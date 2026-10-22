@@ -27,6 +27,14 @@ on:
           - Film Mağarası
           - Filmmagrasi
           - ToonZone
+      platform:
+        description: Publish to these platforms; use instagram after a partial Facebook success
+        required: true
+        type: choice
+        options:
+          - both
+          - facebook
+          - instagram
 
 concurrency:
   group: public-drive-recovery
@@ -46,6 +54,7 @@ jobs:
       - run: |
           pip install -r requirements.txt
           pip install gdown==6.4.2
+          command -v ffmpeg && command -v ffprobe || (sudo apt-get update -qq && sudo apt-get install -y ffmpeg)
       - name: Publish explicit video to Meta
         env:
           META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
@@ -53,8 +62,9 @@ jobs:
           TEXT_ID: ${{ inputs.text_id }}
           EXPECTED_VIDEO_NAME: ${{ inputs.expected_video_name }}
           PAGE: ${{ inputs.page }}
+          PLATFORM: ${{ inputs.platform }}
           YOUTUBE_PUBLISHING_ENABLED: 'false'
         run: |
           python publish_public_drive_once.py \
             --video-id "$VIDEO_ID" --text-id "$TEXT_ID" \
-            --expected-video-name "$EXPECTED_VIDEO_NAME" --page "$PAGE"
+            --expected-video-name "$EXPECTED_VIDEO_NAME" --page "$PAGE" --platform "$PLATFORM"
