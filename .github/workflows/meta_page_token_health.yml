@@ -13,7 +13,6 @@ on:
 
 jobs:
   tests:
-    if: vars.AUTOMATION_ENABLED == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -25,8 +24,7 @@ jobs:
 
   audit:
     if: >-
-      vars.AUTOMATION_ENABLED == 'true' &&
-      (github.event_name == 'workflow_dispatch')
+      github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -36,5 +34,6 @@ jobs:
       - run: pip install --require-hashes -r requirements.txt
       - name: Check saved page token identities only
         env:
+          META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
           META_AUTH_JSON: ${{ secrets.META_AUTH_JSON }}
         run: python meta_page_token_health.py
