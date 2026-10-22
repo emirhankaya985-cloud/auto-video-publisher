@@ -1,3 +1,5 @@
+> **985 aktarımı:** Güncel kurulum ve etkinleştirme adımları: [MIGRATION_985.md](MIGRATION_985.md). Yayın işleri bağlantılar kurulana kadar kapalıdır.
+
 # Auto Video Publisher
 
 GitHub Actions tabanlı çok hesaplı sosyal medya video yayınlama ve performans raporlama sistemi. Bu depo **özel (private)** bir üretim projesidir; otomatik yayın, Google Drive üzerindeki içerik ve durum kayıtları, Meta/YouTube entegrasyonları, NTFY bildirimleri ve isteğe bağlı analitik entegrasyonları bulunur.

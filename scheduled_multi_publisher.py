@@ -553,6 +553,9 @@ def due_slots(now=None, lookback_minutes=1440):
 
 def slot_is_done(files, planned, route, slot):
     """Tam slotu veya aynı pencereye düşen manuel telafiyi tamamlanmış sayar."""
+    # Legacy/manual callers provide local wall-clock values without a zone.
+    # Treat these consistently as Istanbul times before comparing recoveries.
+    planned = planned.replace(tzinfo=TZ) if planned.tzinfo is None else planned.astimezone(TZ)
     next_slot = planned + timedelta(hours=2)
     if route == "toonzone":
         # Each 10-minute slot is a different part. A manual recovery of

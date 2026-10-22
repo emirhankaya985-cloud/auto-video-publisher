@@ -11,7 +11,7 @@ class InstagramDriveDiagnosticTests(unittest.TestCase):
     def test_wrong_event_or_ref_stops_before_drive_auth(self):
         for event, ref in (
             ("schedule", diagnostic.ALLOWED_REF),
-            ("workflow_dispatch", "refs/heads/master"),
+            ("workflow_dispatch", "refs/heads/main"),
         ):
             with self.subTest(event=event, ref=ref), patch.dict(
                 os.environ,
@@ -61,7 +61,7 @@ class InstagramDriveDiagnosticTests(unittest.TestCase):
         publisher_condition = publisher_job["if"]
         self.assertIn("inputs.diagnostic_only != true", publisher_condition)
         self.assertIn("github.event_name != 'workflow_dispatch'", publisher_condition)
-        self.assertIn("github.ref == 'refs/heads/master'", publisher_condition)
+        self.assertIn("github.ref == 'refs/heads/main'", publisher_condition)
         diagnostic_env = next(
             step["env"]
             for step in diagnostic_job["steps"]
