@@ -1,0 +1,24 @@
+name = "auto-video-publisher-fallback"
+main = "index.mjs"
+compatibility_date = "2026-10-14"
+workers_dev = false
+
+[triggers]
+crons = ["*/5 * * * *"]
+
+[vars]
+GITHUB_OWNER = "emirhankaya-AFK"
+GITHUB_REPOSITORY = "auto-video-publisher"
+MAIN_WORKFLOW_ID = "376464836"
+BACKUP_WORKFLOW_ID = "382294717"
+MAIN_WORKFLOW_FILE = "omnichannel_schedule.yml"
+STALE_AFTER_MINUTES = "12"
+FALLBACK_MODE = "enabled"
+
+[[d1_databases]]
+binding = "BATCH_DB"
+database_name = "auto-video-publisher-batches"
+database_id = "b4212a92-50e9-494a-a531-a91affcc2449"
+
+[secrets]
+required = ["GITHUB_TOKEN", "BATCH_API_TOKEN"]

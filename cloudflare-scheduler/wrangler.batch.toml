@@ -1,0 +1,13 @@
+name = "auto-video-publisher-batch-api"
+main = "index.mjs"
+compatibility_date = "2026-10-14"
+workers_dev = true
+
+[[d1_databases]]
+binding = "BATCH_DB"
+database_name = "auto-video-publisher-batches"
+database_id = "b4212a92-50e9-494a-a531-a91affcc2449"
+
+[vars]
+GITHUB_OWNER = "emirhankaya-AFK"
+GITHUB_REPOSITORY = "auto-video-publisher"
