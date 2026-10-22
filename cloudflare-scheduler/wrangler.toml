@@ -7,13 +7,13 @@ workers_dev = false
 crons = ["*/5 * * * *"]
 
 [vars]
-GITHUB_OWNER = "emirhankaya-AFK"
+GITHUB_OWNER = "emirhankaya985-cloud"
 GITHUB_REPOSITORY = "auto-video-publisher"
-MAIN_WORKFLOW_ID = "376464836"
-BACKUP_WORKFLOW_ID = "382294717"
+MAIN_WORKFLOW_ID = "0"
+BACKUP_WORKFLOW_ID = "0"
 MAIN_WORKFLOW_FILE = "omnichannel_schedule.yml"
 STALE_AFTER_MINUTES = "12"
-FALLBACK_MODE = "enabled"
+FALLBACK_MODE = "disabled"
 
 [[d1_databases]]
 binding = "BATCH_DB"

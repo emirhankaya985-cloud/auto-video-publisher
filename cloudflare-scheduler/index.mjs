@@ -91,7 +91,7 @@ async function listRuns(env, fetchImpl, query) {
 }
 
 function isTargetRun(run, workflowIds) {
-  return workflowIds.has(Number(run.workflow_id)) && run.head_branch === "master";
+  return workflowIds.has(Number(run.workflow_id)) && run.head_branch === "main";
 }
 
 function latestTimestamp(runs) {
@@ -162,10 +162,10 @@ export async function runFallback(
   // The existing GitHub concurrency group and Drive slot state remain the final
   // duplicate-publication safeguards if a delayed GitHub cron races this check.
   const [scheduledRuns, dispatchedRuns, queuedRuns, runningRuns] = await Promise.all([
-    listRuns(env, fetchImpl, "branch=master&event=schedule&per_page=100"),
-    listRuns(env, fetchImpl, "branch=master&event=workflow_dispatch&per_page=100"),
-    listRuns(env, fetchImpl, "branch=master&status=queued&per_page=100"),
-    listRuns(env, fetchImpl, "branch=master&status=in_progress&per_page=100"),
+    listRuns(env, fetchImpl, "branch=main&event=schedule&per_page=100"),
+    listRuns(env, fetchImpl, "branch=main&event=workflow_dispatch&per_page=100"),
+    listRuns(env, fetchImpl, "branch=main&status=queued&per_page=100"),
+    listRuns(env, fetchImpl, "branch=main&status=in_progress&per_page=100"),
   ]);
 
   const targetSchedules = scheduledRuns.filter((run) => isTargetRun(run, workflowIds));
@@ -204,7 +204,7 @@ export async function runFallback(
   await githubRequest(dispatchUrl, env, fetchImpl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ref: "master" }),
+    body: JSON.stringify({ ref: "main" }),
   });
   logger.info("No recent GitHub trigger found; dispatched the existing publisher workflow.");
   return { action: "dispatched" };
