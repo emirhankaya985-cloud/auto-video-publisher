@@ -9,7 +9,11 @@ on:
         type: string
       text_id:
         description: Matching shared Drive TXT file ID
-        required: true
+        required: false
+        type: string
+      cover_id:
+        description: Matching ToonZone PNG file ID
+        required: false
         type: string
       expected_video_name:
         description: Expected MP4 filename
@@ -60,11 +64,12 @@ jobs:
           META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
           VIDEO_ID: ${{ inputs.video_id }}
           TEXT_ID: ${{ inputs.text_id }}
+          COVER_ID: ${{ inputs.cover_id }}
           EXPECTED_VIDEO_NAME: ${{ inputs.expected_video_name }}
           PAGE: ${{ inputs.page }}
           PLATFORM: ${{ inputs.platform }}
           YOUTUBE_PUBLISHING_ENABLED: 'false'
         run: |
           python publish_public_drive_once.py \
-            --video-id "$VIDEO_ID" --text-id "$TEXT_ID" \
+            --video-id "$VIDEO_ID" --text-id "$TEXT_ID" --cover-id "$COVER_ID" \
             --expected-video-name "$EXPECTED_VIDEO_NAME" --page "$PAGE" --platform "$PLATFORM"
