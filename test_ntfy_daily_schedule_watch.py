@@ -17,7 +17,7 @@ def mock_response(runs, *, status=200):
 
 
 def scheduled(created_at, status="completed", conclusion="success", event="schedule",
-              branch="master"):
+              branch="main"):
     return {"created_at": created_at, "status": status, "conclusion": conclusion,
             "event": event, "head_branch": branch}
 

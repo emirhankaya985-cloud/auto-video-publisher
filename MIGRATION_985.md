@@ -25,7 +25,6 @@ GitHub Settings → Secrets and variables → Actions. Değerleri yalnız GitHub
 - `DRIVE_FOLDER_ID`
 - `DRIVE_TOKEN_JSON`
 - `FILM_DRIVE_FOLDER_ID`
-- `GITHUB_TOKEN`
 - `GONLE_DUSEN_DRIVE_FOLDER_ID`
 - `META_ACCESS_TOKEN`
 - `META_APP_ID`
@@ -49,3 +48,7 @@ GitHub Settings → Secrets and variables → Actions. Değerleri yalnız GitHub
 4. Yayın açılması onaylandığında yeni depoda `AUTOMATION_ENABLED=true` ayarla. Sheets yazımı ve Cloudflare deploy ayrıca kurulmalı.
 
 Geri alma: Yeni depoda `AUTOMATION_ENABLED` değişkenini kaldır veya `false` yap. Devam eden yayın işlerini ayrıca kontrol et; Drive durum/claim kayıtlarını silme.
+
+## 22 Ekim ek yapılandırma
+
+AFK deposundaki 19 Actions değişkeni 985 deposuna aynı değerlerle aktarıldı ve karşılaştırıldı. `AUTOMATION_ENABLED=false` ayrıca kaydedildi. Günlük rapor watchdog hedefi 985/main olarak düzeltildi. `GITHUB_TOKEN` GitHub tarafından otomatik sağlanır; kullanıcı secret olarak eklememelidir. Ana ve yedek GitHub zamanlayıcıları aktarılmıştır. Harici Cloudflare worker bu geçişte deploy edilmemiştir; ana GitHub yayın akışı bu workera ihtiyaç duymaz (isteğe bağlı batch API ayrı). Tokenler sonrası eski yayıncı durumu ve Drive claim kayıtları denetlenerek kontrollü geçiş yapılmalıdır.

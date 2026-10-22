@@ -16,7 +16,8 @@ def notify_failure():
     # Only allow the expected GitHub.com host and this known repository.
     click = None
     if (server_url == "https://github.com" and
-            repository == "emirhankaya-AFK/auto-video-publisher" and run_id.isdecimal()):
+            repository in {"emirhankaya-AFK/auto-video-publisher",
+                           "emirhankaya985-cloud/auto-video-publisher"} and run_id.isdecimal()):
         click = f"https://github.com/{repository}/actions/runs/{run_id}"
     try:
         result = send_ntfy(

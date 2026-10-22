@@ -13,7 +13,7 @@ import requests
 from ntfy_notifications import send_ntfy
 
 
-EXPECTED_REPOSITORY = "emirhankaya-AFK/auto-video-publisher"
+EXPECTED_REPOSITORY = "emirhankaya985-cloud/auto-video-publisher"
 
 
 def expected_window(now):
@@ -64,7 +64,7 @@ def check_daily_run(*, now=None, get=requests.get, token=None):
                 return {"status": "audit_unavailable", "reason": "invalid_github_response"}
             stamp = _parse_utc(run.get("created_at"))
             if (stamp is not None and lower <= stamp <= upper and
-                    run.get("event") == "schedule" and run.get("head_branch") == "master"):
+                    run.get("event") == "schedule" and run.get("head_branch") == "main"):
                 matching.append(run)
         if any(run.get("status") == "completed" and run.get("conclusion") == "success"
                for run in matching):
