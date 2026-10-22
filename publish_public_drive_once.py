@@ -36,6 +36,7 @@ def main() -> None:
     p.add_argument("--video-id", required=True)
     p.add_argument("--text-id", required=True)
     p.add_argument("--page", choices=sorted(APPROVED_PAGES), required=True)
+    p.add_argument("--platform", choices=("both", "facebook", "instagram"), default="both")
     p.add_argument("--expected-video-name", required=True)
     args = p.parse_args()
     if not args.expected_video_name.lower().endswith(".mp4") or "/" in args.expected_video_name:
@@ -60,9 +61,12 @@ def main() -> None:
         )
         if not facebook_copy or not instagram_copy or len(instagram_copy) > 2200:
             raise RuntimeError("Platform açıklaması boş veya Instagram sınırını aşıyor")
-        fb_id = upload_facebook_reel(page, str(video), facebook_copy)
-        print(json.dumps({"page": args.page, "file": args.expected_video_name, "facebook_id": str(fb_id)}, ensure_ascii=False), flush=True)
-        if page.get("instagram_id"):
+        if args.platform in ("both", "facebook"):
+            fb_id = upload_facebook_reel(page, str(video), facebook_copy)
+            print(json.dumps({"page": args.page, "file": args.expected_video_name, "facebook_id": str(fb_id)}, ensure_ascii=False), flush=True)
+        if args.platform in ("both", "instagram"):
+            if not page.get("instagram_id"):
+                raise RuntimeError("Seçilen sayfaya bağlı Instagram hesabı yok")
             prepared = prepare_instagram_upload(
                 video, Path(tmp) / "instagram.mp4",
                 prefer_remux=True, film_compact=args.page in {"Film Mağarası", "Filmmagrasi"},
