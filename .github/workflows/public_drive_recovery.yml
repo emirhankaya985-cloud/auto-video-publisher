@@ -1,0 +1,58 @@
+name: Public Drive one-shot Meta recovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      video_id:
+        description: Shared Drive MP4 file ID
+        required: true
+        type: string
+      text_id:
+        description: Matching shared Drive TXT file ID
+        required: true
+        type: string
+      expected_video_name:
+        description: Expected MP4 filename
+        required: true
+        type: string
+      page:
+        description: Approved Meta page
+        required: true
+        type: choice
+        options:
+          - Tarladaki Fasulye
+          - Beyinsiz Penguen
+          - Gönle Düşen
+          - Daily Laugh Lab
+          - Film Mağarası
+          - Filmmagrasi
+          - ToonZone
+
+concurrency:
+  group: public-drive-recovery
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt gdown
+      - name: Publish explicit video to Meta
+        env:
+          META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+          VIDEO_ID: ${{ inputs.video_id }}
+          TEXT_ID: ${{ inputs.text_id }}
+          EXPECTED_VIDEO_NAME: ${{ inputs.expected_video_name }}
+          PAGE: ${{ inputs.page }}
+          YOUTUBE_PUBLISHING_ENABLED: 'false'
+        run: |
+          python publish_public_drive_once.py \
+            --video-id "$VIDEO_ID" --text-id "$TEXT_ID" \
+            --expected-video-name "$EXPECTED_VIDEO_NAME" --page "$PAGE"
