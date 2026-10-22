@@ -266,6 +266,8 @@ def get_drive_client():
     return build("drive", "v3", credentials=creds)
 
 def get_youtube_client(env_var_name, fallback_file, scopes=None):
+    if os.getenv("YOUTUBE_PUBLISHING_ENABLED", "true").lower() != "true":
+        raise RuntimeError("YouTube bu kurulumda devre dışı")
     token_str = os.environ.get(env_var_name)
     if token_str:
         data = json.loads(token_str)

@@ -56,3 +56,7 @@ AFK deposundaki 19 Actions değişkeni 985 deposuna aynı değerlerle aktarıld�
 ## Kullanıcı tokenı ile Meta bağlantısı
 
 `META_AUTH_JSON` isteğe bağlıdır. JSON veya yerel dosya yoksa `META_ACCESS_TOKEN` ile `/me/accounts` salt-okunur sorgulanır. Yalnız tanımlı hesap adları ve mevcut sabit sayfa kimlikleri kabul edilir. Sayfa tokenları bellekte tutulur; dosyaya veya loga yazılmaz. Read-only Meta Page Token Health yayın kilidi kapalıyken main dalından manuel çalıştırılabilir.
+
+## Public runner ve Meta-only yayın
+
+985 deposu 22 Ekim 2026 tarihinde public yapıldı. Ana/yedek publisher standart `ubuntu-latest` kullanır. Publisher workflow ortamı `YOUTUBE_PUBLISHING_ENABLED=false` ve `ENABLE_NEW_YOUTUBE_ROUTES=false` uygular; YouTube işleri plana alınmaz ve istemci kimlik bilgileri yüklenmeden durdurulur. Tokenlar kaynak kodunda tutulmaz. Meta kimlik denetimi başarılıdır. Drive erişimi kurulmadan gerçek yayın veya geçmiş uzlaştırması tamamlanmış sayılmaz.

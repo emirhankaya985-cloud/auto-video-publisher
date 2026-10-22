@@ -1287,6 +1287,8 @@ def safe_temp_path(temp, prefix, route, drive_id, extension):
 
 
 def requested_platform(force_platform, platform):
+    if platform == "youtube" and os.getenv("YOUTUBE_PUBLISHING_ENABLED", "true").lower() != "true":
+        return False
     return not force_platform or force_platform == platform
 
 

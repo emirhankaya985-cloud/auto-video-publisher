@@ -2,7 +2,7 @@
 
 # Auto Video Publisher
 
-GitHub Actions tabanlı çok hesaplı sosyal medya video yayınlama ve performans raporlama sistemi. Bu depo **özel (private)** bir üretim projesidir; otomatik yayın, Google Drive üzerindeki içerik ve durum kayıtları, Meta/YouTube entegrasyonları, NTFY bildirimleri ve isteğe bağlı analitik entegrasyonları bulunur.
+GitHub Actions tabanlı çok hesaplı sosyal medya video yayınlama ve performans raporlama sistemi. Bu depo **public** kaynak kodu deposudur; kimlik bilgileri yalnız GitHub Actions Secrets içinde tutulur; otomatik yayın, Google Drive üzerindeki içerik ve durum kayıtları, Meta/YouTube entegrasyonları, NTFY bildirimleri ve isteğe bağlı analitik entegrasyonları bulunur.
 
 > **Yeni devralacak mühendis veya yapay zekâ ajanı:** Önce [SOL_6_1_ONE_SHOT.md](SOL_6_1_ONE_SHOT.md), ardından [SOL_6_1_HANDOFF.md](SOL_6_1_HANDOFF.md) ve [AGENTS.md](AGENTS.md) dosyalarını oku. Kodun testlerden geçmesi, canlı yayın veya telefon teslimatının kanıtlandığı anlamına gelmez.
 
