@@ -1,0 +1,72 @@
+name: Film Instagram upload-only batch test
+
+on:
+  workflow_dispatch:
+    inputs:
+      file_ids:
+        description: 'Exactly 15 unique Drive MP4 IDs; only entries 3–15 are tested'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloud-omni-uploader
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  upload-only-batch:
+    if: vars.AUTOMATION_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Reject missing or duplicate test IDs before external API access
+        env:
+          FILM_IG_TEST_FILE_IDS: ${{ inputs.file_ids }}
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          import sys
+
+          file_ids = [value for value in re.split(r"[\s,;]+", os.environ.get("FILM_IG_TEST_FILE_IDS", "").strip()) if value]
+          if len(file_ids) != 15 or len(set(file_ids)) != 15:
+              print(f"Expected exactly 15 unique Drive IDs; received {len(file_ids)}. No Drive, Meta, or publishing request was made.")
+              sys.exit(1)
+          print("Validated 15 unique Drive IDs; the batch will test entries 3–15 only.")
+          PY
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends ffmpeg
+      - name: Install locked dependencies
+        run: pip install --require-hashes -r requirements.txt
+      - name: Run fixed Film Instagram upload-only batch
+        env:
+          DRIVE_TOKEN_JSON: ${{ secrets.DRIVE_TOKEN_JSON }}
+          DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
+          GONLE_DUSEN_DRIVE_FOLDER_ID: ${{ secrets.GONLE_DUSEN_DRIVE_FOLDER_ID }}
+          DAILY_LAUGH_DRIVE_FOLDER_ID: ${{ secrets.DAILY_LAUGH_DRIVE_FOLDER_ID }}
+          META_AUTH_JSON: ${{ secrets.META_AUTH_JSON }}
+          META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+          ENABLE_FILM_ROUTES: ${{ vars.ENABLE_FILM_ROUTES }}
+          FILM_RIGHTS_APPROVED: ${{ vars.FILM_RIGHTS_APPROVED }}
+          FILM_DRIVE_FOLDER_ID: 1NvEuGQ83BmCMrzdK6ziI1nC_0zzshqJW
+          FORCE_ROUTE: film
+          FORCE_PLATFORM: instagram
+          FILM_IG_UPLOAD_ONLY: 'true'
+          FILM_IG_TEST_BATCH: 'true'
+          FILM_IG_TEST_FILE_IDS: ${{ inputs.file_ids }}
+          FILM_IG_TEST_START_INDEX: '2'
+          FILM_IG_TEST_BATCH_COUNT: '13'
+          FILM_IG_DIAGNOSTIC_CLIP_SECONDS: '0'
+          FILM_IG_DIAGNOSTIC_REMUX: 'false'
+          FILM_CLAIM_TO_CLEAR: ''
+          BACKFILL_ROUTE: ''
+        run: python scheduled_multi_publisher.py

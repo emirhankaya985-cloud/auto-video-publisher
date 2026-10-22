@@ -1,0 +1,44 @@
+name: Reconcile approved Tarladaki and Penguen publications (no publishing)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reconcile:
+    if: vars.AUTOMATION_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Write evidence-backed D1 reconciliation records only
+        env:
+          API: https://auto-video-publisher-batch-api.emirhankaya167.workers.dev
+          TOKEN: ${{ secrets.BATCH_API_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          batch="reconcile-20261016-approved-tp-652-536"
+          expires="2036-10-16T00:00:00Z"
+          targets='[
+            {"account":"tarladaki","platform":"youtube","drive_file_id":"1X-dlZPYrf4pFatQjry_mxvk0cgattWlw","drive_folder_id":"11zbrunHoiTZyJ8JDsj99ascO66mmCj-M","remote_id":"yFYmkw_3qgA","remote_url":"https://youtube.com/shorts/yFYmkw_3qgA"},
+            {"account":"tarladaki","platform":"facebook","drive_file_id":"1X-dlZPYrf4pFatQjry_mxvk0cgattWlw","drive_folder_id":"11zbrunHoiTZyJ8JDsj99ascO66mmCj-M","remote_id":"1439492768368548"},
+            {"account":"tarladaki","platform":"instagram","drive_file_id":"1X-dlZPYrf4pFatQjry_mxvk0cgattWlw","drive_folder_id":"11zbrunHoiTZyJ8JDsj99ascO66mmCj-M","remote_id":"17929043613422345"},
+            {"account":"penguen","platform":"youtube","drive_file_id":"1oa3QSoV7vDgGbrtmgO3p1hM2pCbY_GZJ","drive_folder_id":"11zbrunHoiTZyJ8JDsj99ascO66mmCj-M","remote_id":"H52DNjT3uWs","remote_url":"https://youtube.com/shorts/H52DNjT3uWs"},
+            {"account":"penguen","platform":"facebook","drive_file_id":"1oa3QSoV7vDgGbrtmgO3p1hM2pCbY_GZJ","drive_folder_id":"11zbrunHoiTZyJ8JDsj99ascO66mmCj-M","remote_id":"1769891994298867"},
+            {"account":"penguen","platform":"instagram","drive_file_id":"1oa3QSoV7vDgGbrtmgO3p1hM2pCbY_GZJ","drive_folder_id":"11zbrunHoiTZyJ8JDsj99ascO66mmCj-M","remote_id":"18095604905434621"}
+          ]'
+          create=$(jq -nc --arg b "$batch" --arg e "$expires" --argjson t "$targets" '{op:"create",batch_id:$b,expires_at:$e,action_run_id:env.GITHUB_RUN_ID,targets:$t}')
+          code=$(curl -sS -o /tmp/create.json -w '%{http_code}' -X POST "$API" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "$create")
+          if [ "$code" != 200 ]; then cat /tmp/create.json; exit 1; fi
+          for row in $(jq -c '.[]' <<<"$targets"); do
+            account=$(jq -r .account <<<"$row"); platform=$(jq -r .platform <<<"$row"); file=$(jq -r .drive_file_id <<<"$row"); folder=$(jq -r .drive_folder_id <<<"$row")
+            claim=$(jq -nc --arg b "$batch" --arg a "$account" --arg p "$platform" --arg f "$file" --arg d "$folder" '{op:"claim",batch_id:$b,account:$a,platform:$p,drive_file_id:$f,drive_folder_id:$d}')
+            curl -sS -o /tmp/claim.json -X POST "$API" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "$claim"
+            token=$(jq -r '.claim_token // empty' /tmp/claim.json); test -n "$token"
+            finish=$(jq -nc --arg b "$batch" --arg a "$account" --arg p "$platform" --arg t "$token" --arg id "$(jq -r .remote_id <<<"$row")" --arg url "$(jq -r '.remote_url // empty' <<<"$row")" '{op:"finish",batch_id:$b,account:$a,platform:$p,claim_token:$t,status:"confirmed",remote_id:$id,remote_url:$url}')
+            curl -sS -o /tmp/finish.json -X POST "$API" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "$finish"
+            jq -e '.updated == true' /tmp/finish.json >/dev/null
+          done
+          echo "Six evidence-backed reconciliation records confirmed; no publishing call was made."

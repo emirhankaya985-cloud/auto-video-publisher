@@ -1,0 +1,49 @@
+name: Kapak Drive Klasoru Denetimi
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      create_subfolders:
+        description: Eksik kanal alt klasorlerini olustur
+        required: true
+        type: boolean
+        default: false
+      upload_release_tag:
+        description: Özel depodaki geçici release etiketinden kapakları yükle
+        required: false
+        type: string
+        default: ''
+
+jobs:
+  cover-drive:
+    if: vars.AUTOMATION_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: pip install --require-hashes -r requirements.txt
+      - name: Geçici kapak paketini indir
+        if: inputs.upload_release_tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/covers"
+          gh release download "${{ inputs.upload_release_tag }}" --dir "$RUNNER_TEMP/covers"
+      - name: Kapak klasorunu denetle
+        env:
+          DRIVE_TOKEN_JSON: ${{ secrets.DRIVE_TOKEN_JSON }}
+          COVER_DRIVE_FOLDER_ID: ${{ vars.COVER_DRIVE_FOLDER_ID }}
+          COVER_FEATURE_ENABLED: 'false'
+          UPLOAD_RELEASE_TAG: ${{ inputs.upload_release_tag }}
+        run: |
+          ARGS="${{ inputs.create_subfolders && '--create-subfolders' || '' }}"
+          if [ -n "$UPLOAD_RELEASE_TAG" ]; then
+            ARGS="$ARGS --upload-dir $RUNNER_TEMP/covers"
+          fi
+          python cover_drive_setup.py $ARGS

@@ -1,0 +1,52 @@
+name: Daily Laugh 8-video schedule tests
+
+on:
+  pull_request:
+    paths:
+      - 'scheduled_multi_publisher.py'
+      - 'toonzone_schedule.py'
+      - 'test_toonzone_schedule.py'
+      - 'test_scheduled_multi_publisher.py'
+      - 'stats_reporter.py'
+      - 'test_daily_laugh_eight_schedule.py'
+      - 'test_stats_reporter.py'
+      - '.github/workflows/omnichannel_schedule.yml'
+      - '.github/workflows/cloud_schedule_backup.yml'
+      - '.github/workflows/daily_laugh_schedule_ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  schedule-and-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout without any production credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Python 3.12
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: |
+          pip install --require-hashes -r requirements.txt
+          pip install PyYAML==6.0.2
+      - name: All unittest regression tests (no posting)
+        run: python -m unittest discover -p 'test*.py'
+      - name: Function-style daily report tests (no posting)
+        run: |
+          python - <<'PY'
+          import inspect
+          import test_stats_reporter
+          tests = [
+              getattr(test_stats_reporter, name)
+              for name in dir(test_stats_reporter)
+              if name.startswith('test_') and callable(getattr(test_stats_reporter, name))
+              and not inspect.signature(getattr(test_stats_reporter, name)).parameters
+          ]
+          for test in tests:
+              test()
+          print(f"Daily report assertions passed: {len(tests)}")
+          PY

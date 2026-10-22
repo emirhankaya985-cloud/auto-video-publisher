@@ -1,0 +1,53 @@
+name: Hesap Bazli Izlenme Raporu
+
+permissions:
+  contents: read
+
+on:
+  # GitHub cron UTC kullanır: 20:59 UTC = 23:59 TRT.
+  schedule:
+    - cron: '59 20 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: daily-stats-report
+  cancel-in-progress: false
+
+jobs:
+  report:
+    if: vars.AUTOMATION_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Kodlari Cek
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Python Kur
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: Bagimliliklari Yukle
+        run: pip install --require-hashes -r requirements.txt
+      - name: Istatistikleri Telefona Gonder
+        env:
+          TOKEN_CHANNEL1_JSON: ${{ secrets.TOKEN_CHANNEL1_JSON }}
+          TOKEN_CHANNEL2_JSON: ${{ secrets.TOKEN_CHANNEL2_JSON }}
+          TOKEN_DAILY_LAUGH_LAB_JSON: ${{ secrets.TOKEN_DAILY_LAUGH_LAB_JSON }}
+          TOKEN_GONLE_DUSEN_JSON: ${{ secrets.TOKEN_GONLE_DUSEN_JSON }}
+          META_AUTH_JSON: ${{ secrets.META_AUTH_JSON }}
+          META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+          DRIVE_TOKEN_JSON: ${{ secrets.DRIVE_TOKEN_JSON }}
+          DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
+          GONLE_DUSEN_DRIVE_FOLDER_ID: ${{ secrets.GONLE_DUSEN_DRIVE_FOLDER_ID }}
+          DAILY_LAUGH_DRIVE_FOLDER_ID: ${{ secrets.DAILY_LAUGH_DRIVE_FOLDER_ID }}
+          FILM_DRIVE_FOLDER_ID: 1NvEuGQ83BmCMrzdK6ziI1nC_0zzshqJW
+          TOONZONE_DRIVE_FOLDER_ID: 14ee4AnUdf03dYUAdtfpHa-E9Zxyh4UZF
+          NTFY_TOPIC_URL: ${{ secrets.NTFY_TOPIC_URL }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: python stats_reporter.py
+      - name: Failure notice (does not replace the failed daily report)
+        if: ${{ failure() }}
+        continue-on-error: true
+        env:
+          NTFY_TOPIC_URL: ${{ secrets.NTFY_TOPIC_URL }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: python ntfy_report_failure_alert.py

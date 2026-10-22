@@ -1,0 +1,43 @@
+name: Batch API integration test (no publishing)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: batch-api-integration-test
+  cancel-in-progress: false
+
+jobs:
+  d1-safety:
+    if: vars.AUTOMATION_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Exercise authenticated D1 batch API (test records only)
+        env:
+          API: https://auto-video-publisher-batch-api.emirhankaya167.workers.dev
+          TOKEN: ${{ secrets.BATCH_API_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$TOKEN"
+          batch="ci-test-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          expires=$(date -u -d '+10 minutes' +%Y-%m-%dT%H:%M:%SZ)
+          body=$(jq -nc --arg b "$batch" --arg e "$expires" '{op:"create",batch_id:$b,expires_at:$e,action_run_id:env.GITHUB_RUN_ID,targets:[{account:"ci-test",platform:"dry-run",drive_file_id:("ci-"+env.GITHUB_RUN_ID),drive_folder_id:"ci-only"}]}' )
+          code=$(curl -sS -o /tmp/create.json -w '%{http_code}' -X POST "$API" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "$body")
+          test "$code" = 200
+          jq -e '.ok == true' /tmp/create.json >/dev/null
+          file_id="ci-${GITHUB_RUN_ID}"
+          claim=$(jq -nc --arg b "$batch" --arg f "$file_id" '{op:"claim",batch_id:$b,account:"ci-test",platform:"dry-run",drive_file_id:$f,drive_folder_id:"ci-only"}')
+          for i in 1 2; do curl -sS -o "/tmp/claim$i.json" -X POST "$API" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "$claim" & done
+          wait
+          test "$(jq -r '.claimed' /tmp/claim1.json)" != "$(jq -r '.claimed' /tmp/claim2.json)"
+          token=$(jq -r 'select(.claimed==true) | .claim_token' /tmp/claim1.json /tmp/claim2.json)
+          finish=$(jq -nc --arg b "$batch" --arg t "$token" '{op:"finish",batch_id:$b,account:"ci-test",platform:"dry-run",claim_token:$t,status:"unknown",error:"ci synthetic uncertainty"}')
+          curl -sS -o /tmp/finish.json -X POST "$API" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "$finish" >/dev/null
+          code=$(curl -sS -o /tmp/unauth.json -w '%{http_code}' "$API?batch_id=$batch")
+          test "$code" = 401
+          echo "D1 batch API safety checks passed; no publishing endpoint was called."

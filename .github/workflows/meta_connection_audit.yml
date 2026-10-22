@@ -1,0 +1,66 @@
+name: Read-only Meta connection audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      film_claim_audit:
+        description: Reconcile the one blocked Film claim against Drive and live Instagram history (read-only)
+        type: boolean
+        required: false
+        default: false
+      film_publication_audit:
+        description: Reconcile allowlisted Film parts and current Facebook/Instagram records (read-only)
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: read-only-meta-connection-audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    if: vars.AUTOMATION_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: pip install --require-hashes -r requirements.txt
+      # Report page-token health first; an expired user token must not hide
+      # the independent credentials that publishing can use.
+      - name: Check saved page-token identity health independently
+        if: ${{ !inputs.film_claim_audit && !inputs.film_publication_audit }}
+        continue-on-error: true
+        env:
+          META_AUTH_JSON: ${{ secrets.META_AUTH_JSON }}
+        run: python meta_page_token_health.py
+      - name: Verify exact Meta identities and permissions without publishing
+        env:
+          META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+          META_AUTH_JSON: ${{ secrets.META_AUTH_JSON }}
+          DRIVE_TOKEN_JSON: ${{ secrets.DRIVE_TOKEN_JSON }}
+          TOKEN_FILM_YOUTUBE_JSON: ${{ secrets.TOKEN_FILM_YOUTUBE_JSON }}
+          FILM_CLAIM_AUDIT_FILE_ID: 1dhKwAI9LPpUEniIfqNuWKrY8EQuM67xZ
+          FILM_CLAIM_AUDIT: ${{ inputs.film_claim_audit }}
+          FILM_PUBLICATION_AUDIT: ${{ inputs.film_publication_audit }}
+        run: |
+          if [ "$FILM_PUBLICATION_AUDIT" = "true" ]; then
+            python meta_connection_audit.py --film-publications
+          elif [ "$FILM_CLAIM_AUDIT" = "true" ]; then
+            python meta_connection_audit.py --film-claim
+          else
+            python meta_connection_audit.py
+          fi
+      - name: Verify Meta token validity and data-access expiry without publishing
+        if: ${{ !inputs.film_claim_audit && !inputs.film_publication_audit }}
+        env:
+          META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+          META_APP_ID: ${{ secrets.META_APP_ID }}
+          META_APP_SECRET: ${{ secrets.META_APP_SECRET }}
+        run: python test_meta_token.py

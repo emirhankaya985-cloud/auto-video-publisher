@@ -1,0 +1,24 @@
+name: Drive folder identity audit
+on:
+  workflow_dispatch:
+    inputs:
+      folder_ids:
+        description: "Comma-separated Drive folder IDs"
+        required: true
+        default: "137--TeBht1yikZpMfV9VSEADbKuXZtLT,11zbrunHoiTZyJ8JDsj99ascO66mmCj-M"
+permissions:
+  contents: read
+jobs:
+  audit:
+    if: vars.AUTOMATION_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+      - run: pip install -r requirements.txt --disable-pip-version-check -q
+      - name: Read-only Drive audit
+        env:
+          DRIVE_TOKEN_JSON: ${{ secrets.DRIVE_TOKEN_JSON }}
+          DRIVE_FOLDER_IDS: ${{ inputs.folder_ids }}
+        run: python drive_folder_identity_audit.py

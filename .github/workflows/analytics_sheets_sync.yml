@@ -1,0 +1,67 @@
+name: Sosyal Medya Analitik Sheets Senkronizasyonu
+
+permissions:
+  contents: read
+  actions: read
+
+on:
+  # Daily stats runs at 20:59 UTC; this follows shortly after (00:15 TRT).
+  schedule:
+    - cron: '15 21 * * *'
+  workflow_run:
+    workflows: ["Hesap Bazli Izlenme Raporu"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Önizleme yap; Sheets'e hiçbir şey yazma"
+        type: boolean
+        required: true
+        default: true
+
+concurrency:
+  group: analytics-sheets-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: vars.AUTOMATION_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install --require-hashes -r requirements.txt
+      - name: Dry run
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          DRIVE_TOKEN_JSON: ${{ secrets.DRIVE_TOKEN_JSON }}
+          DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
+          GONLE_DUSEN_DRIVE_FOLDER_ID: ${{ secrets.GONLE_DUSEN_DRIVE_FOLDER_ID }}
+          DAILY_LAUGH_DRIVE_FOLDER_ID: ${{ secrets.DAILY_LAUGH_DRIVE_FOLDER_ID }}
+          FILM_DRIVE_FOLDER_ID: ${{ vars.FILM_DRIVE_FOLDER_ID || '1NvEuGQ83BmCMrzdK6ziI1nC_0zzshqJW' }}
+          TOONZONE_DRIVE_FOLDER_ID: ${{ vars.TOONZONE_DRIVE_FOLDER_ID || '14ee4AnUdf03dYUAdtfpHa-E9Zxyh4UZF' }}
+          ANALYTICS_DRIVE_FOLDER_ID: ${{ vars.ANALYTICS_DRIVE_FOLDER_ID || '1oX3LwQyxofYYxUirJSSv9E2SI3mOJ2uo' }}
+        run: python analytics_sheets.py --dry-run
+      - name: Sync when explicitly configured
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          DRIVE_TOKEN_JSON: ${{ secrets.DRIVE_TOKEN_JSON }}
+          DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
+          GONLE_DUSEN_DRIVE_FOLDER_ID: ${{ secrets.GONLE_DUSEN_DRIVE_FOLDER_ID }}
+          DAILY_LAUGH_DRIVE_FOLDER_ID: ${{ secrets.DAILY_LAUGH_DRIVE_FOLDER_ID }}
+          FILM_DRIVE_FOLDER_ID: ${{ vars.FILM_DRIVE_FOLDER_ID || '1NvEuGQ83BmCMrzdK6ziI1nC_0zzshqJW' }}
+          TOONZONE_DRIVE_FOLDER_ID: ${{ vars.TOONZONE_DRIVE_FOLDER_ID || '14ee4AnUdf03dYUAdtfpHa-E9Zxyh4UZF' }}
+          ANALYTICS_DRIVE_FOLDER_ID: ${{ vars.ANALYTICS_DRIVE_FOLDER_ID || '1oX3LwQyxofYYxUirJSSv9E2SI3mOJ2uo' }}
+          ANALYTICS_SHEET_ID: ${{ vars.ANALYTICS_SHEET_ID }}
+          ANALYTICS_SHEETS_CREDENTIALS_JSON: ${{ secrets.ANALYTICS_SHEETS_CREDENTIALS_JSON }}
+        run: python analytics_sheets.py --write

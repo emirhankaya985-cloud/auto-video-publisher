@@ -1,0 +1,58 @@
+name: Analytics Sheets safety tests
+
+on:
+  pull_request:
+    paths:
+      - 'analytics_sheets.py'
+      - 'test_analytics_sheets.py'
+      - 'analytics_archive.py'
+      - 'analytics_drive_store.py'
+      - 'stats_reporter.py'
+      - 'cloud_omnichannel_publisher.py'
+      - '.github/workflows/analytics_sheets_*.yml'
+      - 'requirements.txt'
+  push:
+    branches: [main]
+    paths:
+      - 'analytics_sheets.py'
+      - 'test_analytics_sheets.py'
+      - 'analytics_archive.py'
+      - 'analytics_drive_store.py'
+      - 'stats_reporter.py'
+      - 'cloud_omnichannel_publisher.py'
+      - '.github/workflows/analytics_sheets_*.yml'
+      - 'requirements.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  no-publish-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install --require-hashes -r requirements.txt
+      - name: Run Sheets and existing analytics assertions (no credentials, no publishing)
+        run: |
+          python - <<'PY'
+          import inspect
+          import test_analytics_sheets
+          import test_stats_reporter
+
+          total = 0
+          for module in (test_analytics_sheets, test_stats_reporter):
+              tests = [getattr(module, name) for name in dir(module)
+                       if name.startswith('test_') and callable(getattr(module, name))
+                       and not inspect.signature(getattr(module, name)).parameters]
+              for test in tests:
+                  test()
+              total += len(tests)
+          print(f'Analytics assertions passed: {total}')
+          PY
