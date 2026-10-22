@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "source_folder_id": "11zbrunHoiTZyJ8JDsj99ascO66mmCj-M",
+  "policy": "Only user-reviewed MP4 content is eligible. Existing confirmed publications remain excluded by per-route history.",
+  "approved": [
+    {
+      "route": "tarladaki",
+      "drive_file_id": "1X-dlZPYrf4pFatQjry_mxvk0cgattWlw",
+      "file_name": "652.mp4",
+      "md5": "b95a552cae245da7273a0dec8bfef204",
+      "approval_source": "user_content_review_2026-10-16"
+    },
+    {
+      "route": "penguen",
+      "drive_file_id": "1oa3QSoV7vDgGbrtmgO3p1hM2pCbY_GZJ",
+      "file_name": "536.mp4",
+      "md5": "5abf4bc49080030a12c554d03a96b129",
+      "approval_source": "user_content_review_2026-10-16"
+    }
+  ]
+}

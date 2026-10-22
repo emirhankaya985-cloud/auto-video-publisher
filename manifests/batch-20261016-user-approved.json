@@ -1,0 +1,18 @@
+{
+  "batch_id": "batch-20261016-user-approved-1397-141-916",
+  "approval_source": "user_message",
+  "approval_type": "content_review_confirmed_by_user",
+  "automated_content_analysis_claimed": false,
+  "publishing_enabled": false,
+  "targets": [
+    {"account":"tarladaki","platform":"youtube","drive_file_id":"1NRnUcN05iEo5cqr2yjFD4Ho1O_DvEVys","drive_folder_id":"137--TeBht1yikZpMfV9VSEADbKuXZtLT","video":"1397.mp4","status":"dry-run-approved"},
+    {"account":"tarladaki","platform":"facebook","drive_file_id":"1NRnUcN05iEo5cqr2yjFD4Ho1O_DvEVys","drive_folder_id":"137--TeBht1yikZpMfV9VSEADbKuXZtLT","video":"1397.mp4","status":"dry-run-approved"},
+    {"account":"tarladaki","platform":"instagram","drive_file_id":"1NRnUcN05iEo5cqr2yjFD4Ho1O_DvEVys","drive_folder_id":"137--TeBht1yikZpMfV9VSEADbKuXZtLT","video":"1397.mp4","status":"dry-run-approved"},
+    {"account":"penguen","platform":"youtube","drive_file_id":"1NRnUcN05iEo5cqr2yjFD4Ho1O_DvEVys","drive_folder_id":"137--TeBht1yikZpMfV9VSEADbKuXZtLT","video":"1397.mp4","status":"dry-run-approved"},
+    {"account":"penguen","platform":"facebook","drive_file_id":"1NRnUcN05iEo5cqr2yjFD4Ho1O_DvEVys","drive_folder_id":"137--TeBht1yikZpMfV9VSEADbKuXZtLT","video":"1397.mp4","status":"dry-run-approved"},
+    {"account":"penguen","platform":"instagram","drive_file_id":"1NRnUcN05iEo5cqr2yjFD4Ho1O_DvEVys","drive_folder_id":"137--TeBht1yikZpMfV9VSEADbKuXZtLT","video":"1397.mp4","status":"dry-run-approved"},
+    {"account":"gonle","platform":"facebook","drive_file_id":"1lLSnbJblWAoFSXNsEchbp3gz2izzdbU9","drive_folder_id":"1OA-qvfBEcCKBCTSMj4dCz8rg2p6t0aKt","video":"141.mp4","status":"dry-run-approved"},
+    {"account":"gonle","platform":"instagram","drive_file_id":"1lLSnbJblWAoFSXNsEchbp3gz2izzdbU9","drive_folder_id":"1OA-qvfBEcCKBCTSMj4dCz8rg2p6t0aKt","video":"141.mp4","status":"blocked-http-400"},
+    {"account":"daily_laugh","platform":"facebook","drive_file_id":"1xIecwryEZ5yHt_ccdkHJFBxP6z7BeJ1e","drive_folder_id":"11zbrunHoiTZyJ8JDsj99ascO66mmCj-M","video":"916.mp4","status":"dry-run-approved"}
+  ]
+}
