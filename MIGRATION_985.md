@@ -52,3 +52,7 @@ Geri alma: Yeni depoda `AUTOMATION_ENABLED` değişkenini kaldır veya `false` y
 ## 22 Ekim ek yapılandırma
 
 AFK deposundaki 19 Actions değişkeni 985 deposuna aynı değerlerle aktarıldı ve karşılaştırıldı. `AUTOMATION_ENABLED=false` ayrıca kaydedildi. Günlük rapor watchdog hedefi 985/main olarak düzeltildi. `GITHUB_TOKEN` GitHub tarafından otomatik sağlanır; kullanıcı secret olarak eklememelidir. Ana ve yedek GitHub zamanlayıcıları aktarılmıştır. Harici Cloudflare worker bu geçişte deploy edilmemiştir; ana GitHub yayın akışı bu workera ihtiyaç duymaz (isteğe bağlı batch API ayrı). Tokenler sonrası eski yayıncı durumu ve Drive claim kayıtları denetlenerek kontrollü geçiş yapılmalıdır.
+
+## Kullanıcı tokenı ile Meta bağlantısı
+
+`META_AUTH_JSON` isteğe bağlıdır. JSON veya yerel dosya yoksa `META_ACCESS_TOKEN` ile `/me/accounts` salt-okunur sorgulanır. Yalnız tanımlı hesap adları ve mevcut sabit sayfa kimlikleri kabul edilir. Sayfa tokenları bellekte tutulur; dosyaya veya loga yazılmaz. Read-only Meta Page Token Health yayın kilidi kapalıyken main dalından manuel çalıştırılabilir.

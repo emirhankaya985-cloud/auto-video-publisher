@@ -30,13 +30,8 @@ def get_drive_client():
     return build("drive", "v3", credentials=creds)
 
 def get_meta_auth():
-    auth_str = os.environ.get("META_AUTH_JSON")
-    if auth_str:
-        return json.loads(auth_str)
-    auth_path = Path(__file__).resolve().parent / "meta_auth.json"
-    if not auth_path.exists():
-        raise FileNotFoundError("meta_auth.json bulunamadi.")
-    return json.loads(auth_path.read_text(encoding="utf-8"))
+    from meta_auth_loader import load_meta_auth
+    return load_meta_auth()
 
 def get_meta_page_info(target_name=TARGET_ACCOUNT):
     auth = get_meta_auth()

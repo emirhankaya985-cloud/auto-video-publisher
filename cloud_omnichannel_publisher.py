@@ -279,11 +279,8 @@ def get_youtube_client(env_var_name, fallback_file, scopes=None):
     return build("youtube", "v3", credentials=creds)
 
 def get_meta_auth():
-    auth_str = os.environ.get("META_AUTH_JSON")
-    if auth_str:
-        return json.loads(auth_str)
-    auth_path = Path(__file__).resolve().parent / "meta_auth.json"
-    return json.loads(auth_path.read_text(encoding="utf-8"))
+    from meta_auth_loader import load_meta_auth
+    return load_meta_auth()
 
 def get_meta_page_info(target_name=TARGET_META_ACCOUNT):
     # The saved page IDs are the allowlist. Display-name matching alone is not

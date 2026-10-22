@@ -114,9 +114,12 @@ def audit(auth, get=requests.get):
 
 def main():
     try:
-        auth = json.loads(os.getenv("META_AUTH_JSON") or "null")
-    except (ValueError, TypeError):
-        auth = None
+        from meta_auth_loader import load_meta_auth
+        auth = load_meta_auth()
+    except Exception as exc:
+        print(json.dumps({"status": "blocked", "reason": str(exc) if type(exc) is RuntimeError
+                          else "invalid_meta_configuration", "publishing_tested": False}))
+        return 1
     result = audit(auth)
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
     return 0 if result["status"] == "identity_verified" else 1

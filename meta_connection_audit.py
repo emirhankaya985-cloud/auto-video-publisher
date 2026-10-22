@@ -3,6 +3,7 @@
 Never prints access tokens or page tokens and contains no publishing call.
 """
 import json
+from meta_auth_loader import load_meta_auth
 import os
 import re
 import sys
@@ -86,7 +87,7 @@ def audit_meta(access_token=None, meta_auth=None, diagnostic=None):
         "http_status": None,
         "token_format": token_format_flags(token),
     })
-    auth = meta_auth if meta_auth is not None else json.loads(os.environ.get("META_AUTH_JSON") or "{}")
+    auth = meta_auth if meta_auth is not None else (load_meta_auth() if (os.getenv("META_AUTH_JSON") or os.getenv("META_ACCESS_TOKEN")) else {})
     if not token:
         raise AuditError("missing_credential", variable="META_ACCESS_TOKEN")
     configured = verified_pages(auth)
@@ -134,7 +135,7 @@ def audit_film_claim(file_id=None, meta_auth=None, drive=None):
     file_id = file_id or os.environ.get("FILM_CLAIM_AUDIT_FILE_ID", "")
     if file_id != FILM_CLAIM_FILE_ID:
         raise AuditError("film_claim_file_not_allowlisted")
-    auth = meta_auth if meta_auth is not None else json.loads(os.environ.get("META_AUTH_JSON") or "{}")
+    auth = meta_auth if meta_auth is not None else (load_meta_auth() if (os.getenv("META_AUTH_JSON") or os.getenv("META_ACCESS_TOKEN")) else {})
     pages = verified_pages(auth)
     configured = next((row for row in pages.values() if str(row.get("page_id")) == FILM_PAGE_ID), None)
     if not configured or not configured.get("instagram_id"):
@@ -191,7 +192,7 @@ def audit_film_claim(file_id=None, meta_auth=None, drive=None):
 
 def audit_film_publications(meta_auth=None, drive=None):
     """Reconcile the current Film inventory and selected platform results read-only."""
-    auth = meta_auth if meta_auth is not None else json.loads(os.environ.get("META_AUTH_JSON") or "{}")
+    auth = meta_auth if meta_auth is not None else (load_meta_auth() if (os.getenv("META_AUTH_JSON") or os.getenv("META_ACCESS_TOKEN")) else {})
     pages = verified_pages(auth)
     by_id = {str(row.get("page_id")): row for row in pages.values()}
     fb1 = by_id.get("1239298989276639")

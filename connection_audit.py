@@ -4,6 +4,7 @@ No publisher, claim, Drive update or media upload is called by this module.
 Only whitelisted fields and error codes are printed; never exception strings.
 """
 import json
+from meta_auth_loader import load_meta_auth
 import os
 import sys
 from pathlib import Path
@@ -202,7 +203,7 @@ def _emit_meta_diagnostic(diagnostic):
 def batch_history_audit():
     manifest = json.loads((REPO / "manifests/batch-20261016-user-approved.json").read_text(encoding="utf-8"))
     drive, _ = google_client("DRIVE_TOKEN_JSON", "drive")
-    auth = json.loads(os.environ.get("META_AUTH_JSON") or "{}")
+    auth = (load_meta_auth() if (os.getenv("META_AUTH_JSON") or os.getenv("META_ACCESS_TOKEN")) else {})
     names = {"tarladaki": "Tarladaki Fasulye", "penguen": "Beyinsiz Penguen", "gonle": "Gönle Düşen", "daily_laugh": "Daily Laugh Lab"}
     youtube_env = {"tarladaki": "TOKEN_CHANNEL1_JSON", "penguen": "TOKEN_CHANNEL2_JSON"}
     drive_cache, history_cache, rows = {}, {}, []
