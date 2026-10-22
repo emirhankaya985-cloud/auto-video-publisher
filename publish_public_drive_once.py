@@ -24,7 +24,7 @@ def download(file_id: str, destination: Path) -> None:
     if not file_id or not all(c.isalnum() or c in "-_" for c in file_id):
         raise ValueError("Geçersiz Drive dosya kimliği")
     subprocess.run(
-        ["gdown", "--id", file_id, "--output", str(destination)],
+        ["gdown", f"https://drive.google.com/uc?id={file_id}", "--output", str(destination)],
         check=True, timeout=300,
     )
     if not destination.is_file() or destination.stat().st_size == 0:
