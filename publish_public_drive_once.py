@@ -13,6 +13,8 @@ from pathlib import Path
 
 from meta_auth_loader import load_meta_auth
 from cloud_omnichannel_publisher import upload_facebook_reel, upload_instagram_reel
+from instagram_media_compat import prepare_instagram_upload
+from scheduled_multi_publisher import platform_content_from_txt
 
 
 APPROVED_PAGES = {"Tarladaki Fasulye", "Beyinsiz Penguen", "Gönle Düşen", "Daily Laugh Lab", "Film Mağarası", "Filmmagrasi", "ToonZone"}
@@ -48,15 +50,24 @@ def main() -> None:
         caption_file = Path(tmp) / "caption.txt"
         download(args.video_id, video)
         download(args.text_id, caption_file)
-        if video.stat().st_size < 1024 or video.read_bytes()[:8][4:8] != b"ftyp":
+        with video.open("rb") as fh:
+            header = fh.read(8)
+        if video.stat().st_size < 1024 or header[4:8] != b"ftyp":
             raise RuntimeError("İndirilen dosya geçerli MP4 değil")
-        caption = caption_file.read_text(encoding="utf-8-sig").strip()
-        if not caption or len(caption) > 2200:
-            raise RuntimeError("Açıklama boş veya çok uzun")
-        fb_id = upload_facebook_reel(page, str(video), caption)
+        raw_copy = caption_file.read_text(encoding="utf-8-sig").strip()
+        _, _, facebook_copy, instagram_copy, _ = platform_content_from_txt(
+            raw_copy, video.stem, "film" if args.page in {"Film Mağarası", "Filmmagrasi"} else "tarladaki"
+        )
+        if not facebook_copy or not instagram_copy or len(instagram_copy) > 2200:
+            raise RuntimeError("Platform açıklaması boş veya Instagram sınırını aşıyor")
+        fb_id = upload_facebook_reel(page, str(video), facebook_copy)
         print(json.dumps({"page": args.page, "file": args.expected_video_name, "facebook_id": str(fb_id)}, ensure_ascii=False), flush=True)
         if page.get("instagram_id"):
-            ig_id = upload_instagram_reel(page, str(video), caption, append_store_link=False)
+            prepared = prepare_instagram_upload(
+                video, Path(tmp) / "instagram.mp4",
+                prefer_remux=True, film_compact=args.page in {"Film Mağarası", "Filmmagrasi"},
+            )
+            ig_id = upload_instagram_reel(page, str(prepared), instagram_copy, append_store_link=False)
             print(json.dumps({"page": args.page, "file": args.expected_video_name, "instagram_id": str(ig_id)}, ensure_ascii=False), flush=True)
 
 
