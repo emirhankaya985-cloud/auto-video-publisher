@@ -173,9 +173,9 @@ def timestamp(row):
     return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(TR)
 
 
-def copies(route, item, files, temp):
+def copies(route, item, files, temp, use_txt=True):
     stem = Path(item["name"]).stem
-    text = files.get(stem + ".txt")
+    text = files.get(stem + ".txt") if use_txt else None
     raw = None
     if text:
         try:
@@ -314,6 +314,14 @@ def plan(audit=False):
             match = remote[entry["platform"]].get(entry["caption_hash"])
             if entry["status"] != "done" and match:
                 entry.update(status="done", post_id=str(match["id"]))
+        counts = {p: max(
+            sum(route_clock(route, timestamp(row)).date() == clock.date() for row in histories[p]),
+            sum(e["route"] == route and e["platform"] == p and e["status"] == "done"
+                and e.get("day") == clock.date().isoformat() for e in state["entries"].values())
+        ) for p in platforms}
+        if all(counts[p] >= target_count(route, now) for p in platforms):
+            report.append("Daily target already complete.")
+            continue
         files = catalogs[source]
         videos = [v for n, v in files.items() if n.lower().endswith(".mp4")]
         other_humor_hashes = set()
@@ -350,6 +358,8 @@ def plan(audit=False):
         selected = None
         route_selected = 0
         for item in videos:
+            if all(counts[p] + planned_counts.get((route, p), 0) >= target_count(route, now) for p in platforms):
+                break
             if all(seed_done(route, p, item["name"]) or state["entries"].get(f"{route}:{p}:{item['id']}", {}).get("status") == "done" for p in platforms):
                 continue
             if source == "toonzone":
@@ -359,7 +369,7 @@ def plan(audit=False):
                     break
             try:
                 with tempfile.TemporaryDirectory() as tmp:
-                    captions, origin = copies(route, item, files, Path(tmp))
+                    captions, origin = copies(route, item, files, Path(tmp), use_txt=batch_limit == 1)
             except (RuntimeError, UnicodeError) as exc:
                 if source in {"film", "toonzone"}:
                     report.append("HELD: " + str(exc))
