@@ -176,10 +176,13 @@ def timestamp(row):
 def copies(route, item, files, temp):
     stem = Path(item["name"]).stem
     text = files.get(stem + ".txt")
+    raw = None
     if text:
-        raw = download(text["id"], temp / "caption.txt").read_text(encoding="utf-8-sig").strip()
-        if not raw:
-            raise RuntimeError("Eşleşen TXT boş")
+        try:
+            raw = download(text["id"], temp / "caption.txt").read_text(encoding="utf-8-sig").strip()
+        except Exception as exc:
+            print(f"TXT unavailable for {route}/{item['name']}: {type(exc).__name__}; using filename caption", flush=True)
+    if raw:
         _, _, fb, ig, _ = platform_content_from_txt(raw, stem, route.removesuffix("_second"))
         origin = "matching-txt"
     elif route == "toonzone":
@@ -187,7 +190,9 @@ def copies(route, item, files, temp):
         fb = ig = metadata["title"] + "\n\n" + metadata["description"]
         origin = "metadata-no-txt"
     else:
-        raise RuntimeError("Eşleşen TXT bulunamadı")
+        title = re.sub(r"[_]+", " ", stem).strip()
+        fb = ig = f"{ROUTES[route][1]} · {title}"
+        origin = "filename-no-txt"
     if route == "daily_laugh":
         # The archive reuses the same short TXT body across different videos.
         # Preserve that body, and make future remote reconciliation unambiguous.
@@ -273,6 +278,8 @@ def plan(audit=False):
     for key, files in catalogs.items():
         report.append(f"{key}: MP4={sum(n.lower().endswith('.mp4') for n in files)}, TXT={sum(n.lower().endswith('.txt') for n in files)}, total={len(files)}")
     plans = []
+    planned_counts = {}
+    batch_limit = 8 if os.getenv("CATCHUP_BATCH_DATE") == day else 1
     history_cache = {}
     for route, (source, page_name) in ROUTES.items():
         report.extend(["", f"## {page_name}"])
@@ -341,6 +348,7 @@ def plan(audit=False):
         else:
             videos.sort(key=lambda v: v["name"])
         selected = None
+        route_selected = 0
         for item in videos:
             if all(seed_done(route, p, item["name"]) or state["entries"].get(f"{route}:{p}:{item['id']}", {}).get("status") == "done" for p in platforms):
                 continue
@@ -383,7 +391,7 @@ def plan(audit=False):
                 )
                 today_count = max(today_count, confirmed_in_ledger)
                 # A tick catches up one item per account; no all-night busy polling.
-                if today_count >= target:
+                if today_count + planned_counts.get((route, p), 0) >= target:
                     continue
                 pending.append(p)
             if held:
@@ -405,9 +413,13 @@ def plan(audit=False):
                 for p in pending:
                     state["entries"][f"{route}:{p}:{item['id']}"] = {"route": route, "platform": p, "status": "intent", "caption_hash": caption_key(captions[p]), "file": item["name"], "day": clock.date().isoformat(), "run_id": os.environ["GITHUB_RUN_ID"]}
                 plans.append(selected)
-            break
+                for p in pending:
+                    planned_counts[(route, p)] = planned_counts.get((route, p), 0) + 1
+            route_selected += 1
+            if route_selected >= batch_limit:
+                break
         if selected is None:
-            report.append("No eligible unpublished item with an exact TXT/approval match.")
+            report.append("No eligible unpublished item below the daily target.")
     save(STATE, state)
     save(PLAN, plans)
     summary = "\n".join(report) + "\n"
