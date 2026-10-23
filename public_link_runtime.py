@@ -80,10 +80,17 @@ def github_get(path):
 
 def restore():
     """Newest run's result wins; otherwise its pre-upload intent is authoritative."""
-    artifacts = github_get("actions/artifacts?per_page=100&name=link-state-result").json().get("artifacts", [])
-    intents = github_get("actions/artifacts?per_page=100&name=link-state-intent").json().get("artifacts", [])
+    def artifact_list(name):
+        payload = github_get(f"actions/artifacts?per_page=100&name={name}").json()
+        if not isinstance(payload, dict) or not isinstance(payload.get("artifacts"), list):
+            raise RuntimeError("GitHub durum listesi geçersiz; otomatik sıfırlama yapılmadı")
+        return payload["artifacts"]
+    artifacts = artifact_list("link-state-result")
+    intents = artifact_list("link-state-intent")
     rows = [x for x in artifacts + intents if not x.get("expired")]
     if not rows:
+        if artifacts or intents:
+            raise RuntimeError("Önceki durum kaydının süresi dolmuş; otomatik sıfırlama yapılmadı")
         return {"schema": 1, "entries": {}, "episode_days": {}}
     rows.sort(key=lambda x: (int(x["workflow_run"]["id"]), x["name"] == "link-state-result"), reverse=True)
     response = github_get(f"actions/artifacts/{rows[0]['id']}/zip")
@@ -100,15 +107,19 @@ def restore():
 def inventory(folder):
     files = gdown.download_folder(id=folder, skip_download=True, quiet=True,
                                  use_cookies=False, timeout=40)
-    result = {}
+    result, ambiguous = {}, set()
     for item in files:
         if len(Path(item.path).parts) != 1:
             continue
         name = Path(item.path).name
         # Exclude recursive child folders: they must use their own approved source.
         if name in result and result[name]["id"] != item.id:
-            raise RuntimeError("Aynı adlı birden çok Drive dosyası bulundu")
+            if folder != FOLDERS["daily_laugh"]:
+                raise RuntimeError("Aynı adlı birden çok Drive dosyası bulundu")
+            ambiguous.add(name)
         result[name] = {"id": item.id, "name": name}
+    for name in ambiguous:
+        result.pop(name, None)
     if not result:
         raise RuntimeError("Paylaşılan klasör boş veya erişilemiyor")
     return result
@@ -232,7 +243,7 @@ def plan(audit=False):
     for key, files in catalogs.items():
         report.append(f"{key}: MP4={sum(n.lower().endswith('.mp4') for n in files)}, TXT={sum(n.lower().endswith('.txt') for n in files)}, total={len(files)}")
     plans = []
-    approved = json.loads(Path("manifests/shared-humor-approved-content.json").read_text())["approved"]
+    history_cache = {}
     for route, (source, page_name) in ROUTES.items():
         report.extend(["", f"## {page_name}"])
         if not route_enabled(route):
@@ -246,7 +257,12 @@ def plan(audit=False):
         platforms = ["facebook"] + (["instagram"] if page.get("instagram_id") and route != "film_second" and ig_enabled else [])
         clock = route_clock(route, now)
         try:
-            histories = {p: graph_rows(page, p) for p in platforms}
+            histories = {}
+            for p in platforms:
+                cache_key = (page_name, p)
+                if cache_key not in history_cache:
+                    history_cache[cache_key] = graph_rows(page, p)
+                histories[p] = history_cache[cache_key]
         except RuntimeError as exc:
             report.append("HELD: " + str(exc))
             continue
@@ -263,14 +279,32 @@ def plan(audit=False):
                 entry.update(status="done", post_id=str(match["id"]))
         files = catalogs[source]
         videos = [v for n, v in files.items() if n.lower().endswith(".mp4")]
+        other_humor_hashes = set()
         if route in {"tarladaki", "penguen"}:
-            allow = {x["drive_file_id"]: x for x in approved if x["route"] == route}
-            videos = [v for v in videos if v["id"] in allow]
-            for item in videos:
-                item["approved_md5"] = allow[item["id"]]["md5"]
+            # Match the existing normal publisher's explicit TP activation gate.
+            # Shared files are consumed globally across both humor accounts.
+            other_name = ROUTES["penguen" if route == "tarladaki" else "tarladaki"][1]
+            other_page = pages.get(other_name)
+            if not other_page:
+                report.append("HELD: other shared-humor account history unavailable.")
+                continue
+            try:
+                for p in ("facebook", "instagram"):
+                    if p == "instagram" and not other_page.get("instagram_id"):
+                        continue
+                    ck = (other_name, p)
+                    if ck not in history_cache:
+                        history_cache[ck] = graph_rows(other_page, p)
+                    other_humor_hashes.update(caption_key(r.get("description") or r.get("caption")) for r in history_cache[ck])
+            except RuntimeError as exc:
+                report.append("HELD: " + str(exc))
+                continue
+            videos = [v for v in videos if not any(
+                k.endswith(":" + v["id"]) and e["route"] in {"tarladaki", "penguen"} and e["route"] != route
+                for k, e in state["entries"].items())]
         if source == "film":
-            videos = [v for v in videos if re.fullmatch(r"Yoksul_1986_Part_\d+\.mp4", v["name"], re.I)]
-            videos.sort(key=lambda v: parse_order(Path(v["name"]).stem, "film"))
+            videos = [v for v in videos if parse_order(Path(v["name"]).stem, "film")]
+            videos.sort(key=lambda v: (not v["name"].lower().startswith("yoksul_1986_"), parse_order(Path(v["name"]).stem, "film")))
         elif source == "toonzone":
             videos = [v for v in videos if parse_order(Path(v["name"]).stem, "cartoon")]
             videos.sort(key=lambda v: parse_order(Path(v["name"]).stem, "cartoon"))
@@ -293,6 +327,8 @@ def plan(audit=False):
                     report.append("HELD: " + str(exc))
                     break
                 continue
+            if other_humor_hashes and any(caption_key(c) in other_humor_hashes for c in captions.values()):
+                continue
             pending = []
             held = False
             for p in platforms:
@@ -310,6 +346,12 @@ def plan(audit=False):
                     continue
                 target = target_count(route, now)
                 today_count = sum(route_clock(route, timestamp(row)).date() == clock.date() for row in histories[p])
+                confirmed_in_ledger = sum(
+                    e["route"] == route and e["platform"] == p and e["status"] == "done"
+                    and e.get("day") == clock.date().isoformat()
+                    for e in state["entries"].values()
+                )
+                today_count = max(today_count, confirmed_in_ledger)
                 # A tick catches up one item per account; no all-night busy polling.
                 if today_count >= target:
                     continue
