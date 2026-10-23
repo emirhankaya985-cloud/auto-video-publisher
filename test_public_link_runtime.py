@@ -18,6 +18,7 @@ def load_runtime():
     cloud = types.ModuleType("cloud_omnichannel_publisher")
     cloud.GRAPH_API_VERSION = "v24.0"
     cloud.MetaAPIError = type("MetaAPIError", (RuntimeError,), {})
+    cloud._sanitize_meta_text = str
     for name in ("create_instagram_cover_video", "upload_facebook_reel", "upload_instagram_reel"):
         setattr(cloud, name, Mock(side_effect=AssertionError("No live upload in tests")))
     scheduled = types.ModuleType("scheduled_multi_publisher")
@@ -78,6 +79,16 @@ class LinkRuntimeSafety(unittest.TestCase):
     def test_catchup_preserves_daily_laugh_eight_target(self):
         with patch.dict(os.environ, {"COMPLETE_DAY_DATE": "2026-10-23"}):
             self.assertEqual(runtime.target_count("daily_laugh", datetime(2026, 10, 23, 9, tzinfo=runtime.TR)), 8)
+            self.assertEqual(runtime.target_count("film_second", datetime(2026, 10, 23, 9, tzinfo=runtime.TR)), 6)
+
+    def test_daily_reused_txt_has_distinct_video_reference(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            text = Path(tmp) / "caption.txt"
+            text.write_text("Shared short caption", encoding="utf-8")
+            with patch.object(runtime, "download", return_value=text):
+                first, _ = runtime.copies("daily_laugh", {"name": "100.mp4"}, {"100.txt": {"id": "txt"}}, Path(tmp))
+                second, _ = runtime.copies("daily_laugh", {"name": "101.mp4"}, {"101.txt": {"id": "txt"}}, Path(tmp))
+            self.assertNotEqual(runtime.caption_key(first["facebook"]), runtime.caption_key(second["facebook"]))
 
     def test_newer_intent_beats_older_result_on_crash(self):
         old = {"id": 10, "name": "link-state-result", "workflow_run": {"id": 100}}

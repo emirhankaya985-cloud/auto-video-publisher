@@ -22,7 +22,7 @@ import requests
 
 from cloud_omnichannel_publisher import (
     GRAPH_API_VERSION, MetaAPIError, create_instagram_cover_video,
-    upload_facebook_reel, upload_instagram_reel,
+    upload_facebook_reel, upload_instagram_reel, _sanitize_meta_text,
 )
 from instagram_media_compat import prepare_instagram_upload
 from meta_auth_loader import load_meta_auth
@@ -127,7 +127,7 @@ def inventory(folder):
 
 def download(file_id, path):
     result = gdown.download(id=file_id, output=str(path), quiet=True,
-                            use_cookies=False, timeout=40)
+                            use_cookies=True, timeout=40)
     if not result or not path.is_file() or not path.stat().st_size:
         raise RuntimeError("Paylaşılan Drive dosyası indirilemedi")
     return path
@@ -188,6 +188,11 @@ def copies(route, item, files, temp):
         origin = "metadata-no-txt"
     else:
         raise RuntimeError("Eşleşen TXT bulunamadı")
+    if route == "daily_laugh":
+        # The archive reuses the same short TXT body across different videos.
+        # Preserve that body, and make future remote reconciliation unambiguous.
+        reference = f"Daily Laugh Lab · Video {stem}\n\n"
+        fb, ig = reference + fb, reference + ig
     if not fb.strip() or not ig.strip() or len(ig) > 2200 or "<html" in fb.lower():
         raise RuntimeError("Platform açıklaması geçersiz")
     return {"facebook": fb, "instagram": ig}, origin
@@ -223,14 +228,39 @@ def target_count(route, now):
     else:
         slots = [(h, 30 if route == "penguen" else 15 if route == "gonle" else 0) for h in hours[route]]
     if os.getenv("COMPLETE_DAY_DATE") == now.date().isoformat():
-        return len(slots)
+        # The second Film page still lacked the already-confirmed Part 6 at cutover.
+        return len(slots) + (1 if route == "film_second" else 0)
     return sum((h, m) <= (clock.hour, clock.minute) for h, m in slots)
+
+
+def apply_verified_migration(state):
+    payload = json.loads(Path(__file__).with_name("migration_verified_publications.json").read_text())
+    if payload.get("schema") != 1 or not isinstance(payload.get("records"), list):
+        raise RuntimeError("Doğrulanmış aktarım geçmişi geçersiz")
+    # The first audit incorrectly treated generic Daily captions as file IDs.
+    # Remove only those derived inferences; preserve all actual upload intents/results.
+    state["entries"] = {k: e for k, e in state["entries"].items()
+                        if not (e["route"] == "daily_laugh" and not e.get("run_id")
+                                and e.get("proof") != "verified-afk-log")}
+    for row in payload["records"]:
+        key = f"{row['route']}:{row['platform']}:{row['file_id']}"
+        if key in state["entries"] and state["entries"][key].get("run_id"):
+            continue
+        recorded = datetime.fromisoformat(row["recorded_at"].replace("Z", "+00:00"))
+        state["entries"][key] = {
+            "route": row["route"], "platform": row["platform"], "status": "done",
+            "caption_hash": "verified-file-id:" + row["file_id"],
+            "post_id": row["post_id"], "file": row["file_name"],
+            "day": route_clock(row["route"], recorded.astimezone(TR)).date().isoformat(),
+            "proof": "verified-afk-log", "source_run_id": row["source_run_id"],
+        }
 
 
 def plan(audit=False):
     now = datetime.now(TR)
     day = now.date().isoformat()
     state = restore()
+    apply_verified_migration(state)
     pages = {p["page_name"]: p for p in load_meta_auth()["pages"]}
     report = [f"# Public link publisher — {day}", "", "YouTube: disabled. Drive OAuth: not used.", ""]
     catalogs = {}
@@ -408,7 +438,7 @@ def publish():
                     cover = download(item["cover_id"], temp / "cover.png")
                     video = create_instagram_cover_video(video, cover, temp / "covered.mp4")
             except Exception as exc:
-                failures.append(item["page"] + ": " + type(exc).__name__)
+                failures.append(item["page"] + ": " + type(exc).__name__ + ": " + _sanitize_meta_text(str(exc))[:400])
                 for platform in item["platforms"]:
                     state["entries"][f"{item['route']}:{platform}:{item['id']}"]["status"] = "ready"
                 save(STATE, state)
