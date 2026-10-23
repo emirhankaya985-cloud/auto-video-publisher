@@ -65,10 +65,18 @@ class LinkRuntimeSafety(unittest.TestCase):
             self.assertEqual(origin, "matching-txt")
             self.assertEqual(result["instagram"], "IG from TXT")
 
-    def test_non_toonzone_does_not_invent_missing_txt(self):
+    def test_missing_txt_uses_filename_caption(self):
         with tempfile.TemporaryDirectory() as tmp:
-            with self.assertRaisesRegex(RuntimeError, "TXT"):
-                runtime.copies("gonle", {"name": "1.mp4"}, {}, Path(tmp))
+            result, origin = runtime.copies("gonle", {"name": "1.mp4"}, {}, Path(tmp))
+            self.assertEqual(origin, "filename-no-txt")
+            self.assertIn("Gönle Düşen · 1", result["facebook"])
+
+    def test_unreadable_txt_uses_fallback(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(runtime, "download", side_effect=Exception("Drive limit")):
+                result, origin = runtime.copies("gonle", {"name": "2.mp4"}, {"2.txt": {"id": "txt"}}, Path(tmp))
+            self.assertEqual(origin, "filename-no-txt")
+            self.assertIn("2", result["instagram"])
 
     def test_schedule_remains_five_film_slots_after_catchup_date(self):
         with patch.dict(os.environ, {"COMPLETE_DAY_DATE": "2026-10-23"}):
