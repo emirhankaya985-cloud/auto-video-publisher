@@ -61,7 +61,16 @@ def main() -> None:
         if args.page == "ToonZone":
             if not args.cover_id:
                 raise ValueError("ToonZone için eşleşen kapak kimliği gerekli")
-            facebook_copy = instagram_copy = toonzone_metadata(video.stem)["description"]
+            metadata = toonzone_metadata(video.stem)
+            if args.text_id:
+                raw_copy = caption_file.read_text(encoding="utf-8-sig").strip()
+                _, _, facebook_copy, instagram_copy, _ = platform_content_from_txt(
+                    raw_copy, video.stem, "toonzone"
+                )
+                print("ToonZone açıklaması: eşleşen Drive TXT dosyası", flush=True)
+            else:
+                facebook_copy = instagram_copy = metadata["title"] + "\n\n" + metadata["description"]
+                print("ToonZone açıklaması: TXT bulunmadı; bölüm ve Part numarası içeren mevcut metadata şablonu", flush=True)
             cover = Path(tmp) / "cover.png"
             download(args.cover_id, cover)
             video = create_instagram_cover_video(video, cover, Path(tmp) / "toonzone-with-cover.mp4")
