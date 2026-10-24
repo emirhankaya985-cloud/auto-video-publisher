@@ -121,9 +121,45 @@ class LinkRuntimeSafety(unittest.TestCase):
 
     def test_missing_txt_blocks_ordinary_routes(self):
         with tempfile.TemporaryDirectory() as tmp:
-            for route in ("gonle", "film", "tarladaki", "penguen", "daily_laugh", "film_second"):
+            for route in ("gonle", "film", "tarladaki", "penguen", "film_second"):
                 with self.subTest(route=route), self.assertRaisesRegex(RuntimeError, "TXT bulunamadı"):
                     runtime.copies(route, {"name": "1.mp4"}, {}, Path(tmp))
+
+    def test_daily_laugh_generates_exact_txt_only_when_missing(self):
+        catalog = {"101.mp4": {"id": "a"}, "102.mp4": {"id": "b"},
+                   "102.txt": {"id": "existing"}, "1.mp4": {"id": "c"},
+                   "notes.txt": {"id": "ignored"}, "invalid.mp4": {"id": "bad"}}
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp)
+            generated, invalid = runtime.generate_daily_laugh_txts(catalog, dest)
+            self.assertEqual((generated, invalid), (2, 1))
+            self.assertEqual(sorted(path.name for path in dest.glob("*.txt")), ["1.txt", "101.txt"])
+            self.assertIn("#DailyLaughLab", (dest / "101.txt").read_text(encoding="utf-8"))
+            self.assertNotIn("102.txt", [x.name for x in dest.iterdir()])
+
+    def test_daily_laugh_missing_txt_is_materialized_before_caption_use(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch.object(runtime, "ROOT", root):
+                result, origin = runtime.copies("daily_laugh", {"name": "101.mp4"}, {}, root)
+            self.assertEqual(origin, "generated-daily-laugh-txt")
+            self.assertTrue((root / "daily_laugh_txt" / "101.txt").is_file())
+            self.assertIn("Video 101", result["facebook"])
+            self.assertIn("Video 101", result["instagram"])
+
+    def test_daily_laugh_existing_txt_is_not_replaced_by_generated_text(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "caption.txt"
+            source.write_text("Original approved description", encoding="utf-8")
+            with patch.object(runtime, "ROOT", root), patch.object(runtime, "download", return_value=source):
+                _captions, origin = runtime.copies("daily_laugh", {"name": "101.mp4"}, {"101.txt": {"id": "source"}}, root)
+            self.assertEqual(origin, "matching-txt")
+            self.assertFalse((root / "daily_laugh_txt" / "101.txt").exists())
+
+    def test_daily_laugh_rejects_unsafe_filename_for_auto_caption(self):
+        with self.assertRaises(ValueError):
+            runtime.daily_laugh_txt_text("../secrets")
 
     def test_unreadable_txt_blocks_ordinary_routes(self):
         with tempfile.TemporaryDirectory() as tmp:
