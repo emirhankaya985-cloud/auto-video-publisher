@@ -1,4 +1,4 @@
-> **985 aktarımı:** Güncel kurulum ve etkinleştirme adımları: [MIGRATION_985.md](MIGRATION_985.md). Yayın işleri bağlantılar kurulana kadar kapalıdır.
+> **Aktif 985 üretimi:** Meta-only yayıncı `.github/workflows/public_link_schedule.yml` üzerinden çalışır. **Eski OAuth/YouTube yayıncısı kapalıdır; `AUTOMATION_ENABLED` değerini açma.** Daha önce yaşanan HTTP 400, Drive, ffmpeg, TXT, kapak ve durum kaydı hataları için [**Üretim Kurtarma Defteri**](docs/PRODUCTION_RECOVERY_RUNBOOK.md) zorunlu ilk okumadır. Token/OAuth eksiklerini kullanıcı ayrı sohbette yönetecek. Kurulum: [MIGRATION_985.md](MIGRATION_985.md).
 
 # Auto Video Publisher
 
