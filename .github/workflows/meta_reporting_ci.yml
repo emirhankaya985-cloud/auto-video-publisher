@@ -43,7 +43,7 @@ jobs:
           watcher = Path(".github/workflows/daily_report_watch.yml").read_text()
           for text in (nightly, watcher):
               assert "vars.AUTOMATION_ENABLED" not in text
-              assert "vars.META_REPORTING_ENABLED != 'false'" in text
+              assert "vars.META_REPORTING_ENABLED == 'true'" in text
           assert "59 20 * * *" in nightly
           assert "10 4 * * *" in watcher
           assert "META_ONLY_REPORTING: 'true'" in nightly
