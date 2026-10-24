@@ -1,0 +1,29 @@
+name: Read-only Telegram connection diagnostic
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - telegram_readonly_diagnostic.py
+      - test_telegram_readonly_diagnostic.py
+      - .github/workflows/telegram_readonly_diagnostic.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: pip install --require-hashes -r requirements.txt
+      - name: Verify Telegram getMe and getChat (never sendMessage)
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python telegram_readonly_diagnostic.py
