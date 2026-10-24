@@ -172,6 +172,52 @@ class InstagramBinaryUploadTests(unittest.TestCase):
         self.assertNotIn("user_tags", post.call_args_list[1].kwargs["data"])
         self.assertEqual(post.call_count, 2)
 
+    def test_reels_only_falls_back_for_explicit_user_tags_400_before_publish(self):
+        with patch("cloud_omnichannel_publisher.os.path.getsize", return_value=5), \
+             patch("cloud_omnichannel_publisher._sha256_file", return_value="a" * 64), \
+             patch("cloud_omnichannel_publisher._upload_instagram_binary"), \
+             patch("cloud_omnichannel_publisher.time.sleep"), \
+             patch("cloud_omnichannel_publisher.requests.post") as post, \
+             patch("cloud_omnichannel_publisher.requests.get") as get:
+            post.side_effect = [
+                Mock(ok=False, status_code=400,
+                     json=lambda: {"error": {"message": "Invalid parameter user_tags", "code": 100}}),
+                Mock(ok=True, status_code=200,
+                     json=lambda: {"id": "safe-container", "uri": "https://rupload.facebook.com/1"}),
+                Mock(ok=True, status_code=200, json=lambda: {"id": "media"}),
+            ]
+            get.side_effect = [
+                Mock(ok=True, status_code=200, json=lambda: {"status_code": "FINISHED"}),
+                Mock(ok=True, status_code=200, json=lambda: {"id": "media", "permalink": "https://www.instagram.com/reel/safe/"}),
+            ]
+            self.assertEqual(
+                upload_instagram_reel(
+                    {"instagram_id": "ig", "page_token": "secret"}, "video.mp4",
+                    "Ronaldo @cristiano", user_tags=["cristiano"],
+                    append_store_link=False,
+                ), "media"
+            )
+        self.assertIn("user_tags", post.call_args_list[0].kwargs["data"])
+        self.assertNotIn("user_tags", post.call_args_list[1].kwargs["data"])
+        self.assertIn("@cristiano", post.call_args_list[1].kwargs["data"]["caption"])
+        self.assertEqual(post.call_count, 3)  # one rejected tag container, plain container, one publish
+
+    def test_generic_container_http400_with_tags_stays_blocked_no_retry(self):
+        with patch("cloud_omnichannel_publisher.os.path.getsize", return_value=5), \
+             patch("cloud_omnichannel_publisher.requests.post") as post, \
+             patch("cloud_omnichannel_publisher._upload_instagram_binary") as binary:
+            post.return_value = Mock(
+                ok=False, status_code=400,
+                json=lambda: {"error": {"message": "Invalid video metadata", "code": 100}},
+            )
+            with self.assertRaises(MetaAPIError):
+                upload_instagram_reel(
+                    {"instagram_id": "ig", "page_token": "secret"}, "video.mp4",
+                    "Ronaldo @cristiano", user_tags=["cristiano"],
+                )
+        post.assert_called_once()
+        binary.assert_not_called()
+
     def test_invalid_user_tag_is_rejected_before_any_api_post(self):
         with patch("cloud_omnichannel_publisher.os.path.getsize", return_value=5), \
              patch("cloud_omnichannel_publisher.requests.post") as post:
