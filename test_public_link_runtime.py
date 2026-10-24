@@ -35,7 +35,7 @@ def load_runtime():
     ordered = types.ModuleType("ordered_channels")
     ordered.parse_order = Mock(return_value=(1, 2, 2, "title"))
     def fake_toonzone_metadata(stem):
-        match = re.fullmatch(r"S(\\d+)E(\\d+)_(.+)_Part_?(\\d+)", stem)
+        match = re.fullmatch(r"S(\d+)E(\d+)_(.+)_Part_?(\d+)", stem)
         if not match or int(match[4]) not in (1, 2, 3, 4):
             raise ValueError("invalid ToonZone filename")
         return {"season": int(match[1]), "episode": int(match[2]),
