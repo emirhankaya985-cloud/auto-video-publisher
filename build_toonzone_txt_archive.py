@@ -7,7 +7,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from public_link_runtime import FOLDERS, generate_toonzone_txts, inventory, toonzone_cover_coverage
+from public_link_runtime import FOLDERS, exact_txt_coverage, generate_toonzone_txts, inventory, toonzone_cover_coverage
 
 
 def main():
@@ -17,6 +17,8 @@ def main():
     generated, invalid = generate_toonzone_txts(files, dest)
     expected = sum(name.lower().endswith(".mp4") for name in files)
     covered, uncovered = toonzone_cover_coverage(files, covers)
+    other_sources = {source: exact_txt_coverage(inventory(FOLDERS[source]))
+                     for source in ("humor", "gonle", "daily_laugh", "film")}
     manifest = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "source": "public ToonZone Drive filenames",
@@ -25,6 +27,7 @@ def main():
         "invalid_video_names": invalid,
         "exact_png_covers": covered,
         "missing_exact_png_covers": uncovered,
+        "other_account_exact_txt_coverage": other_sources,
         "destination": "GitHub Actions artifact; Drive is read-only",
         "content_rule": "season, episode, part and filename title only; no invented scene details",
     }
