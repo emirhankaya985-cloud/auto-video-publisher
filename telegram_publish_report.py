@@ -47,6 +47,17 @@ def publication_summary(state, run_id, *, verify_outcome="success", plan_outcome
         lines.append(f"⚠️ Belirsiz yükleme: {len(unknown)} (otomatik tekrar yayın yok)")
     if failed:
         lines.append("❌ Yayın iş akışı adımlarından biri başarısız.")
+        safe_reasons = {"media_preparation_failed", "source_or_cover_preparation_failed",
+                        "invalid_media_or_graph_request", "credentials_or_permissions",
+                        "rate_limit", "meta_server_or_network",
+                        "unclassified_upload_result"}
+        reasons = Counter(
+            row.get("failure", {}).get("reason")
+            for row in matched if isinstance(row.get("failure"), dict)
+            and row.get("failure", {}).get("reason") in safe_reasons
+        )
+        for reason, count in sorted(reasons.items()):
+            lines.append(f"🧩 {reason}: {count}")
     lines.append(f"🔎 https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/{run_id}")
     return "\n".join(lines), "alert" if failed or unknown else "published"
 
