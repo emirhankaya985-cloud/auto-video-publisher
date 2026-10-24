@@ -365,6 +365,66 @@ class LinkRuntimeSafety(unittest.TestCase):
                 self.assertEqual(json.loads((root / "plan.json").read_text()), [])
                 self.assertEqual(caption_mock.call_count, 1)
 
+    def test_local_ig_prepare_failure_keeps_fb_publishable(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            state_path, plan_path = root / "state.json", root / "plan.json"
+            item = {"page": "Daily Laugh Lab", "route": "daily_laugh", "id": "vid",
+                    "name": "101.mp4", "platforms": ["facebook", "instagram"],
+                    "captions": {"facebook": "fb text", "instagram": "ig text"}}
+            runtime.save(state_path, {"entries": {
+                "daily_laugh:facebook:vid": {"status": "intent"},
+                "daily_laugh:instagram:vid": {"status": "intent"}}})
+            runtime.save(plan_path, [item])
+            def download(_id, path):
+                path.write_bytes(b"1234ftypOK")
+                return path
+            with patch.object(runtime, "STATE", state_path), patch.object(runtime, "PLAN", plan_path), \
+                    patch.object(runtime, "download", side_effect=download), \
+                    patch.object(runtime, "load_meta_auth", return_value={"pages": [
+                        {"page_name": "Daily Laugh Lab", "page_token": "test"}]}), \
+                    patch.object(runtime, "prepare_instagram_upload", side_effect=RuntimeError("ffmpeg failed")), \
+                    patch.object(runtime, "upload_facebook_reel", return_value="fb123") as facebook, \
+                    patch.object(runtime, "upload_instagram_reel") as instagram:
+                with self.assertRaises(SystemExit):
+                    runtime.publish()
+            entries = json.loads(state_path.read_text())["entries"]
+            self.assertEqual(entries["daily_laugh:facebook:vid"]["status"], "done")
+            self.assertEqual(entries["daily_laugh:facebook:vid"]["post_id"], "fb123")
+            self.assertEqual(entries["daily_laugh:instagram:vid"]["status"], "ready")
+            self.assertEqual(entries["daily_laugh:instagram:vid"]["failure"]["reason"], "media_preparation_failed")
+            facebook.assert_called_once()
+            instagram.assert_not_called()
+
+    def test_meta_http_400_is_held_uncertain_with_diagnostic(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            state_path, plan_path = root / "state.json", root / "plan.json"
+            runtime.save(state_path, {"entries": {"toonzone:instagram:vid": {"status": "intent"}}})
+            runtime.save(plan_path, [{"page": "ToonZone", "route": "toonzone",
+                "id": "vid", "name": "S01E01_The_Power_Part2.mp4",
+                "platforms": ["instagram"], "captions": {"instagram": "IG text"}}])
+            def download(_id, path):
+                path.write_bytes(b"1234ftypOK")
+                return path
+            err = runtime.MetaAPIError("HTTP 400 invalid media")
+            err.http_status, err.code, err.subcode = 400, 100, 2207009
+            err.stage = "Instagram binary upload"
+            with patch.object(runtime, "STATE", state_path), patch.object(runtime, "PLAN", plan_path), \
+                    patch.object(runtime, "download", side_effect=download), \
+                    patch.object(runtime, "load_meta_auth", return_value={"pages": [
+                        {"page_name": "ToonZone", "page_token": "test"}]}), \
+                    patch.object(runtime, "prepare_instagram_upload", side_effect=lambda path, *a, **kw: path), \
+                    patch.object(runtime, "upload_instagram_reel", side_effect=err) as ig:
+                with self.assertRaises(SystemExit):
+                    runtime.publish()
+            entry = json.loads(state_path.read_text())["entries"]["toonzone:instagram:vid"]
+            self.assertEqual(entry["status"], "uncertain")
+            self.assertEqual(entry["failure"]["reason"], "invalid_media_or_graph_request")
+            self.assertEqual(entry["failure"]["graph_subcode"], 2207009)
+            self.assertFalse(entry["failure"]["safe_to_repost"])
+            ig.assert_called_once()
+
     def test_source_failure_records_ready_without_calling_meta(self):
         with tempfile.TemporaryDirectory() as tmp:
             state_path, plan_path = Path(tmp) / "state.json", Path(tmp) / "plan.json"
