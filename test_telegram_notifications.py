@@ -79,5 +79,63 @@ class TelegramNotificationTests(unittest.TestCase):
         transport.post.assert_not_called()
 
 
+class TelegramSmokeDiagnosticTests(unittest.TestCase):
+    def test_safe_failure_code_never_echoes_secrets(self):
+        from telegram_smoke_test import safe_failure_code
+        codes = {
+            "telegram credentials missing or invalid: bot token missing": "bot_token_missing",
+            "telegram credentials missing or invalid: chat id missing": "chat_id_missing",
+            "telegram credentials missing or invalid: bot token format": "bot_token_format_invalid",
+            "telegram credentials missing or invalid: chat id format": "chat_id_format_invalid",
+            "telegram delivery not accepted HTTP 400": "telegram_http_400",
+            "telegram delivery not accepted HTTP 401": "telegram_http_401",
+            "telegram delivery not accepted HTTP 403": "telegram_http_403",
+            "telegram delivery not accepted HTTP 429": "telegram_http_429",
+            "telegram delivery not accepted HTTP 418": "telegram_http_other",
+            "telegram delivery failed (ConnectionError)": "telegram_connection_failed",
+            "telegram server receipt mismatch": "telegram_rejected_response",
+        }
+        for message, code in codes.items():
+            with self.subTest(message=message):
+                self.assertEqual(safe_failure_code(RuntimeError(message)), code)
+        self.assertEqual(safe_failure_code(RuntimeError(
+            "HTTP response secretly includes 123456789:private-token"
+        )), "telegram_error")
+
+    def test_smoke_diagnostic_logs_only_allowlisted_code(self):
+        import io
+        import json
+        from contextlib import redirect_stdout
+        import telegram_smoke_test
+
+        output = io.StringIO()
+        with patch("telegram_smoke_test.send_telegram",
+                   side_effect=RuntimeError("telegram delivery not accepted HTTP 403")), redirect_stdout(output):
+            self.assertEqual(telegram_smoke_test.main(), 1)
+        self.assertEqual(json.loads(output.getvalue())["error_code"], "telegram_http_403")
+        self.assertNotIn("bot", output.getvalue())
+        self.assertNotIn("chat", output.getvalue())
+
+    def test_smoke_success_uses_receipt(self):
+        import io
+        import json
+        from contextlib import redirect_stdout
+        import telegram_smoke_test
+
+        output = io.StringIO()
+        with patch("telegram_smoke_test.send_telegram",
+                   return_value={"http_status": 200, "server_ack": True}), redirect_stdout(output):
+            self.assertEqual(telegram_smoke_test.main(), 0)
+        self.assertTrue(json.loads(output.getvalue())["server_ack"])
+
+    def test_specific_configuration_error_does_not_call_network(self):
+        transport = Mock()
+        env = {"TELEGRAM_BOT_TOKEN": "invalid", "TELEGRAM_CHAT_ID": "-100123456789"}
+        with patch.dict(os.environ, env, clear=True):
+            with self.assertRaisesRegex(RuntimeError, "bot token format"):
+                send_telegram("hi", "hello", session=transport)
+        transport.post.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
