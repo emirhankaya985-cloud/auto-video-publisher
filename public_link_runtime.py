@@ -222,6 +222,11 @@ def route_clock(route, now):
     return now.astimezone(ZoneInfo("America/New_York")) if route == "daily_laugh" else now
 
 
+def publication_day(route, row):
+    """Use the account scheduling timezone for confirmed Meta history entries."""
+    return route_clock(route, timestamp(row)).date().isoformat()
+
+
 def target_count(route, now):
     clock = route_clock(route, now)
     hours = {"tarladaki": TARLADAKI_HOURS, "penguen": PENGUEN_HOURS,
@@ -386,7 +391,7 @@ def plan(audit=False):
                 match = remote[p].get(cap_hash)
                 if existing.get("status") == "done" or seed_done(route, p, item["name"]) or match:
                     if match:
-                        state["entries"][key] = {"route": route, "platform": p, "status": "done", "caption_hash": cap_hash, "post_id": str(match["id"]), "file": item["name"], "day": timestamp(match).date().isoformat()}
+                        state["entries"][key] = {"route": route, "platform": p, "status": "done", "caption_hash": cap_hash, "post_id": str(match["id"]), "file": item["name"], "day": publication_day(route, match)}
                     continue
                 if existing and existing.get("status") != "ready":
                     report.append(f"HELD: {item['name']} {p} has an uncertain previous intent.")
