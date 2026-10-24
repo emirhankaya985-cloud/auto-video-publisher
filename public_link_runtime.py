@@ -187,7 +187,7 @@ def timestamp(row):
 def exact_txt_coverage(files):
     """Audit exact case-sensitive MP4/TXT stem pairs (the publish-time rule)."""
     videos = {name[:-4] for name in files if name.lower().endswith(".mp4")}
-    txts = {name[:-4] for name in files if name.lower().endswith(".txt")}
+    txts = {name[:-4] for name in files if name.endswith(".txt")}
     missing = sorted(videos - txts)
     return {"mp4": len(videos), "matched": len(videos) - len(missing),
             "missing": len(missing), "missing_examples": missing[:12]}
