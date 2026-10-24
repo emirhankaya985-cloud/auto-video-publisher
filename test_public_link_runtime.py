@@ -85,6 +85,20 @@ class LinkRuntimeSafety(unittest.TestCase):
             self.assertEqual(runtime.target_count("toonzone", datetime(2026, 10, 24, 7, tzinfo=runtime.TR)), 0)
             self.assertEqual(runtime.target_count("toonzone", datetime(2026, 10, 24, 12, 20, tzinfo=runtime.TR)), 3)
 
+    def test_toonzone_cover_audit_requires_exact_part_png(self):
+        videos = {
+            "s03_e01_part1.mp4": {"id": "a"},
+            "s03_e01_part2.mp4": {"id": "b"},
+            "notes.txt": {"id": "c"},
+        }
+        covers = {"s03_e01_part1.png": {"id": "cover-1"},
+                  "s03_e02_part2.png": {"id": "other-episode"}}
+        self.assertEqual(runtime.toonzone_cover_coverage(videos, covers), (1, 1))
+
+    def test_toonzone_cover_audit_ignores_non_mp4_sources(self):
+        self.assertEqual(runtime.toonzone_cover_coverage(
+            {"s03_e01_part1.txt": {}, "image.jpg": {}}, {}), (0, 0))
+
     def test_instagram_history_counts_videos_not_photos(self):
         response = Mock(status_code=200)
         response.json.return_value = {"data": [
