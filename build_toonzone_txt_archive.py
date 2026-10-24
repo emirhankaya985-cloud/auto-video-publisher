@@ -7,7 +7,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from public_link_runtime import FOLDERS, exact_txt_coverage, generate_toonzone_txts, inventory, toonzone_cover_coverage
+from public_link_runtime import FOLDERS, exact_txt_coverage, generate_toonzone_txts, generate_daily_laugh_txts, inventory, toonzone_cover_coverage
 
 
 def main():
@@ -27,6 +27,10 @@ def main():
                          for source in ("humor", "gonle", "daily_laugh", "film")}
     other_sources = {source: exact_txt_coverage(catalog)
                      for source, catalog in other_inventories.items()}
+    # Keep already present captions untouched; materialize only missing pairs.
+    daily_generated, daily_invalid = generate_daily_laugh_txts(
+        other_inventories["daily_laugh"], dest / "daily_laugh_missing_txt"
+    )
     daily_catalog = other_inventories["daily_laugh"]
     daily_txt_names = sorted(n for n in daily_catalog if n.lower().endswith(".txt"))
     daily_video_names = sorted(n for n in daily_catalog if n.lower().endswith(".mp4"))
@@ -44,6 +48,8 @@ def main():
         "cover_filenames": cover_filenames,
         "missing_cover_video_examples": missing_cover_videos[:24],
         "other_account_exact_txt_coverage": other_sources,
+        "daily_laugh_missing_txt_generated": daily_generated,
+        "daily_laugh_invalid_mp4_names": daily_invalid,
         "destination": "GitHub Actions artifact; Drive is read-only",
         "content_rule": "40 original brief Turkish story hooks checked against IMDb season 1-2 episode listings; per-part tags, no invented clip-specific scenes",
         "episode_sources": [
@@ -54,7 +60,7 @@ def main():
     dest.mkdir(exist_ok=True)
     (dest / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(manifest, ensure_ascii=False), flush=True)
-    if not expected or generated + invalid != expected or invalid:
+    if not expected or generated + invalid != expected or invalid or daily_invalid or daily_generated != other_sources["daily_laugh"]["missing"]:
         # Keep output for forensic audit, but never report incomplete TXT coverage as green.
         raise SystemExit("ToonZone TXT generation incomplete (invalid MP4 filenames).")
 
