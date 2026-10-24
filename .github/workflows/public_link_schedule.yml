@@ -113,13 +113,15 @@ jobs:
           path: link-runtime/incidents.json
           if-no-files-found: warn
           retention-days: 90
-      - name: Telegram confirmed publication and error summary (no uploads)
-        # A failed Telegram push must not reclassify or retry a Meta publication.
+      - name: Per-post Telegram and ntfy notifications plus failure alerts (no uploads)
+        # A failed notification must never retry or reclassify a Meta publication.
         if: ${{ always() && (github.event_name == 'schedule' || inputs.mode == 'publish') }}
         continue-on-error: true
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          NTFY_TOPIC_URL: ${{ secrets.NTFY_TOPIC_URL }}
           VERIFY_STEP_OUTCOME: ${{ steps.verify.outcome }}
           PLAN_STEP_OUTCOME: ${{ steps.plan.outcome }}
           PUBLISH_STEP_OUTCOME: ${{ steps.publish.outcome }}
