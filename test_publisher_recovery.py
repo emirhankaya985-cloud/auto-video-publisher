@@ -3,7 +3,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-from publisher_recovery import classify_meta_failure, read_with_retry
+from publisher_recovery import classify_meta_failure, read_with_retry, known_pre_publish_media_rejection
 
 
 class RecoveryPolicyTests(unittest.TestCase):
@@ -61,6 +61,23 @@ class RecoveryPolicyTests(unittest.TestCase):
                 self.assertEqual(result["reason"], expected)
                 self.assertFalse(result["safe_to_repost"])
                 self.assertEqual(result["post_write_action"], "reconcile_with_remote_history_before_any_retry")
+
+    def test_only_known_pre_publish_ig400_gets_one_alternate_encoding(self):
+        error = SimpleNamespace(stage="Instagram ikili video aktarımı",
+                                http_status=400, code=100)
+        self.assertTrue(known_pre_publish_media_rejection(error, "daily_laugh", 0))
+        self.assertTrue(known_pre_publish_media_rejection(error, "penguen", 0))
+        self.assertFalse(known_pre_publish_media_rejection(error, "daily_laugh", 1))
+        self.assertFalse(known_pre_publish_media_rejection(error, "film", 0))
+        self.assertFalse(known_pre_publish_media_rejection(error, "toonzone", 0))
+
+    def test_ig_media_publish_or_unknown_transport_is_never_auto_retried(self):
+        for stage in ("Instagram media_publish", "Instagram gönderi permalink doğrulama", "unknown"):
+            error = SimpleNamespace(stage=stage, http_status=400, code=100)
+            self.assertFalse(known_pre_publish_media_rejection(error, "penguen", 0))
+        self.assertFalse(known_pre_publish_media_rejection(
+            SimpleNamespace(stage="Instagram ikili video aktarımı", http_status=403, code=190),
+            "penguen", 0))
 
     def test_unknown_transport_failure_remains_uncertain(self):
         result = classify_meta_failure(TimeoutError())
