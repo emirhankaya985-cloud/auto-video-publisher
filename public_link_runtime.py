@@ -635,22 +635,49 @@ def publish():
                     state["entries"][f"{item['route']}:{platform}:{item['id']}"]["status"] = "ready"
                 save(STATE, state)
                 continue
+            # Instagram transcoding is local preparation, not a Meta API
+            # upload. If it fails, mark only Instagram ready to try the next
+            # safe scheduled run. Facebook can still publish independently.
+            prepared_ig = None
+            if "instagram" in item["platforms"]:
+                try:
+                    prepared_ig = prepare_instagram_upload(
+                        video, temp / "instagram.mp4", prefer_remux=True,
+                        film_compact=item["route"] in {"film", "film_second", "gonle"},
+                        toonzone_compact=item["route"] == "toonzone",
+                    )
+                except Exception as exc:
+                    key = f"{item['route']}:instagram:{item['id']}"
+                    state["entries"][key].update(
+                        status="ready", failure={"reason": "media_preparation_failed",
+                                                 "error_type": type(exc).__name__,
+                                                 "safe_to_repost": True},
+                    )
+                    failures.append(item["page"] + " instagram: local media preparation "
+                                    + type(exc).__name__ + " (no Meta upload attempted)")
+                    save(STATE, state)
             for platform in item["platforms"]:
+                if platform == "instagram" and prepared_ig is None:
+                    continue
                 key = f"{item['route']}:{platform}:{item['id']}"
                 try:
                     if platform == "facebook":
                         post = upload_facebook_reel(page, str(video), item["captions"][platform])
                     else:
-                        prepared = prepare_instagram_upload(video, temp / "instagram.mp4", prefer_remux=True,
-                            film_compact=item["route"] in {"film", "film_second", "gonle"},
-                            toonzone_compact=item["route"] == "toonzone")
-                        post = upload_instagram_reel(page, str(prepared), item["captions"][platform], append_store_link=False)
+                        post = upload_instagram_reel(
+                            page, str(prepared_ig), item["captions"][platform],
+                            append_store_link=False,
+                        )
                     if not post:
                         raise RuntimeError("Publication has no post ID")
                     state["entries"][key].update(status="done", post_id=str(post))
                     print(json.dumps({"page": item["page"], "file": item["name"], "platform": platform, "post_id": str(post)}, ensure_ascii=False), flush=True)
                 except Exception as exc:
-                    state["entries"][key]["status"] = "uncertain"
+                    # Never blindly repeat a Meta POST, including HTTP 400.
+                    # A rejected API request and a timed-out *accepted* upload
+                    # are indistinguishable without remote reconciliation.
+                    diagnostic = classify_meta_failure(exc)
+                    state["entries"][key].update(status="uncertain", failure=diagnostic)
                     safe = str(exc) if isinstance(exc, MetaAPIError) else type(exc).__name__
                     failures.append(item["page"] + " " + platform + ": " + safe)
                 finally:
