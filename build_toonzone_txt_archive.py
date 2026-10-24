@@ -17,6 +17,12 @@ def main():
     generated, invalid = generate_toonzone_txts(files, dest)
     expected = sum(name.lower().endswith(".mp4") for name in files)
     covered, uncovered = toonzone_cover_coverage(files, covers)
+    # The owner's canonical cover folder ID is already FOLDERS["covers"].
+    # Audit actual filenames before assuming unpaired videos have no art.
+    cover_filenames = sorted(name for name in covers if name.lower().endswith((".png", ".jpg", ".jpeg", ".webp")))
+    video_names = sorted(name for name in files if name.lower().endswith(".mp4"))
+    missing_cover_videos = [name for name in video_names
+                            if Path(name).stem + ".png" not in covers]
     other_inventories = {source: inventory(FOLDERS[source])
                          for source in ("humor", "gonle", "daily_laugh", "film")}
     other_sources = {source: exact_txt_coverage(catalog)
@@ -34,6 +40,9 @@ def main():
         "invalid_video_names": invalid,
         "exact_png_covers": covered,
         "missing_exact_png_covers": uncovered,
+        "cover_folder_id": FOLDERS["covers"],
+        "cover_filenames": cover_filenames,
+        "missing_cover_video_examples": missing_cover_videos[:24],
         "other_account_exact_txt_coverage": other_sources,
         "destination": "GitHub Actions artifact; Drive is read-only",
         "content_rule": "40 original brief Turkish story hooks checked against IMDb season 1-2 episode listings; per-part tags, no invented clip-specific scenes",
