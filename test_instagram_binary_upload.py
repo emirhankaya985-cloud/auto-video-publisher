@@ -180,7 +180,7 @@ class InstagramBinaryUploadTests(unittest.TestCase):
              patch("cloud_omnichannel_publisher.requests.post") as post, \
              patch("cloud_omnichannel_publisher.requests.get") as get:
             post.side_effect = [
-                Mock(ok=False, status_code=400,
+                Mock(ok=False, status_code=400, headers={}, text="",
                      json=lambda: {"error": {"message": "Invalid parameter user_tags", "code": 100}}),
                 Mock(ok=True, status_code=200,
                      json=lambda: {"id": "safe-container", "uri": "https://rupload.facebook.com/1"}),
@@ -207,7 +207,7 @@ class InstagramBinaryUploadTests(unittest.TestCase):
              patch("cloud_omnichannel_publisher.requests.post") as post, \
              patch("cloud_omnichannel_publisher._upload_instagram_binary") as binary:
             post.return_value = Mock(
-                ok=False, status_code=400,
+                ok=False, status_code=400, headers={}, text="",
                 json=lambda: {"error": {"message": "Invalid video metadata", "code": 100}},
             )
             with self.assertRaises(MetaAPIError):
