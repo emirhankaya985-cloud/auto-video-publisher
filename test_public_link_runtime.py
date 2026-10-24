@@ -85,6 +85,31 @@ class LinkRuntimeSafety(unittest.TestCase):
             self.assertEqual(runtime.target_count("toonzone", datetime(2026, 10, 24, 7, tzinfo=runtime.TR)), 0)
             self.assertEqual(runtime.target_count("toonzone", datetime(2026, 10, 24, 12, 20, tzinfo=runtime.TR)), 3)
 
+    def test_zero_due_target_is_reported_as_not_due_not_complete(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            state = {"schema": 1, "entries": {}, "episode_days": {}}
+            with patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(root / "summary.md"),
+                                         "GITHUB_RUN_ID": "123"}), \
+                    patch.object(runtime, "ROOT", root), \
+                    patch.object(runtime, "STATE", root / "state.json"), \
+                    patch.object(runtime, "PLAN", root / "plan.json"), \
+                    patch.object(runtime, "FOLDERS", {"toonzone": "folder", "covers": "covers"}), \
+                    patch.object(runtime, "ROUTES", {"toonzone": ("toonzone", "ToonZone")}), \
+                    patch.object(runtime, "restore", return_value=state), \
+                    patch.object(runtime, "load_meta_auth",
+                                 return_value={"pages": [{"page_name": "ToonZone"}]}), \
+                    patch.object(runtime, "inventory", return_value={}), \
+                    patch.object(runtime, "graph_rows", return_value=[]), \
+                    patch.object(runtime, "target_count", return_value=0), \
+                    patch.object(runtime, "copies") as captions:
+                runtime.plan()
+            report = (root / "report.md").read_text(encoding="utf-8")
+            self.assertIn("NOT DUE", report)
+            self.assertNotIn("Daily target already complete.", report)
+            captions.assert_not_called()
+            self.assertEqual(json.loads((root / "plan.json").read_text()), [])
+
     def test_toonzone_cover_audit_requires_exact_part_png(self):
         videos = {
             "s03_e01_part1.mp4": {"id": "a"},
