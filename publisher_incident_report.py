@@ -1,0 +1,88 @@
+"""Tamper-resistant-ish, credential-free incident summary for each publisher run.
+
+The source of truth is the persisted publication ledger, not CI green badges.
+Output is an artifact, not an extra publishing action.
+"""
+import json
+import os
+from collections import Counter
+from datetime import datetime, timezone
+from pathlib import Path
+
+ROOT = Path("link-runtime")
+_SAFE_REASONS = {
+    "source_or_cover_preparation_failed", "media_preparation_failed",
+    "credentials_or_permissions", "rate_limit", "meta_server_or_network",
+    "invalid_media_or_graph_request", "unclassified_upload_result",
+}
+_SAFE_STATUSES = {"done", "ready", "uncertain", "intent"}
+
+
+def build_incident_report(state, run_id, *, plan_text=""):
+    if not str(run_id).isdigit():
+        raise ValueError("GitHub run ID invalid")
+    if not isinstance(state, dict) or not isinstance(state.get("entries"), dict):
+        raise ValueError("Publication ledger invalid")
+    counts, incidents = Counter(), []
+    for key, row in state["entries"].items():
+        if not isinstance(row, dict) or str(row.get("run_id", "")) != run_id:
+            continue
+        status = row.get("status")
+        if status not in _SAFE_STATUSES:
+            raise ValueError("Unknown ledger status")
+        counts[status] += 1
+        detail = row.get("failure")
+        if not isinstance(detail, dict):
+            continue
+        reason = detail.get("reason")
+        reason = reason if reason in _SAFE_REASONS else "unknown"
+        # Deliberately avoid raw Meta error messages, OAuth values and URLs.
+        incident = {"route": str(row.get("route", ""))[:45],
+                    "platform": row.get("platform") if row.get("platform") in ("facebook", "instagram") else "unknown",
+                    "status": status, "reason": reason,
+                    "action": "remote_reconciliation_required" if status in ("intent", "uncertain") else
+                              "safe_to_reprepare_next_tick"}
+        for field in ("http_status", "graph_code", "graph_subcode"):
+            value = detail.get(field)
+            if type(value) is int and 0 <= value <= 99999999:
+                incident[field] = value
+        incidents.append(incident)
+    markers = {
+        "missing_drive_folder": "HELD source ",
+        "txt_or_caption_blocked": "HELD TXT/caption:",
+        "toonzone_exact_cover_missing": "HELD: exact ToonZone cover missing.",
+        "disabled_route": "HELD: existing route/rights switch is disabled.",
+        "meta_history_blocked": "HELD: Meta geçmişi",
+    }
+    blockers = {name: sum(line.startswith(marker) for line in plan_text.splitlines())
+                for name, marker in markers.items()}
+    return {
+        "schema": 1, "run_id": run_id,
+        "created_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "confirmed_new_posts": counts["done"],
+        "safe_pre_upload_retries": counts["ready"],
+        "uncertain_pending_reconciliation": counts["intent"] + counts["uncertain"],
+        "incidents": incidents, "planning_blocker_counts": blockers,
+        "message": "No automatic Meta POST retries. Confirm remote history before reattempting an ambiguous upload.",
+    }
+
+
+def main():
+    run_id = os.environ.get("GITHUB_RUN_ID", "")
+    state_path = ROOT / "state.json"
+    if state_path.is_file():
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    else:
+        state = {"entries": {}}
+    report_path = ROOT / "report.md"
+    plan_text = report_path.read_text(encoding="utf-8") if report_path.is_file() else ""
+    summary = build_incident_report(state, run_id, plan_text=plan_text)
+    ROOT.mkdir(parents=True, exist_ok=True)
+    (ROOT / "incidents.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps({key: summary[key] for key in ("run_id", "confirmed_new_posts",
+                      "safe_pre_upload_retries", "uncertain_pending_reconciliation",
+                      "planning_blocker_counts")}, ensure_ascii=False), flush=True)
+
+
+if __name__ == "__main__":
+    main()
