@@ -11,6 +11,7 @@ from collections import Counter
 from pathlib import Path
 
 from telegram_notifications import send_telegram, telegram_configured
+from ntfy_notifications import send_ntfy
 
 STATE_PATH = Path("link-runtime/state.json")
 ALLOWED_STEP_RESULTS = {"success", "failure", "skipped", "cancelled", ""}
@@ -62,45 +63,122 @@ def publication_summary(state, run_id, *, verify_outcome="success", plan_outcome
     return "\n".join(lines), "alert" if failed or unknown else "published"
 
 
+ROUTE_LABELS = {
+    "tarladaki": "🌱 Tarladaki Fasulye",
+    "penguen": "🐧 Beyinsiz Penguen",
+    "gonle": "❤️ Gönle Düşen",
+    "daily_laugh": "😂 Daily Laugh Lab",
+    "film": "🎬 Film Mağarası",
+    "film_second": "🎞️ Filmmagrasi",
+    "toonzone": "📺 ToonZone",
+}
+PLATFORM_LABELS = {"facebook": "Facebook", "instagram": "Instagram"}
+
+
+def confirmed_posts(state, run_id):
+    """Only actual post IDs created and recorded by this GitHub Actions run."""
+    if not isinstance(state, dict) or not isinstance(state.get("entries"), dict):
+        raise ValueError("invalid publication state")
+    if not isinstance(run_id, str) or not run_id.isdigit():
+        raise ValueError("invalid run ID")
+    return [row for row in state["entries"].values()
+            if isinstance(row, dict) and row.get("status") == "done"
+            and str(row.get("run_id", "")) == run_id
+            and str(row.get("post_id", "")).strip()
+            and row.get("route") in ROUTE_LABELS
+            and row.get("platform") in PLATFORM_LABELS]
+
+
+def post_message(row, run_id):
+    """Individual per-platform result; does not invent a permalink."""
+    route, platform = row["route"], row["platform"]
+    def safe(value, limit=96):
+        return str(value or "").replace("\n", " ").replace("\r", " ").strip()[:limit]
+    title = f"✅ {PLATFORM_LABELS[platform]} video yayınlandı"
+    body = (f"📣 Hesap: {ROUTE_LABELS[route]}\n"
+            f"📱 Platform: {PLATFORM_LABELS[platform]}\n"
+            f"🎬 Video: {safe(Path(str(row.get('file') or 'Video')).name)}\n"
+            f"✅ Durum: Başarılı\n"
+            f"🆔 Gönderi ID: {safe(row['post_id'])}\n"
+            f"🔎 https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/{run_id}")
+    return title, body
+
+
 def main():
-    # A workflow without configured secrets should keep publishing unaffected.
-    if not telegram_configured():
-        print('{"status":"telegram_not_configured"}', flush=True)
-        return 0
     run_id = os.getenv("GITHUB_RUN_ID", "")
     plan_outcome = os.getenv("PLAN_STEP_OUTCOME", "")
     publish_outcome = os.getenv("PUBLISH_STEP_OUTCOME", "")
     verify_outcome = os.getenv("VERIFY_STEP_OUTCOME", "")
     if plan_outcome == "skipped" and publish_outcome == "skipped" and verify_outcome != "failure":
         return 0
-    state = {"entries": {}}
-    if STATE_PATH.is_file():
-        try:
-            state = json.loads(STATE_PATH.read_text(encoding="utf-8"))
-        except (ValueError, OSError):
-            print('{"status":"telegram_report_invalid_state"}', flush=True)
-            return 1
-    message, category = publication_summary(
-        state, run_id, verify_outcome=verify_outcome, plan_outcome=plan_outcome, publish_outcome=publish_outcome
-    )
-    if not message:
-        print(json.dumps({"status": category, "message_sent": False}), flush=True)
-        return 0 if category == "nothing_to_report" else 1
-    try:
-        response = send_telegram(
-            "Meta publisher", message,
-        )
-        print(json.dumps({"status": "telegram_server_acknowledged",
-                          "type": category,
-                          "server_ack": response["server_ack"],
-                          "phone_delivery_verified": False}), flush=True)
+
+    telegram_on = telegram_configured()
+    ntfy_on = bool(os.getenv("NTFY_TOPIC_URL", "").strip() or os.getenv("NTFY_TOPIC", "").strip())
+    if not telegram_on and not ntfy_on:
+        print('{"status":"notifications_not_configured"}', flush=True)
         return 0
-    except Exception as exc:
-        # Never print sensitive bot-token, chat ID, or response text.
-        print(json.dumps({"status": "telegram_notification_failed",
+    try:
+        state = {"entries": {}}
+        if STATE_PATH.is_file():
+            state = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+        message, category = publication_summary(
+            state, run_id, verify_outcome=verify_outcome,
+            plan_outcome=plan_outcome, publish_outcome=publish_outcome,
+        )
+        if category in {"invalid_run_id", "invalid_state", "invalid_step_outcome"}:
+            raise ValueError(category)
+        posts = confirmed_posts(state, run_id)
+    except (ValueError, OSError, TypeError) as exc:
+        print(json.dumps({"status": "notification_report_invalid_state",
                           "error_type": type(exc).__name__}), flush=True)
         return 1
 
+    if not message:
+        print('{"status":"no_posts_or_errors","messages_sent":0}', flush=True)
+        return 0
+
+    events = [post_message(row, run_id) for row in posts]
+    if category == "alert":
+        events.append(("🚨 Meta yayın uyarısı", message))
+    run_url = f"https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/{run_id}"
+    acknowledged = {"telegram": 0, "ntfy": 0}
+    failures = 0
+    for title, body in events:
+        if telegram_on:
+            try:
+                result = send_telegram(title, body)
+                if result["server_ack"] is not True:
+                    raise RuntimeError("telegram acknowledgment missing")
+                acknowledged["telegram"] += 1
+            except Exception as exc:
+                failures += 1
+                # Do not log credential-bearing provider error text.
+                print(json.dumps({"status": "telegram_notification_failed",
+                                  "error_type": type(exc).__name__}), flush=True)
+        if ntfy_on:
+            try:
+                result = send_ntfy(
+                    title, body, priority=4 if title.startswith("🚨") else 3,
+                    tags=["warning"] if title.startswith("🚨") else ["white_check_mark"],
+                    click=run_url, timeout=20, require_ack=True,
+                )
+                if result["server_ack"] is not True:
+                    raise RuntimeError("ntfy acknowledgment missing")
+                acknowledged["ntfy"] += 1
+            except Exception as exc:
+                failures += 1
+                print(json.dumps({"status": "ntfy_notification_failed",
+                                  "error_type": type(exc).__name__}), flush=True)
+    print(json.dumps({
+        "status": "completed" if not failures else "partial_notification_failure",
+        "confirmed_posts": len(posts),
+        "alert": category == "alert",
+        "telegram_server_acks": acknowledged["telegram"],
+        "ntfy_server_acks": acknowledged["ntfy"],
+        "delivery_failures": failures,
+        "phone_delivery_verified": False,
+    }, ensure_ascii=False), flush=True)
+    return 1 if failures else 0
 
 if __name__ == "__main__":
     sys.exit(main())
