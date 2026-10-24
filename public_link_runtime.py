@@ -26,7 +26,7 @@ from cloud_omnichannel_publisher import (
 )
 from instagram_media_compat import prepare_instagram_upload
 from meta_auth_loader import load_meta_auth
-from ordered_channels import parse_order, toonzone_metadata
+from ordered_channels import TOONZONE_ETSY_LINK, parse_order, toonzone_metadata
 from publication_safety import route_paused
 from scheduled_multi_publisher import (
     platform_content_from_txt, TARLADAKI_HOURS, PENGUEN_HOURS,
@@ -196,7 +196,6 @@ def exact_txt_coverage(files):
 def toonzone_txt_text(stem):
     """Publish a short sourced Turkish episode plot, season/part and hashtags."""
     from toonzone_episode_summaries import episode_summary
-    from ordered_channels import TOONZONE_ETSY_LINK
 
     metadata = toonzone_metadata(stem)
     season = metadata["season"]
