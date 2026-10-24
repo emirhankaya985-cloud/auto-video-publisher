@@ -65,18 +65,57 @@ class LinkRuntimeSafety(unittest.TestCase):
             self.assertEqual(origin, "matching-txt")
             self.assertEqual(result["instagram"], "IG from TXT")
 
-    def test_missing_txt_uses_filename_caption(self):
+    def test_missing_txt_blocks_ordinary_routes(self):
         with tempfile.TemporaryDirectory() as tmp:
-            result, origin = runtime.copies("gonle", {"name": "1.mp4"}, {}, Path(tmp))
-            self.assertEqual(origin, "filename-no-txt")
-            self.assertIn("Gönle Düşen · 1", result["facebook"])
+            for route in ("gonle", "film", "tarladaki", "penguen", "daily_laugh", "film_second"):
+                with self.subTest(route=route), self.assertRaisesRegex(RuntimeError, "TXT bulunamadı"):
+                    runtime.copies(route, {"name": "1.mp4"}, {}, Path(tmp))
 
-    def test_unreadable_txt_uses_fallback(self):
+    def test_unreadable_txt_blocks_ordinary_routes(self):
         with tempfile.TemporaryDirectory() as tmp:
             with patch.object(runtime, "download", side_effect=Exception("Drive limit")):
-                result, origin = runtime.copies("gonle", {"name": "2.mp4"}, {"2.txt": {"id": "txt"}}, Path(tmp))
-            self.assertEqual(origin, "filename-no-txt")
-            self.assertIn("2", result["instagram"])
+                with self.assertRaisesRegex(RuntimeError, "TXT indirilemedi"):
+                    runtime.copies("gonle", {"name": "2.mp4"}, {"2.txt": {"id": "txt"}}, Path(tmp))
+
+    def test_empty_txt_blocks_ordinary_routes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "empty.txt"
+            dest.write_text("   ", encoding="utf-8")
+            with patch.object(runtime, "download", return_value=dest):
+                with self.assertRaisesRegex(RuntimeError, "TXT boş"):
+                    runtime.copies("film", {"name": "2.mp4"}, {"2.txt": {"id": "txt"}}, Path(tmp))
+
+    def test_toonzone_txts_generated_for_each_video_and_used(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            catalog = {
+                "S03E01_Deneme_Part_1.mp4": {"id": "a"},
+                "S03E01_Deneme_Part_2.mp4": {"id": "b"},
+                "readme.txt": {"id": "text"},
+                "bad-file.mp4": {"id": "bad"},
+            }
+            def metadata(stem):
+                if not stem.startswith("S03E01_"):
+                    raise ValueError("invalid filename")
+                part = stem.rsplit("_", 1)[-1]
+                return {"title": f"Deneme Part {part}", "description": f"Sezon 3 Bölüm 1 — Part {part}"}
+            with patch.object(runtime, "toonzone_metadata", side_effect=metadata), \
+                    patch.object(runtime, "ROOT", root):
+                generated, invalid = runtime.generate_toonzone_txts(catalog, root / "toonzone_txt")
+                self.assertEqual((generated, invalid), (2, 1))
+                self.assertEqual(len(list((root / "toonzone_txt").glob("*.txt"))), 2)
+                captions, origin = runtime.copies("toonzone", {"name": "S03E01_Deneme_Part_2.mp4"}, {}, root)
+                self.assertEqual(origin, "generated-toonzone-txt")
+                self.assertIn("Part 2", captions["instagram"])
+                self.assertNotIn("Part 1", captions["instagram"])
+
+    def test_toonzone_generated_txt_is_deterministic_and_no_txt_is_required(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(runtime, "ROOT", Path(tmp)):
+                captions, origin = runtime.copies("toonzone", {"name": "S03E01_Deneme_Part_3.mp4"}, {}, Path(tmp))
+            self.assertEqual(origin, "generated-toonzone-txt")
+            self.assertIn("Part 2", captions["facebook"])  # metadata mock
+            self.assertEqual(captions["facebook"], captions["instagram"])
 
     def test_schedule_remains_five_film_slots_after_catchup_date(self):
         with patch.dict(os.environ, {"COMPLETE_DAY_DATE": "2026-10-23"}):
