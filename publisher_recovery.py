@@ -65,3 +65,22 @@ def confirmed_media_error_is_pre_publish(exc):
     Never infer no-write based on an HTTP 400 from an Instagram/FB endpoint.
     """
     return False
+
+def known_pre_publish_media_rejection(exc, route, previous_retries=0):
+    """Authorize one stricter *new preparation*, not a blind Meta repost.
+
+    Binary-upload and processing errors in upload_instagram_reel() are raised
+    before it ever executes media_publish. Only ordinary noncompact routes
+    have a different safe encoding to attempt. A failed media_publish or
+    timeout may have published, so they NEVER qualify.
+    """
+    return bool(
+        route in {"tarladaki", "penguen", "daily_laugh"}
+        and previous_retries == 0
+        and getattr(exc, "stage", None) in {
+            "Instagram ikili video aktarımı",
+            "Instagram video işleme durumu",
+        }
+        and getattr(exc, "http_status", None) == 400
+        and getattr(exc, "code", None) in (None, 100)
+    )
