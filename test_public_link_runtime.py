@@ -61,6 +61,50 @@ runtime = load_runtime()
 
 
 class LinkRuntimeSafety(unittest.TestCase):
+    def test_drive_download_retries_transient_url_error_and_removes_partial(self):
+        with tempfile.TemporaryDirectory() as d:
+            dest = Path(d) / "video.mp4"
+            tries = []
+
+            def fake_drive(**kwargs):
+                tries.append(1)
+                if len(tries) == 1:
+                    dest.write_bytes(b"incomplete")
+                    raise RuntimeError("FileURLRetrievalError https://secret.private/link")
+                self.assertFalse(dest.exists())
+                dest.write_bytes(b"good mp4 data")
+                return str(dest)
+
+            with patch.object(runtime.gdown, "download", create=True, side_effect=fake_drive), \
+                    patch.object(runtime.time, "sleep") as sleeping:
+                self.assertEqual(runtime.download("id", dest), dest)
+            self.assertEqual(dest.read_bytes(), b"good mp4 data")
+            self.assertEqual(len(tries), 2)
+            sleeping.assert_called_once_with(1)
+
+    def test_drive_download_does_not_accept_partial_or_empty_files(self):
+        with tempfile.TemporaryDirectory() as d:
+            dest = Path(d) / "video.mp4"
+            def always_partial(**kwargs):
+                dest.write_bytes(b"partial")
+                raise ValueError("sensitive Drive URL not for logs")
+            with patch.object(runtime.gdown, "download", create=True, side_effect=always_partial), \
+                    patch.object(runtime.time, "sleep") as sleeping:
+                with self.assertRaisesRegex(RuntimeError, "3 denemede") as caught:
+                    runtime.download("id", dest)
+            self.assertFalse(dest.exists())
+            self.assertNotIn("sensitive Drive URL", str(caught.exception))
+            self.assertEqual(sleeping.call_count, 2)
+
+    def test_drive_download_retries_missing_output_even_if_provider_returns_path(self):
+        with tempfile.TemporaryDirectory() as d:
+            dest = Path(d) / "video.mp4"
+            with patch.object(runtime.gdown, "download", create=True, return_value=str(dest)) as fetch, \
+                    patch.object(runtime.time, "sleep"):
+                with self.assertRaises(RuntimeError):
+                    runtime.download("id", dest)
+            self.assertEqual(fetch.call_count, 3)
+
     def test_caption_dedupe_ignores_store_suffix_and_spacing(self):
         self.assertEqual(runtime.caption_key("A  video\nEtsy: https://www.etsy.com/shop/x"), runtime.caption_key("A video"))
         self.assertNotEqual(runtime.caption_key("Part 2"), runtime.caption_key("Part 3"))
