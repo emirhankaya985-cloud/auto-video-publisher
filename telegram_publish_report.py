@@ -12,6 +12,7 @@ from pathlib import Path
 
 from telegram_notifications import send_telegram, telegram_configured
 from ntfy_notifications import send_ntfy
+from publisher_error_journal import read_errors, record_error
 
 STATE_PATH = Path("link-runtime/state.json")
 ALLOWED_STEP_RESULTS = {"success", "failure", "skipped", "cancelled", ""}
@@ -128,22 +129,42 @@ def main():
         if category in {"invalid_run_id", "invalid_state", "invalid_step_outcome"}:
             raise ValueError(category)
         posts = confirmed_posts(state, run_id)
+        events = read_errors(run_id=run_id)
     except (ValueError, OSError, TypeError) as exc:
         print(json.dumps({"status": "notification_report_invalid_state",
                           "error_type": type(exc).__name__}), flush=True)
         return 1
 
-    if not message:
+    if not message and not events:
         print('{"status":"no_posts_or_errors","messages_sent":0}', flush=True)
         return 0
 
-    events = [post_message(row, run_id) for row in posts]
-    if category == "alert":
-        events.append(("🚨 Meta yayın uyarısı", message))
+    messages = [post_message(row, run_id) for row in posts]
+    if category == "alert" or events:
+        # One actionable warning per run; every sanitized event stays intact
+        # in the error-journal and 90-day artifact, even if the alert is short.
+        details = []
+        for entry in events[:8]:
+            part = (f"• {entry.get('route') or '?'} / {entry.get('platform') or '?'}"
+                    f" / {entry.get('video') or '-'}"
+                    f" — {entry.get('stage')}: {entry.get('reason')}")
+            if "http_status" in entry:
+                part += f" (HTTP {entry['http_status']})"
+            if "graph_code" in entry:
+                part += f" [Graph {entry['graph_code']}]"
+            details.append(part)
+        if len(events) > 8:
+            details.append(f"• Diğer {len(events) - 8} olayın tamamı GitHub error journal'da.")
+        title = "🚨 Meta yayın uyarısı"
+        warning = (message if category == "alert" else
+                   f"🚨 Yayın iş akışında engel veya hata kaydedildi.\nGitHub çalışma: {run_id}")
+        warning += ("\n🧩 Kaydedilen hata/engel: " + str(len(events)) +
+                    "\n" + "\n".join(details)) if events else ""
+        messages.append((title, warning))
     run_url = f"https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/{run_id}"
     acknowledged = {"telegram": 0, "ntfy": 0}
     failures = 0
-    for title, body in events:
+    for title, body in messages:
         if telegram_on:
             try:
                 result = send_telegram(title, body)
@@ -153,6 +174,8 @@ def main():
             except Exception as exc:
                 failures += 1
                 # Do not log credential-bearing provider error text.
+                record_error("telegram_notification", "notification_delivery_failed",
+                             error=exc)
                 print(json.dumps({"status": "telegram_notification_failed",
                                   "error_type": type(exc).__name__}), flush=True)
         if ntfy_on:
@@ -167,12 +190,15 @@ def main():
                 acknowledged["ntfy"] += 1
             except Exception as exc:
                 failures += 1
+                record_error("ntfy_notification", "notification_delivery_failed",
+                             error=exc)
                 print(json.dumps({"status": "ntfy_notification_failed",
                                   "error_type": type(exc).__name__}), flush=True)
     print(json.dumps({
         "status": "completed" if not failures else "partial_notification_failure",
         "confirmed_posts": len(posts),
-        "alert": category == "alert",
+        "alert": category == "alert" or bool(events),
+        "recorded_errors": len(events),
         "telegram_server_acks": acknowledged["telegram"],
         "ntfy_server_acks": acknowledged["ntfy"],
         "delivery_failures": failures,
