@@ -408,6 +408,47 @@ class LinkRuntimeSafety(unittest.TestCase):
             facebook.assert_called_once()
             instagram.assert_not_called()
 
+    def test_known_ig_binary_400_queues_only_one_strict_profile_retry(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            state_path, plan_path = root / "state.json", root / "plan.json"
+            runtime.save(state_path, {"entries": {
+                "penguen:instagram:vid": {"status": "intent", "prepublish_retry_count": 0}
+            }})
+            runtime.save(plan_path, [{"page": "Beyinsiz Penguen", "route": "penguen",
+                "id": "vid", "name": "22.mp4", "platforms": ["instagram"],
+                "captions": {"instagram": "IG text"}}])
+            def download(_id, path):
+                path.write_bytes(b"1234ftypOK")
+                return path
+            err = runtime.MetaAPIError("HTTP 400")
+            err.http_status, err.code, err.subcode = 400, 100, 2207009
+            err.stage = "Instagram ikili video aktarımı"
+            with patch.object(runtime, "STATE", state_path), patch.object(runtime, "PLAN", plan_path), \
+                    patch.object(runtime, "download", side_effect=download), \
+                    patch.object(runtime, "load_meta_auth", return_value={"pages": [
+                        {"page_name": "Beyinsiz Penguen", "page_token": "test"}]}), \
+                    patch.object(runtime, "prepare_instagram_upload", side_effect=lambda path, *a, **kw: path) as prepare, \
+                    patch.object(runtime, "upload_instagram_reel", side_effect=err) as ig:
+                with self.assertRaises(SystemExit):
+                    runtime.publish()
+                first = json.loads(state_path.read_text())["entries"]["penguen:instagram:vid"]
+                self.assertEqual(first["status"], "ready")
+                self.assertEqual(first["prepublish_retry_count"], 1)
+                self.assertFalse(prepare.call_args.kwargs["film_compact"])
+                ig.assert_called_once()
+                state = json.loads(state_path.read_text())
+                state["entries"]["penguen:instagram:vid"]["status"] = "intent"
+                runtime.save(state_path, state)
+                ig.reset_mock(side_effect=True)
+                ig.return_value = "ig-post-confirmed"
+                runtime.publish()
+                second = json.loads(state_path.read_text())["entries"]["penguen:instagram:vid"]
+                self.assertEqual(second["status"], "done")
+                self.assertEqual(second["post_id"], "ig-post-confirmed")
+                self.assertTrue(prepare.call_args.kwargs["film_compact"])
+                self.assertEqual(ig.call_count, 1)
+
     def test_meta_http_400_is_held_uncertain_with_diagnostic(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
