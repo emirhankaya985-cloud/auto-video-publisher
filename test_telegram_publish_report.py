@@ -51,6 +51,15 @@ class TelegramPublishReportTests(unittest.TestCase):
         self.assertEqual(kind, "alert")
         self.assertIn("başarısız", message)
 
+    def test_prepublication_safety_failure_notifies_without_claiming_upload(self):
+        msg, kind = report.publication_summary(
+            {"entries": {}}, "333", verify_outcome="failure",
+            plan_outcome="skipped", publish_outcome="skipped",
+        )
+        self.assertEqual(kind, "alert")
+        self.assertIn("başarısız", msg)
+        self.assertNotIn("Yeni doğrulanan", msg)
+
     def test_unsuccessful_post_not_claimed_published(self):
         state = {"entries": {"a": {"run_id": "333", "status": "ready", "route": "film"}}}
         self.assertEqual(report.publication_summary(state, "333"), (None, "nothing_to_report"))
