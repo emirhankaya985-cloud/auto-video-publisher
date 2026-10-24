@@ -20,7 +20,9 @@ def read_with_retry(get, *args, sleep=time.sleep, **kwargs):
     for attempt in range(3):
         try:
             response = get(*args, **kwargs)
-        except Exception:
+        except OSError:
+            # requests transport failures derive from OSError/IOError. A
+            # programming bug must surface, not be silently retried.
             if attempt >= 2:
                 raise
         else:
