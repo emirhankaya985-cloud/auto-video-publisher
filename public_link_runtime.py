@@ -347,7 +347,11 @@ def plan(audit=False):
             sum(e["route"] == route and e["platform"] == p and e["status"] == "done"
                 and e.get("day") == clock.date().isoformat() for e in state["entries"].values())
         ) for p in platforms}
-        if all(counts[p] >= target_count(route, now) for p in platforms):
+        due = target_count(route, now)
+        if due == 0:
+            report.append("NOT DUE: publication hours have not started for this route's local day.")
+            continue
+        if all(counts[p] >= due for p in platforms):
             report.append("Daily target already complete.")
             continue
         files = catalogs[source]
