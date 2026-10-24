@@ -29,6 +29,7 @@ from instagram_media_compat import prepare_instagram_upload
 from meta_auth_loader import load_meta_auth
 from ordered_channels import TOONZONE_ETSY_LINK, parse_order, toonzone_metadata
 from publication_safety import route_paused
+from publisher_recovery import read_with_retry, classify_meta_failure
 from scheduled_multi_publisher import (
     platform_content_from_txt, TARLADAKI_HOURS, PENGUEN_HOURS,
     GONLE_HOURS, FILM_HOURS, daily_laugh_hours_for_date,
@@ -70,8 +71,8 @@ def caption_key(value):
 
 def github_get(path):
     repo = os.environ["GITHUB_REPOSITORY"]
-    response = requests.get(
-        f"https://api.github.com/repos/{repo}/{path}",
+    response = read_with_retry(
+        requests.get, f"https://api.github.com/repos/{repo}/{path}",
         headers={"Authorization": f"Bearer {os.environ['GH_TOKEN']}"}, timeout=30,
     )
     if response.status_code != 200:
@@ -106,8 +107,21 @@ def restore():
 
 
 def inventory(folder):
-    files = gdown.download_folder(id=folder, skip_download=True, quiet=True,
-                                 use_cookies=False, timeout=40)
+    # Drive folder metadata is a read-only operation; retry transient failures.
+    files = None
+    for attempt in range(3):
+        try:
+            files = gdown.download_folder(id=folder, skip_download=True, quiet=True,
+                                         use_cookies=False, timeout=40)
+            if files is not None:
+                break
+        except Exception:
+            if attempt == 2:
+                raise
+        if attempt < 2:
+            time.sleep(2 ** attempt)
+    if files is None:
+        raise RuntimeError("Paylaşılan Drive klasör listesi 3 denemede alınamadı")
     result, ambiguous = {}, set()
     for item in files:
         if len(Path(item.path).parts) != 1:
@@ -163,8 +177,8 @@ def graph_rows(page, platform):
     params = {"fields": fields, "limit": 100}
     rows, seen = [], set()
     for _ in range(40):
-        response = requests.get(
-            f"https://graph.facebook.com/{GRAPH_API_VERSION}/{object_id}/{edge}",
+        response = read_with_retry(
+            requests.get, f"https://graph.facebook.com/{GRAPH_API_VERSION}/{object_id}/{edge}",
             headers={"Authorization": f"Bearer {page['page_token']}"},
             params=params, timeout=30,
         )
