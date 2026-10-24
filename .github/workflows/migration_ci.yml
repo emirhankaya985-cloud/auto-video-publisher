@@ -37,6 +37,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GONLE_DUSEN_DRIVE_FOLDER_ID: ${{ secrets.GONLE_DUSEN_DRIVE_FOLDER_ID }}
           META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+          LINK_AUTOMATION_ENABLED: ${{ vars.LINK_AUTOMATION_ENABLED }}
+          AUTOMATION_ENABLED: ${{ vars.AUTOMATION_ENABLED }}
           META_APP_ID: ${{ secrets.META_APP_ID }}
           META_APP_SECRET: ${{ secrets.META_APP_SECRET }}
           META_AUTH_JSON: ${{ secrets.META_AUTH_JSON }}
@@ -58,7 +60,9 @@ jobs:
           rows = ["## 985 connection setup", "| Setting | Status |", "| --- | --- |"]
           for name in names:
               rows.append(f"| {name} | {'Configured' if os.environ.get(name) else 'Missing'} |")
-          rows.append("Production jobs require AUTOMATION_ENABLED=true. Configure credentials and route approvals before activation.")
+          rows.append(f"Meta-only publisher enabled: {os.environ.get('LINK_AUTOMATION_ENABLED') == 'true'}")
+          rows.append(f"Legacy OAuth publisher enabled: {os.environ.get('AUTOMATION_ENABLED') == 'true'}")
+          rows.append("Meta-only publication uses LINK_AUTOMATION_ENABLED and META_ACCESS_TOKEN. Disabled legacy workflows may lack optional Drive/YouTube secrets.")
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as output:
               output.write('\n'.join(rows) + '\n')
           print(f"Configured secret names: {sum(bool(os.environ.get(n)) for n in names)}/{len(names)}")
