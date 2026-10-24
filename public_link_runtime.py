@@ -194,9 +194,28 @@ def exact_txt_coverage(files):
 
 
 def toonzone_txt_text(stem):
-    """Generate metadata-grounded copy only, never invent unseen scene dialogue."""
+    """Publish a short sourced Turkish episode plot, season/part and hashtags."""
+    from toonzone_episode_summaries import episode_summary
+    from ordered_channels import TOONZONE_ETSY_LINK
+
     metadata = toonzone_metadata(stem)
-    return metadata["title"] + "\n\n" + metadata["description"]
+    season = metadata["season"]
+    episode = metadata["episode"]
+    part = metadata["part"]
+    short_plot = episode_summary(season, episode)
+    display_title = metadata["title"].split(" — Part ", 1)[0]
+    if display_title.endswith(" Tr"):
+        display_title = display_title[:-3].strip()
+    episode_tag = f"S{season:02d}E{episode:02d}"
+    return (
+        f"🎬 Regular Show | {display_title}\n"
+        f"📺 Sezon {season} • Bölüm {episode} • Part {part}/4\n\n"
+        f"📖 {short_plot}\n\n"
+        f"💬 Bu bölüm hakkındaki düşünceni yorumlara yaz!\n\n"
+        f"🛍️ Etsy: {TOONZONE_ETSY_LINK}\n\n"
+        f"#RegularShow #ToonZone #Mordecai #Rigby "
+        f"#ÇizgiFilm #CartoonNetwork #{episode_tag} #Part{part}"
+    )
 
 
 def generate_toonzone_txts(files, output_dir):
