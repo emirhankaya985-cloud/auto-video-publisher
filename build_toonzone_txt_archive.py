@@ -36,7 +36,11 @@ def main():
         "missing_exact_png_covers": uncovered,
         "other_account_exact_txt_coverage": other_sources,
         "destination": "GitHub Actions artifact; Drive is read-only",
-        "content_rule": "season, episode, part and filename title only; no invented scene details",
+        "content_rule": "40 original brief Turkish story hooks checked against IMDb season 1-2 episode listings; per-part tags, no invented clip-specific scenes",
+        "episode_sources": [
+            "https://www.imdb.com/title/tt1710308/episodes/?season=1",
+            "https://www.imdb.com/title/tt1710308/episodes/?season=2",
+        ],
     }
     dest.mkdir(exist_ok=True)
     (dest / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
