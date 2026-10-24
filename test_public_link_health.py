@@ -90,5 +90,34 @@ class PublicLinkHealthTests(unittest.TestCase):
         self.assertNotIn("my-secret-topic", output.getvalue())
 
 
+    def test_unhealthy_alerts_telegram_without_ntfy(self):
+        output = io.StringIO()
+        with patch.object(health, "check_publisher",
+                          return_value={"status": "unhealthy", "reason": "no_recent_success"}), \
+                patch.object(health, "telegram_configured", return_value=True), \
+                patch.object(health, "send_telegram",
+                             return_value={"server_ack": True}) as telegram, \
+                patch.object(health, "send_ntfy") as ntfy, \
+                patch.dict(os.environ, {"NTFY_TOPIC": "", "NTFY_TOPIC_URL": "",
+                                        "GITHUB_STEP_SUMMARY": ""}), redirect_stdout(output):
+            self.assertEqual(health.main(), 1)
+        ntfy.assert_not_called()
+        telegram.assert_called_once()
+        self.assertIn("telegram_server_ack", output.getvalue())
+
+    def test_telegram_failure_never_logs_token(self):
+        output = io.StringIO()
+        with patch.object(health, "check_publisher",
+                          return_value={"status": "unknown", "reason": "github_api_unavailable"}), \
+                patch.object(health, "telegram_configured", return_value=True), \
+                patch.object(health, "send_telegram",
+                             side_effect=RuntimeError("BOT-TOKEN-SHOULD-NOT-LEAK")), \
+                patch.dict(os.environ, {"NTFY_TOPIC": "", "NTFY_TOPIC_URL": "",
+                                        "GITHUB_STEP_SUMMARY": ""}), redirect_stdout(output):
+            self.assertEqual(health.main(), 1)
+        self.assertNotIn("BOT-TOKEN-SHOULD-NOT-LEAK", output.getvalue())
+        self.assertIn("telegram_failed", output.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()
