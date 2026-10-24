@@ -81,3 +81,25 @@ platform gönderi kimlikleri kontrol edilmelidir.
 - Gece raporu ve analytics job'ları `AUTOMATION_ENABLED` ile
   kapalı kalabildiğinden bu işler Meta-only operasyonlarda ayrıca
   güncellenmedikçe telefon istatistiği üretildiği varsayılmamalıdır.
+
+## TXT kuralları ve doğrulanmış eşleşmeler (24 Ekim 2026)
+
+- ToonZone'da kaynak TXT yoktur: mevcut 159 MP4 dosyasının her biri için
+  `toonzone_txt_text` / `generate_toonzone_txts` tam adlı UTF-8 TXT üretir.
+  Yayıncı bu metinleri otomatik kullanır. Video görüntüsü incelenmediği için
+  sahne/diyalog iddiası eklenmez; yalnızca dosya adındaki sezon, bölüm, part
+  ve başlık kullanılır. İşletim amaçlı TXT arşivi,
+  `Generate ToonZone TXT archive` workflow artifact'ından alınabilir.
+  Public Drive klasörüne otomatik TXT **yüklenmez**; okuma erişimi vardır.
+- Diğer hesaplarda MP4 adına **tam eşleşen, dolu ve okunabilir TXT** zorunludur.
+  TXT yoksa veya Drive erişimi hata verirse yanlış/genel açıklamayla
+  yayın yapılmaz; ilgili içerik HELD raporlanır.
+- Canlı ad eşleşmesi denetiminde ortak mizah 851/851, Gönle 314/314,
+  Film 877/877 doğrulandı. Daily Laugh'ta 175 MP4'ün yalnızca 58'inin
+  aynı adlı TXT'si vardı; **117 tanesi eşleşmedi**. Klasörde 561 TXT
+  olması yeterli değildir; 101.mp4 gibi videolara 101.txt eşlenemiyor.
+  Bunlar otomatik olarak rastgele başka TXT'lerle eşleştirilmemelidir.
+- ToonZone görselleri için aynı denetimde 159 MP4'ün 48'inin tam adlı
+  kapağı bulundu; 111 kapak eksik. Eksik kapaklar ayrı bir yayın engelidir.
+- Doğrulama: 24 Ekim CI 365 unittest + 57 fonksiyon kontrolü başarılı;
+  TXT arşivi canlı GitHub Actions işinde 159/159 oluşturuldu.
