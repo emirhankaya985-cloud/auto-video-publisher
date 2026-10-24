@@ -21,8 +21,14 @@ def send_telegram(title, message, *, timeout=20, session=requests):
     """One plain-text POST, no redirects/retries, no credential-bearing logs."""
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
-    if not _BOT_TOKEN.fullmatch(token) or not _CHAT_ID.fullmatch(chat_id):
-        raise RuntimeError("telegram credentials missing or invalid")
+    if not token:
+        raise RuntimeError("telegram credentials missing or invalid: bot token missing")
+    if not chat_id:
+        raise RuntimeError("telegram credentials missing or invalid: chat id missing")
+    if not _BOT_TOKEN.fullmatch(token):
+        raise RuntimeError("telegram credentials missing or invalid: bot token format")
+    if not _CHAT_ID.fullmatch(chat_id):
+        raise RuntimeError("telegram credentials missing or invalid: chat id format")
     if not isinstance(title, str) or not isinstance(message, str):
         raise ValueError("telegram title and message must be strings")
     body = (title + "\n\n" + message).strip()
