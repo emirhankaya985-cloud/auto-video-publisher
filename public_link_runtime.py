@@ -11,6 +11,7 @@ import io
 import json
 import os
 import re
+import time
 import tempfile
 import zipfile
 from datetime import datetime
@@ -126,11 +127,31 @@ def inventory(folder):
 
 
 def download(file_id, path):
-    result = gdown.download(id=file_id, output=str(path), quiet=True,
-                            use_cookies=True, timeout=40)
-    if not result or not path.is_file() or not path.stat().st_size:
-        raise RuntimeError("Paylaşılan Drive dosyası indirilemedi")
-    return path
+    """Retry transient read-only Drive transfers before touching Meta.
+
+    Never return partial files; exhaust retries rather than reusing corrupted
+    content. The publication intent ledger still controls all Meta retries.
+    """
+    failures = []
+    for attempt in range(3):
+        try:
+            result = gdown.download(id=file_id, output=str(path), quiet=True,
+                                    use_cookies=True, timeout=40)
+            if result and path.is_file() and path.stat().st_size > 0:
+                return path
+            failures.append("empty_or_missing")
+        except Exception as exc:
+            # The Drive provider can raise FileURLRetrievalError on a transient
+            # shared-link fetch. Do not log untrusted exception URLs/tokens.
+            failures.append(type(exc).__name__)
+        if path.exists():
+            path.unlink()
+        if attempt < 2:
+            time.sleep(2 ** attempt)
+    raise RuntimeError(
+        "Paylaşılan Drive dosyası 3 denemede indirilemedi "
+        f"({','.join(failures)})"
+    ) from None
 
 
 def graph_rows(page, platform):
