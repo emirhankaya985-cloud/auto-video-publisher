@@ -85,6 +85,17 @@ class LinkRuntimeSafety(unittest.TestCase):
             self.assertEqual(runtime.target_count("toonzone", datetime(2026, 10, 24, 7, tzinfo=runtime.TR)), 0)
             self.assertEqual(runtime.target_count("toonzone", datetime(2026, 10, 24, 12, 20, tzinfo=runtime.TR)), 3)
 
+    def test_daily_laugh_confirmed_post_uses_new_york_calendar_day(self):
+        # 00:30 UTC on Oct 24 is Oct 24 in Istanbul, Oct 23 in New York.
+        row = {"created_time": "2026-10-24T00:30:00Z"}
+        self.assertEqual(runtime.timestamp(row).date().isoformat(), "2026-10-24")
+        self.assertEqual(runtime.publication_day("daily_laugh", row), "2026-10-23")
+        self.assertEqual(runtime.publication_day("film", row), "2026-10-24")
+
+    def test_daily_laugh_publication_day_after_new_york_midnight(self):
+        row = {"timestamp": "2026-10-24T06:00:00Z"}
+        self.assertEqual(runtime.publication_day("daily_laugh", row), "2026-10-24")
+
     def test_catchup_preserves_daily_laugh_eight_target(self):
         with patch.dict(os.environ, {"COMPLETE_DAY_DATE": "2026-10-23"}):
             self.assertEqual(runtime.target_count("daily_laugh", datetime(2026, 10, 23, 9, tzinfo=runtime.TR)), 8)
