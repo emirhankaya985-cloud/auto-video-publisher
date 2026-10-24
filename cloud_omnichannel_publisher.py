@@ -656,10 +656,26 @@ def upload_instagram_reel(
         # Reels accepts username-only tags; x/y coordinates are for images.
         # Validate *before* the first Meta write. Never tag all videos globally.
         container_data["user_tags"] = reels_user_tags_payload(user_tags)
-    init_res = _graph_json(
-        requests.post(container_url, data=container_data, timeout=30),
-        "Instagram container oluşturma",
-    )
+    try:
+        init_res = _graph_json(
+            requests.post(container_url, data=container_data, timeout=30),
+            "Instagram container oluşturma",
+        )
+    except MetaAPIError as exc:
+        # A *definitive* HTTP 400 on user_tags rejects this container before
+        # any media upload or media_publish. Preserve the @mention and post
+        # caption-only, instead of blocking an otherwise valid scheduled Reel.
+        # Never retry generic HTTP 400, ambiguous timeouts or media_publish.
+        if (not user_tags or exc.http_status != 400
+                or "user_tags" not in str(exc).lower()):
+            raise
+        container_data.pop("user_tags", None)
+        print("Instagram user_tags desteği bu hedefte reddedildi; "
+              "Reel yalnızca açıklama @mention ile devam edecek.", flush=True)
+        init_res = _graph_json(
+            requests.post(container_url, data=container_data, timeout=30),
+            "Instagram container oluşturma (etiketsiz güvenli geri dönüş)",
+        )
     container_id = init_res["id"]
     if container_id in (forbidden_container_ids or set()):
         raise RuntimeError("Meta tekrarlanan container ID döndürdü; binary upload durduruldu.")
