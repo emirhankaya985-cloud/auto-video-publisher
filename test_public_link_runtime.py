@@ -3,6 +3,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import sys
 import tempfile
 import types
@@ -33,7 +34,16 @@ def load_runtime():
     compat.prepare_instagram_upload = Mock()
     ordered = types.ModuleType("ordered_channels")
     ordered.parse_order = Mock(return_value=(1, 2, 2, "title"))
-    ordered.toonzone_metadata = Mock(return_value={"title": "Part 2", "description": "Fallback"})
+    def fake_toonzone_metadata(stem):
+        match = re.fullmatch(r"S(\\d+)E(\\d+)_(.+)_Part_?(\\d+)", stem)
+        if not match or int(match[4]) not in (1, 2, 3, 4):
+            raise ValueError("invalid ToonZone filename")
+        return {"season": int(match[1]), "episode": int(match[2]),
+                "part": int(match[4]),
+                "title": match[3].replace("_", " ") + f" — Part {match[4]}",
+                "description": "Unused fallback"}
+    ordered.toonzone_metadata = Mock(side_effect=fake_toonzone_metadata)
+    ordered.TOONZONE_ETSY_LINK = "https://www.etsy.com/shop/MiroviaStudio"
     safety = types.ModuleType("publication_safety")
     safety.route_paused = Mock(return_value=False)
     stubs = {"requests": types.ModuleType("requests"), "gdown": types.ModuleType("gdown"),
@@ -105,33 +115,36 @@ class LinkRuntimeSafety(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             catalog = {
-                "S03E01_Deneme_Part_1.mp4": {"id": "a"},
-                "S03E01_Deneme_Part_2.mp4": {"id": "b"},
+                "S01E01_The_Power_Part1.mp4": {"id": "a"},
+                "S01E01_The_Power_Part2.mp4": {"id": "b"},
                 "readme.txt": {"id": "text"},
                 "bad-file.mp4": {"id": "bad"},
             }
-            def metadata(stem):
-                if not stem.startswith("S03E01_"):
-                    raise ValueError("invalid filename")
-                part = stem.rsplit("_", 1)[-1]
-                return {"title": f"Deneme Part {part}", "description": f"Sezon 3 Bölüm 1 — Part {part}"}
-            with patch.object(runtime, "toonzone_metadata", side_effect=metadata), \
-                    patch.object(runtime, "ROOT", root):
+            with patch.object(runtime, "ROOT", root):
                 generated, invalid = runtime.generate_toonzone_txts(catalog, root / "toonzone_txt")
                 self.assertEqual((generated, invalid), (2, 1))
                 self.assertEqual(len(list((root / "toonzone_txt").glob("*.txt"))), 2)
-                captions, origin = runtime.copies("toonzone", {"name": "S03E01_Deneme_Part_2.mp4"}, {}, root)
+                first = (root / "toonzone_txt" / "S01E01_The_Power_Part1.txt").read_text()
+                captions, origin = runtime.copies("toonzone", {"name": "S01E01_The_Power_Part2.mp4"}, {}, root)
                 self.assertEqual(origin, "generated-toonzone-txt")
-                self.assertIn("Part 2", captions["instagram"])
-                self.assertNotIn("Part 1", captions["instagram"])
+                self.assertIn("Part 2/4", captions["instagram"])
+                self.assertIn("#S01E01 #Part2", captions["instagram"])
+                self.assertIn("sihirli bir klavyeye", captions["facebook"])
+                self.assertIn("sihirli bir klavyeye", first)
+                self.assertNotEqual(first, captions["instagram"])
 
     def test_toonzone_generated_txt_is_deterministic_and_no_txt_is_required(self):
         with tempfile.TemporaryDirectory() as tmp:
             with patch.object(runtime, "ROOT", Path(tmp)):
-                captions, origin = runtime.copies("toonzone", {"name": "S03E01_Deneme_Part_3.mp4"}, {}, Path(tmp))
+                captions, origin = runtime.copies("toonzone", {"name": "S01E01_The_Power_Part3.mp4"}, {}, Path(tmp))
             self.assertEqual(origin, "generated-toonzone-txt")
-            self.assertIn("Part 2", captions["facebook"])  # metadata mock
+            self.assertIn("Part 3/4", captions["facebook"])
+            self.assertIn("#RegularShow", captions["facebook"])
             self.assertEqual(captions["facebook"], captions["instagram"])
+
+    def test_unsourced_future_episode_is_not_given_fake_plot(self):
+        with self.assertRaisesRegex(ValueError, "ozeti onayli degil"):
+            runtime.toonzone_txt_text("S03E01_Stick_Hockey_Part1")
 
     def test_schedule_remains_five_film_slots_after_catchup_date(self):
         with patch.dict(os.environ, {"COMPLETE_DAY_DATE": "2026-10-23"}):
