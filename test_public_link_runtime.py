@@ -62,6 +62,27 @@ runtime = load_runtime()
 
 
 class LinkRuntimeSafety(unittest.TestCase):
+    def test_exact_video_instagram_mention_does_not_modify_facebook_caption(self):
+        from instagram_tagging import _parse_rules
+        rules = _parse_rules({"schema": 1, "rules": [
+            {"route": "film", "stem": "ronaldo_goal_01",
+             "usernames": ["cristiano"], "hashtags": ["CR7"]}
+        ]})
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "source.txt"
+            source.write_text("Ronaldo goal analysis", encoding="utf-8")
+            with patch.object(runtime, "download", return_value=source), \
+                    patch("instagram_tagging.load_rules", return_value=rules):
+                captions, origin = runtime.copies(
+                    "film", {"name": "ronaldo_goal_01.mp4"},
+                    {"ronaldo_goal_01.txt": {"id": "test"}}, Path(tmp),
+                )
+            self.assertEqual(origin, "matching-txt")
+            self.assertEqual(captions["facebook"], "FB from TXT")
+            self.assertIn("@cristiano", captions["instagram"])
+            self.assertIn("#CR7", captions["instagram"])
+            self.assertNotIn("@cristiano", captions["facebook"])
+
     def test_drive_download_retries_transient_url_error_and_removes_partial(self):
         with tempfile.TemporaryDirectory() as d:
             dest = Path(d) / "video.mp4"
