@@ -502,6 +502,107 @@ class LinkRuntimeSafety(unittest.TestCase):
             self.assertFalse(entry["failure"]["safe_to_repost"])
             ig.assert_called_once()
 
+    def test_unique_remote_caption_index_rejects_duplicate_and_blank_captions(self):
+        rows = [
+            {"id": "1", "description": "Same video"},
+            {"id": "2", "description": "Same video"},
+            {"id": "3", "caption": "Unique video"},
+            {"id": "4", "description": ""},
+        ]
+        index, ambiguous = runtime.index_history_captions(rows)
+        self.assertIn(runtime.caption_key("Same video"), ambiguous)
+        self.assertNotIn(runtime.caption_key("Same video"), index)
+        self.assertEqual(index[runtime.caption_key("Unique video")]["id"], "3")
+        self.assertNotIn(runtime.caption_key(""), index)
+
+    def test_reconciled_platform_date_uses_ny_and_istanbul_separately(self):
+        post = {"id": "123", "timestamp": "2026-10-24T00:30:00+03:00"}
+        self.assertEqual(runtime.history_publication_match("daily_laugh", post),
+                         ("123", "2026-10-23"))
+        self.assertEqual(runtime.history_publication_match("gonle", post),
+                         ("123", "2026-10-24"))
+
+    def test_missing_invalid_or_naive_meta_timestamp_remains_uncertain(self):
+        for timestamp in (None, "invalid", "2026-10-24T00:30:00"):
+            row = {"id": "123", "timestamp": timestamp}
+            with self.subTest(timestamp=timestamp):
+                with self.assertRaises(RuntimeError):
+                    runtime.history_publication_match("film", row)
+        with self.assertRaisesRegex(RuntimeError, "kimliği"):
+            runtime.history_publication_match("film", {"id": "", "timestamp": "2026-10-24T00:30:00Z"})
+
+    def test_plan_reconciles_only_unique_confirmed_post_preserving_original_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            original = {"schema": 1, "episode_days": {}, "entries": {
+                "daily_laugh:facebook:video-old": {
+                    "route": "daily_laugh", "platform": "facebook", "status": "uncertain",
+                    "caption_hash": runtime.caption_key("A specific clip"),
+                    "file": "video-old.mp4", "day": "2026-10-24",
+                    "run_id": "111"
+                }
+            }}
+            remote_post = {"id": "123456", "description": "A specific clip",
+                           "created_time": "2026-10-24T00:30:00+03:00"}
+            with patch.dict(os.environ, {"GITHUB_RUN_ID": "222",
+                                         "GITHUB_STEP_SUMMARY": str(root / "summary.md")}), \
+                    patch.object(runtime, "ROOT", root), \
+                    patch.object(runtime, "STATE", root / "state.json"), \
+                    patch.object(runtime, "PLAN", root / "plan.json"), \
+                    patch.object(runtime, "ROUTES", {"daily_laugh": ("daily_laugh", "Daily Laugh Lab")}), \
+                    patch.object(runtime, "FOLDERS", {"daily_laugh": "folder"}), \
+                    patch.object(runtime, "restore", return_value=original), \
+                    patch.object(runtime, "apply_verified_migration"), \
+                    patch.object(runtime, "load_meta_auth",
+                                 return_value={"pages": [{"page_name": "Daily Laugh Lab", "page_token": "test"}]}), \
+                    patch.object(runtime, "inventory", return_value={}), \
+                    patch.object(runtime, "graph_rows", return_value=[remote_post]), \
+                    patch.object(runtime, "target_count", return_value=0):
+                runtime.plan()
+            reconciled = json.loads((root / "state.json").read_text())["entries"]["daily_laugh:facebook:video-old"]
+            self.assertEqual(reconciled["day"], "2026-10-23")
+            self.assertEqual(reconciled["post_id"], "123456")
+            self.assertEqual(reconciled["run_id"], "111")
+            self.assertEqual(reconciled["reconciled_in_run_id"], "222")
+            self.assertEqual(reconciled["reconciliation_proof"], "unique_platform_history_caption")
+            self.assertEqual(json.loads((root / "plan.json").read_text()), [])
+
+    def test_plan_multiple_caption_matches_never_marks_uncertain_as_done(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            original = {"schema": 1, "episode_days": {}, "entries": {
+                "film_second:facebook:clip": {
+                    "route": "film_second", "platform": "facebook", "status": "uncertain",
+                    "caption_hash": runtime.caption_key("Repeated title"),
+                    "day": "2026-10-23", "run_id": "333"
+                }
+            }}
+            remote_rows = [
+                {"id": "111", "description": "Repeated title",
+                 "created_time": "2026-10-24T01:00:00+03:00"},
+                {"id": "222", "description": "Repeated title",
+                 "created_time": "2026-10-24T02:00:00+03:00"},
+            ]
+            with patch.dict(os.environ, {"GITHUB_RUN_ID": "444",
+                                         "GITHUB_STEP_SUMMARY": str(root / "summary.md")}), \
+                    patch.object(runtime, "ROOT", root), \
+                    patch.object(runtime, "STATE", root / "state.json"), \
+                    patch.object(runtime, "PLAN", root / "plan.json"), \
+                    patch.object(runtime, "ROUTES", {"film_second": ("film", "Filmmagrasi")}), \
+                    patch.object(runtime, "FOLDERS", {"film": "folder"}), \
+                    patch.object(runtime, "restore", return_value=original), \
+                    patch.object(runtime, "apply_verified_migration"), \
+                    patch.object(runtime, "load_meta_auth",
+                                 return_value={"pages": [{"page_name": "Filmmagrasi", "page_token": "test"}]}), \
+                    patch.object(runtime, "inventory", return_value={}), \
+                    patch.object(runtime, "graph_rows", return_value=remote_rows), \
+                    patch.object(runtime, "target_count", return_value=0):
+                runtime.plan()
+            entry = json.loads((root / "state.json").read_text())["entries"]["film_second:facebook:clip"]
+            self.assertEqual(entry["status"], "uncertain")
+            self.assertNotIn("post_id", entry)
+            self.assertIn("multiple remote posts", (root / "report.md").read_text())
+
     def test_source_failure_records_ready_without_calling_meta(self):
         with tempfile.TemporaryDirectory() as tmp:
             state_path, plan_path = Path(tmp) / "state.json", Path(tmp) / "plan.json"
