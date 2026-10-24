@@ -632,7 +632,13 @@ def publish():
             except Exception as exc:
                 failures.append(item["page"] + ": " + type(exc).__name__ + ": " + _sanitize_meta_text(str(exc))[:400])
                 for platform in item["platforms"]:
-                    state["entries"][f"{item['route']}:{platform}:{item['id']}"]["status"] = "ready"
+                    key = f"{item['route']}:{platform}:{item['id']}"
+                    state["entries"][key].update(
+                        status="ready",
+                        failure={"reason": "source_or_cover_preparation_failed",
+                                 "error_type": type(exc).__name__,
+                                 "safe_to_repost": True},
+                    )
                 save(STATE, state)
                 continue
             # Instagram transcoding is local preparation, not a Meta API
@@ -671,6 +677,7 @@ def publish():
                     if not post:
                         raise RuntimeError("Publication has no post ID")
                     state["entries"][key].update(status="done", post_id=str(post))
+                    state["entries"][key].pop("failure", None)
                     print(json.dumps({"page": item["page"], "file": item["name"], "platform": platform, "post_id": str(post)}, ensure_ascii=False), flush=True)
                 except Exception as exc:
                     # Never blindly repeat a Meta POST, including HTTP 400.
