@@ -25,7 +25,7 @@ from cloud_omnichannel_publisher import (
     GRAPH_API_VERSION, MetaAPIError, create_instagram_cover_video,
     upload_facebook_reel, upload_instagram_reel, _sanitize_meta_text,
 )
-from instagram_media_compat import prepare_instagram_upload
+from instagram_media_compat import prepare_instagram_upload, probe
 from meta_auth_loader import load_meta_auth
 from ordered_channels import TOONZONE_ETSY_LINK, parse_order, toonzone_metadata
 from publication_safety import route_paused
@@ -609,6 +609,25 @@ def plan(audit=False):
         out.write(summary)
 
 
+def verify_source_video(path):
+    """Reject truncated or nonvideo MP4s before either Facebook or IG POST."""
+    try:
+        info = probe(path)
+        streams = info.get("streams", [])
+        fmt = info.get("format", {})
+        duration = float(fmt.get("duration", 0))
+        if not any(stream.get("codec_type") == "video" for stream in streams):
+            raise ValueError("no-video-stream")
+        if not (0 < duration < 10800):
+            raise ValueError("invalid-video-duration")
+    except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
+        raise RuntimeError("MP4 medya ön doğrulaması başarısız: " + type(exc).__name__) from None
+    except Exception as exc:
+        # ffprobe process errors are handled like other local pre-upload errors.
+        raise RuntimeError("MP4 medya doğrulaması çalıştırılamadı: " + type(exc).__name__) from None
+    return True
+
+
 def publish():
     state = json.loads(STATE.read_text())
     plans = json.loads(PLAN.read_text())
@@ -622,6 +641,7 @@ def publish():
                 video = download(item["id"], temp / "source.mp4")
                 if video.open("rb").read(8)[4:8] != b"ftyp":
                     raise RuntimeError("Source is not MP4")
+                verify_source_video(video)
                 if item.get("approved_md5"):
                     checksum = hashlib.md5(video.read_bytes()).hexdigest()
                     if checksum != item["approved_md5"]:
