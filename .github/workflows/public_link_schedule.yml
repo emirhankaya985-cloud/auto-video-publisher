@@ -2,7 +2,11 @@ name: Public link Meta automation
 
 on:
   schedule:
+    # Normal checks every half hour; GitHub schedules may start late.
     - cron: '7,37 * * * *'
+    # ToonZone: four parts at 12:00, 12:10, 12:20, 12:30 TRT (UTC+3).
+    # The global concurrency group prevents overlapping publishing runs.
+    - cron: '0,10,20,30 9 * * *'
   workflow_dispatch:
     inputs:
       mode:
