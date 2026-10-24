@@ -52,3 +52,32 @@ kurtarma yolunu aynı depoda sıralar. Normal işletimde yeni zamanlayıcı kull
 Bir işin yeşil olması tek başına bütün hesapların günlük hedefe ulaştığını
 göstermez. Hesap bazlı `published_today`, `NEXT`, `HELD` satırları ve gerçek
 platform gönderi kimlikleri kontrol edilmelidir.
+
+## 24 Ekim 2026 güvenilirlik güncellemesi
+
+- Mevcut 07/37 UTC yarım saatlik Meta kontrolüne ek olarak ToonZone'un
+  12:00, 12:10, 12:20 ve 12:30 TRT video slotlarında da kontrol yapılır.
+  `public-drive-recovery` concurrency grubu çakışan yüklemeleri sıraya alır.
+  GitHub cron dakikası garantili değildir; günlük hedef kontrolü kalıcı niyet
+  kaydı ve geçmiş denetimiyle korunur.
+- `public_link_health.py` ve
+  `.github/workflows/public_link_health.yml` her gün saat
+  11:40 TRT'de son üç saatin gerçek planlanmış yayın işlerini denetler.
+  Üst üste iki başarısız çalışma, son üç saatte başarı bulunmaması veya
+  planlı çalışma görünmemesi kırmızı sağlık sonucu üretir.
+  NTFY topic ayarlıysa ayrıca uyarı gönderir; değilse GitHub işi başarısız
+  olur ve sessizce yeşil kabul edilmez.
+- Bu watchdog yalnız GitHub Actions çalışma sağlığını ölçer. Yeşil sonuç
+  tek başına video yayınlandığı, bütün hedeflere ulaşıldığı veya izlenme
+  sayılarına erişildiği anlamına gelmez. Platform geçmişi ayrı doğrulanır.
+- 985'in Meta-only modunda `LINK_AUTOMATION_ENABLED=true` ve
+  `META_ACCESS_TOKEN` gerekir. `AUTOMATION_ENABLED` eski
+  Drive OAuth/YouTube işlerine ait ayrı anahtardır; yeni sistemi açmak
+  amacıyla etkinleştirilmemelidir.
+- Geçiş CI'sındaki yapılandırılmış secret sayısı, eski/opsiyonel
+  entegrasyonların eksiklerini de kapsar. Tüm bu secretların eksikliği Meta-only
+  yayını otomatik olarak engellemez; ancak YouTube, Drive geçmiş arşivi ve
+  klasik gün sonu izlenme raporunun çalıştığını göstermez.
+- Gece raporu ve analytics job'ları `AUTOMATION_ENABLED` ile
+  kapalı kalabildiğinden bu işler Meta-only operasyonlarda ayrıca
+  güncellenmedikçe telefon istatistiği üretildiği varsayılmamalıdır.
