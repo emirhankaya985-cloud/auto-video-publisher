@@ -565,7 +565,8 @@ def build_report(now=None):
         if meta_only and history_read_ok:
             try:
                 upsert_records(history_path, records, preserve_success_on_failure=True)
-                artifact_path = Path("link-runtime/daily_video_views.jsonl")
+                artifact_path = Path(os.getenv("META_REPORT_ARTIFACT_PATH",
+                                                   "link-runtime/daily_video_views.jsonl"))
                 artifact_path.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(history_path, artifact_path)
                 archive_saved = True
