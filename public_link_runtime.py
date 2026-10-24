@@ -137,7 +137,7 @@ def graph_rows(page, platform):
     object_id = page["page_id"] if platform == "facebook" else page.get("instagram_id")
     if not object_id:
         return []
-    fields = "id,description,created_time" if platform == "facebook" else "id,caption,timestamp,permalink"
+    fields = "id,description,created_time" if platform == "facebook" else "id,caption,timestamp,permalink,media_type"
     edge = "videos" if platform == "facebook" else "media"
     params = {"fields": fields, "limit": 100}
     rows, seen = [], set()
@@ -154,7 +154,18 @@ def graph_rows(page, platform):
         if response.status_code != 200 or not isinstance(payload.get("data"), list):
             error = payload.get("error") or {}
             raise RuntimeError(f"Meta geçmişi okunamadı: HTTP {response.status_code}, kod {error.get('code', 'unknown')}")
-        rows.extend(payload["data"])
+        for media in payload["data"]:
+            if not isinstance(media, dict):
+                raise RuntimeError("Meta geçmişinde geçersiz medya kaydı")
+            if platform == "instagram":
+                media_type = media.get("media_type")
+                if not isinstance(media_type, str):
+                    raise RuntimeError("Instagram medya türü alınamadı; güvenli sayım mümkün değil")
+                # Only video/reel media count toward the video publication target.
+                # Instagram photos must never satisfy a missing Reels slot.
+                if media_type != "VIDEO":
+                    continue
+            rows.append(media)
         paging = payload.get("paging") or {}
         if not paging.get("next"):
             return rows
