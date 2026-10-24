@@ -85,6 +85,22 @@ class LinkRuntimeSafety(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "TXT boş"):
                     runtime.copies("film", {"name": "2.mp4"}, {"2.txt": {"id": "txt"}}, Path(tmp))
 
+    def test_exact_txt_coverage_catches_missing_or_mismatched_names(self):
+        catalog = {
+            "1.mp4": {"id": "video-1"}, "1.txt": {"id": "text-1"},
+            "2.mp4": {"id": "video-2"}, "2.TXT": {"id": "wrong-case"},
+            "3.mp4": {"id": "video-3"}, "other.txt": {"id": "extra"},
+        }
+        actual = runtime.exact_txt_coverage(catalog)
+        self.assertEqual(actual["mp4"], 3)
+        self.assertEqual(actual["matched"], 1)
+        self.assertEqual(actual["missing"], 2)
+        self.assertEqual(actual["missing_examples"], ["2", "3"])
+
+    def test_all_exact_txt_pairs_are_ready(self):
+        pairs = {"a.mp4": {}, "a.txt": {}, "b.mp4": {}, "b.txt": {}}
+        self.assertEqual(runtime.exact_txt_coverage(pairs)["missing"], 0)
+
     def test_toonzone_txts_generated_for_each_video_and_used(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
