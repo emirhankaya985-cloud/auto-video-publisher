@@ -99,6 +99,20 @@ jobs:
           path: link-runtime/report.md
           if-no-files-found: ignore
           retention-days: 30
+      - name: Generate per-run incident and recovery ledger (no API writes)
+        if: always()
+        continue-on-error: true
+        env:
+          GITHUB_RUN_ID: ${{ github.run_id }}
+        run: python publisher_incident_report.py
+      - name: Persist incident report even after failed publishing
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: link-incident-report
+          path: link-runtime/incidents.json
+          if-no-files-found: warn
+          retention-days: 90
       - name: Telegram confirmed publication and error summary (no uploads)
         # A failed Telegram push must not reclassify or retry a Meta publication.
         if: ${{ always() && (github.event_name == 'schedule' || inputs.mode == 'publish') }}
