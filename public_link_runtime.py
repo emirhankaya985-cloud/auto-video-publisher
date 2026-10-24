@@ -216,11 +216,45 @@ def graph_rows(page, platform):
     raise RuntimeError("Meta geçmiş sınırı aşıldı; yayın durduruldu")
 
 
+def index_history_captions(rows):
+    """Return only unique, nonempty caption matches; ambiguous posts are blocked.
+
+    A description hash is a weak proxy for video identity. Never choose an
+    arbitrary post when multiple videos share the same description.
+    """
+    unique, ambiguous = {}, set()
+    for row in rows:
+        caption = row.get("description") or row.get("caption")
+        if not isinstance(caption, str) or not caption.strip():
+            continue
+        key = caption_key(caption)
+        if key in unique:
+            del unique[key]
+            ambiguous.add(key)
+        elif key not in ambiguous:
+            unique[key] = row
+    return unique, ambiguous
+
+
+def history_publication_match(route, row):
+    """Require a real numeric platform post ID and valid publication timestamp."""
+    if not isinstance(row, dict) or not str(row.get("id") or "").isdecimal():
+        raise RuntimeError("Meta geçmişinde doğrulanabilir gönderi kimliği yok")
+    day = publication_day(route, row)  # timezone-aware or fail closed
+    return str(row["id"]), day
+
+
 def timestamp(row):
     value = row.get("created_time") or row.get("timestamp")
     if not value:
         raise RuntimeError("Meta geçmişinde yayın zamanı eksik")
-    return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(TR)
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (ValueError, TypeError, AttributeError):
+        raise RuntimeError("Meta geçmişinde yayın zamanı geçersiz") from None
+    if parsed.tzinfo is None:
+        raise RuntimeError("Meta geçmişinde yayın zaman dilimi eksik")
+    return parsed.astimezone(TR)
 
 
 def exact_txt_coverage(files):
@@ -481,7 +515,9 @@ def plan(audit=False):
             record_error("meta_history", "meta_history_unavailable",
                          route=route, error=exc)
             continue
-        remote = {p: {caption_key(row.get("description") or row.get("caption")): row for row in rows} for p, rows in histories.items()}
+        caption_indexes = {p: index_history_captions(rows) for p, rows in histories.items()}
+        remote = {p: index[0] for p, index in caption_indexes.items()}
+        ambiguous_captions = {p: index[1] for p, index in caption_indexes.items()}
         for platform, rows in histories.items():
             count = sum(route_clock(route, timestamp(row)).date() == clock.date() for row in rows)
             report.append(f"{platform}: published_today={count}, history_records={len(rows)}")
@@ -489,9 +525,22 @@ def plan(audit=False):
         for key, entry in state["entries"].items():
             if entry["route"] != route or entry["platform"] not in platforms:
                 continue
-            match = remote[entry["platform"]].get(entry["caption_hash"])
+            caption_hash = entry.get("caption_hash")
+            if entry["status"] != "done" and caption_hash in ambiguous_captions[entry["platform"]]:
+                report.append("HELD: previous uncertain intent matches multiple remote posts.")
+                continue
+            match = remote[entry["platform"]].get(caption_hash)
             if entry["status"] != "done" and match:
-                entry.update(status="done", post_id=str(match["id"]))
+                try:
+                    confirmed_id, confirmed_day = history_publication_match(route, match)
+                except RuntimeError:
+                    report.append("HELD: previous intent matched a post with invalid ID or timestamp.")
+                    continue
+                entry.update(
+                    status="done", post_id=confirmed_id, day=confirmed_day,
+                    reconciled_in_run_id=os.getenv("GITHUB_RUN_ID", ""),
+                    reconciliation_proof="unique_platform_history_caption",
+                )
         counts = {p: max(
             sum(route_clock(route, timestamp(row)).date() == clock.date() for row in histories[p]),
             sum(e["route"] == route and e["platform"] == p and e["status"] == "done"
@@ -569,10 +618,30 @@ def plan(audit=False):
                 key = f"{route}:{p}:{item['id']}"
                 existing = state["entries"].get(key, {})
                 cap_hash = caption_key(captions[p])
+                if cap_hash in ambiguous_captions[p]:
+                    report.append("HELD: multiple Meta posts share the same caption; manual reconciliation required.")
+                    held = True
+                    continue
                 match = remote[p].get(cap_hash)
                 if existing.get("status") == "done" or seed_done(route, p, item["name"]) or match:
                     if match:
-                        state["entries"][key] = {"route": route, "platform": p, "status": "done", "caption_hash": cap_hash, "post_id": str(match["id"]), "file": item["name"], "day": publication_day(route, match)}
+                        try:
+                            confirmed_id, confirmed_day = history_publication_match(route, match)
+                        except RuntimeError:
+                            report.append("HELD: remote caption match lacks valid post ID or timestamp.")
+                            held = True
+                            continue
+                        if existing and existing.get("status") in {"intent", "uncertain"}:
+                            state["entries"][key].update(
+                                status="done", post_id=confirmed_id, day=confirmed_day,
+                                reconciled_in_run_id=os.getenv("GITHUB_RUN_ID", ""),
+                                reconciliation_proof="unique_platform_history_caption",
+                            )
+                        elif not existing:
+                            # Same caption is NOT proof that this video was posted;
+                            # do not claim success or publish a possible duplicate.
+                            report.append("HELD: remote caption matches but source identity is unverified.")
+                            held = True
                     continue
                 if existing and existing.get("status") != "ready":
                     report.append(f"HELD: {item['name']} {p} has an uncertain previous intent.")
@@ -668,7 +737,9 @@ def publish():
             temp = Path(tmp)
             try:
                 video = download(item["id"], temp / "source.mp4")
-                if video.open("rb").read(8)[4:8] != b"ftyp":
+                with video.open("rb") as source:
+                    header = source.read(8)
+                if header[4:8] != b"ftyp":
                     raise RuntimeError("Source is not MP4")
                 verify_source_video(video)
                 if item.get("approved_md5"):
