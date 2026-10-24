@@ -35,6 +35,10 @@ jobs:
         run: python -m unittest discover -v -p 'test*.py'
       - name: Check publisher reconciliation regressions without Meta uploads
         run: python -m unittest -v test_public_link_runtime.py
+      - name: Run full legacy-compatible migration acceptance suite (mocked)
+        run: python migration_985_tests.py
+      - name: Run Cloudflare scheduler simulated tests
+        run: node --test test/cloudflare_scheduler.test.mjs
       - name: Check reporting & nightly workflow gates
         run: |
           python - <<'PYCODE'
