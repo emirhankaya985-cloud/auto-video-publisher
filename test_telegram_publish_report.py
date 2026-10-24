@@ -101,7 +101,83 @@ class TelegramPublishReportTests(unittest.TestCase):
                     patch.dict(os.environ, {"GITHUB_RUN_ID": "333", "PLAN_STEP_OUTCOME": "success",
                                             "PUBLISH_STEP_OUTCOME": "success"}):
                 self.assertEqual(report.main(), 0)
-                self.assertIn("Yeni doğrulanan gönderi: 1", send.call_args.args[1])
+                self.assertIn("🎬 Film Mağarası", send.call_args.args[1])
+                self.assertIn("Instagram", send.call_args.args[1])
+                self.assertIn("Gönderi ID: 123", send.call_args.args[1])
+
+    def test_each_confirmed_platform_post_sends_separate_telegram_and_ntfy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_file = Path(tmp) / "state.json"
+            state_file.write_text(json.dumps({"entries": {
+                "fb": {"run_id": "333", "route": "penguen", "platform": "facebook",
+                       "status": "done", "post_id": "fb-101", "file": "101.mp4"},
+                "ig": {"run_id": "333", "route": "penguen", "platform": "instagram",
+                       "status": "done", "post_id": "ig-101", "file": "101.mp4"},
+                "other": {"run_id": "332", "route": "gonle", "platform": "instagram",
+                          "status": "done", "post_id": "old-id", "file": "103.mp4"},
+            }}, ensure_ascii=False))
+            with patch.object(report, "STATE_PATH", state_file), \
+                    patch.object(report, "telegram_configured", return_value=True), \
+                    patch.object(report, "send_telegram", return_value={"server_ack": True}) as telegram, \
+                    patch.object(report, "send_ntfy", return_value={"server_ack": True}) as ntfy, \
+                    patch.dict(os.environ, {"GITHUB_RUN_ID": "333", "PLAN_STEP_OUTCOME": "success",
+                                            "PUBLISH_STEP_OUTCOME": "success",
+                                            "NTFY_TOPIC": "mock-topic", "NTFY_TOPIC_URL": ""}):
+                self.assertEqual(report.main(), 0)
+            self.assertEqual(telegram.call_count, 2)
+            self.assertEqual(ntfy.call_count, 2)
+            bodies = [call.args[1] for call in telegram.call_args_list]
+            self.assertTrue(any("Facebook" in body and "fb-101" in body for body in bodies))
+            self.assertTrue(any("Instagram" in body and "ig-101" in body for body in bodies))
+            self.assertTrue(all("old-id" not in body for body in bodies))
+            self.assertTrue(all(call.kwargs["require_ack"] for call in ntfy.call_args_list))
+
+    def test_notification_transport_failure_does_not_retry_meta_or_block_other_channel(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_file = Path(tmp) / "state.json"
+            state_file.write_text(json.dumps({"entries": {"ig": {
+                "run_id": "333", "route": "toonzone", "platform": "instagram",
+                "status": "done", "post_id": "verified-ig", "file": "S01E01_The_Power_Part1.mp4"
+            }}}))
+            with patch.object(report, "STATE_PATH", state_file), \
+                    patch.object(report, "telegram_configured", return_value=True), \
+                    patch.object(report, "send_telegram",
+                                 side_effect=RuntimeError("secret-provider-response")), \
+                    patch.object(report, "send_ntfy", return_value={"server_ack": True}) as ntfy, \
+                    patch.dict(os.environ, {"GITHUB_RUN_ID": "333", "PLAN_STEP_OUTCOME": "success",
+                                            "PUBLISH_STEP_OUTCOME": "success",
+                                            "NTFY_TOPIC_URL": "", "NTFY_TOPIC": "mock-topic"}):
+                self.assertEqual(report.main(), 1)
+            ntfy.assert_called_once()
+
+    def test_ntfy_only_works_without_telegram_secrets(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_file = Path(tmp) / "state.json"
+            state_file.write_text(json.dumps({"entries": {"ig": {
+                "run_id": "333", "route": "film", "platform": "instagram",
+                "status": "done", "post_id": "verified-ig", "file": "film.mp4"
+            }}}))
+            with patch.object(report, "STATE_PATH", state_file), \
+                    patch.object(report, "telegram_configured", return_value=False), \
+                    patch.object(report, "send_telegram") as telegram, \
+                    patch.object(report, "send_ntfy", return_value={"server_ack": True}) as ntfy, \
+                    patch.dict(os.environ, {"GITHUB_RUN_ID": "333", "PLAN_STEP_OUTCOME": "success",
+                                            "PUBLISH_STEP_OUTCOME": "success",
+                                            "NTFY_TOPIC_URL": "", "NTFY_TOPIC": "mock-topic"}):
+                self.assertEqual(report.main(), 0)
+            telegram.assert_not_called()
+            ntfy.assert_called_once()
+
+    def test_per_post_notification_requires_actual_post_id_and_run_id(self):
+        state = {"entries": {
+            "a": {"run_id": "333", "route": "film", "platform": "instagram", "status": "done"},
+            "b": {"run_id": "332", "route": "film", "platform": "instagram", "status": "done", "post_id": "old"},
+            "c": {"run_id": "333", "route": "film", "platform": "facebook", "status": "done", "post_id": "valid"},
+            "d": {"run_id": "333", "route": "film", "platform": "instagram", "status": "uncertain", "post_id": "wrong"},
+        }}
+        posts = report.confirmed_posts(state, "333")
+        self.assertEqual(len(posts), 1)
+        self.assertEqual(posts[0]["post_id"], "valid")
 
     def test_unconfigured_credentials_never_interrupt_publisher(self):
         with patch.object(report, "telegram_configured", return_value=False), \
