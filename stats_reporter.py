@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import shutil
 import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -18,6 +19,7 @@ from cloud_omnichannel_publisher import (
 )
 from analytics_archive import make_record, upsert_records, export_csv
 from analytics_drive_store import get_or_create_archive_folder, download_history, save_history_and_csv
+from analytics_github_history import restore_history
 from ntfy_notifications import send_ntfy
 from telegram_notifications import send_telegram, telegram_configured
 from ntfy_phone_report import compact_phone_report
@@ -96,41 +98,63 @@ def graph_get(path, token, **params):
     response = requests.get(
         f"https://graph.facebook.com/{GRAPH_API_VERSION}/{path}",
         params={**params, "access_token": token},
-        timeout=30,
+        timeout=30, allow_redirects=False,
     )
     try:
         payload = response.json()
     except ValueError:
-        payload = {}
+        payload = None
+    if not isinstance(payload, dict):
+        raise RuntimeError("Meta API yanıtı geçersiz")
     if not response.ok or payload.get("error"):
         error = payload.get("error") or {}
-        code = error.get("code")
-        suffix = f" code={code}" if code is not None else ""
+        code = error.get("code") if isinstance(error, dict) else None
+        suffix = f" code={code}" if isinstance(code, int) else ""
         raise RuntimeError(f"Meta API HTTP {response.status_code}{suffix}")
     return payload
 
 
 def graph_pages(path, token, **params):
-    """Read all cursor pages; never print next-page URLs (they contain auth)."""
+    """Read all cursor pages; invalid 200 results must not count as zero views."""
+    from urllib.parse import urlsplit
+
     response = requests.get(
         f"https://graph.facebook.com/{GRAPH_API_VERSION}/{path}",
         params={**params, "access_token": token}, timeout=30,
+        allow_redirects=False,
     )
-    while True:
+    seen_urls = set()
+    for _ in range(100):
         try:
             payload = response.json()
         except ValueError:
-            payload = {}
+            payload = None
+        if not isinstance(payload, dict):
+            raise RuntimeError("Meta API sayfalama yanıtı geçersiz")
         if not response.ok or payload.get("error"):
             error = payload.get("error") or {}
-            code = error.get("code")
-            suffix = f" code={code}" if code is not None else ""
+            code = error.get("code") if isinstance(error, dict) else None
+            suffix = f" code={code}" if isinstance(code, int) else ""
             raise RuntimeError(f"Meta API HTTP {response.status_code}{suffix}")
-        yield from payload.get("data", [])
-        next_url = (payload.get("paging") or {}).get("next")
+        data = payload.get("data")
+        paging = payload.get("paging", {})
+        if not isinstance(data, list) or not isinstance(paging, dict):
+            raise RuntimeError("Meta API sayfalama verisi geçersiz")
+        if any(not isinstance(row, dict) for row in data):
+            raise RuntimeError("Meta API video kaydı geçersiz")
+        yield from data
+        next_url = paging.get("next")
         if not next_url:
-            break
-        response = requests.get(next_url, timeout=30)
+            return
+        if not isinstance(next_url, str):
+            raise RuntimeError("Meta API sayfalama bağlantısı geçersiz")
+        parts = urlsplit(next_url)
+        if (parts.scheme != "https" or parts.hostname != "graph.facebook.com"
+                or parts.username or parts.password or next_url in seen_urls):
+            raise RuntimeError("Meta API sayfalama bağlantısı reddedildi")
+        seen_urls.add(next_url)
+        response = requests.get(next_url, timeout=30, allow_redirects=False)
+    raise RuntimeError("Meta API sayfalama sınırı aşıldı")
 
 
 def youtube_total(env_name, fallback, expected_channel_id=None):
@@ -348,6 +372,8 @@ def _collect_snapshot(now, *, report_day=None):
             save_platform(account, platform, None, api, exc)
 
     for account, env_name, fallback, expected_id, platform in YOUTUBE_TARGETS:
+        if os.getenv("META_ONLY_REPORTING", "").lower() == "true":
+            continue
         api = "youtube.data.v3.videos.statistics.viewCount"
         if not os.environ.get(env_name, "").strip() and not Path(fallback).exists():
             save_platform(account, platform, None, api, RuntimeError("YouTube OAuth ayarı bulunamadı"))
@@ -512,14 +538,21 @@ def build_report(now=None):
     yesterday = (report_day - timedelta(days=1)).isoformat()
     errors, drive, archive_folder = [], None, None
     history_read_ok = False
+    meta_only = os.getenv("META_ONLY_REPORTING", "").lower() == "true"
     with tempfile.TemporaryDirectory(prefix="daily-analytics-") as temp:
         history_path = Path(temp) / "daily_video_views.jsonl"
         csv_path = Path(temp) / "daily_video_views.csv"
         try:
-            drive = get_drive_client()
-            archive_folder = get_or_create_archive_folder(drive)
-            download_history(drive, archive_folder, history_path)
-            history_read_ok = True
+            if meta_only:
+                history_result = restore_history(history_path)
+                history_read_ok = True
+                if history_result["status"] == "first_snapshot":
+                    errors.append("GitHub geçmişinde önceki ölçüm yok; günlük artış ilk gün N/A.")
+            else:
+                drive = get_drive_client()
+                archive_folder = get_or_create_archive_folder(drive)
+                download_history(drive, archive_folder, history_path)
+                history_read_ok = True
         except Exception as exc:
             errors.append(f"Kalıcı geçmiş: {safe_error(exc)}")
         previous = _read_day_records(history_path, yesterday)
@@ -529,7 +562,16 @@ def build_report(now=None):
         )
         errors.extend(collection_errors)
         archive_saved = False
-        if drive and archive_folder and history_read_ok:
+        if meta_only and history_read_ok:
+            try:
+                upsert_records(history_path, records, preserve_success_on_failure=True)
+                artifact_path = Path("link-runtime/daily_video_views.jsonl")
+                artifact_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(history_path, artifact_path)
+                archive_saved = True
+            except Exception as exc:
+                errors.append(f"GitHub artifact geçmişi hazırlanamadı: {safe_error(exc)}")
+        elif drive and archive_folder and history_read_ok:
             try:
                 upsert_records(history_path, records, preserve_success_on_failure=True)
                 export_csv(history_path, csv_path)
@@ -543,7 +585,8 @@ def build_report(now=None):
         report_accounts = {}
         for account, (target, route, _folder, _keys) in ACCOUNT_TARGETS.items():
             platform_names = {p for owner, _page, p in META_TARGETS if owner == account}
-            platform_names.update(p for owner, _env, _fallback, _expected, p in YOUTUBE_TARGETS if owner == account)
+            if not meta_only:
+                platform_names.update(p for owner, _env, _fallback, _expected, p in YOUTUBE_TARGETS if owner == account)
             platforms = {p: _platform_totals(snapshot, previous, account, p, today) for p in sorted(platform_names)}
             if delayed:
                 # A post-midnight API sample can include views earned after
@@ -557,7 +600,11 @@ def build_report(now=None):
                 progress = None
             report_accounts[account] = (target, route, platforms, progress)
 
-        rows = [f"🌙 GÜNLÜK SOSYAL MEDYA RAPORU — {report_day:%d.%m.%Y}", ""]
+        rows = [f"🌙 GÜNLÜK SOSYAL MEDYA RAPORU — {report_day:%d.%m.%Y}",
+                f"🕒 Ölçüm: {now:%d.%m.%Y %H:%M} TRT",
+                "📊 Kapsam: Meta video sayaçları (Facebook/Instagram); YouTube ölçülmedi."
+                if meta_only else "📊 Kapsam: Erişilebilir platform video sayaçları.",
+                "⚠️ Genel toplamlar erişilebilen videoların toplamıdır; tüm içerik türleri veya tüm geçmiş garanti edilmez.", ""]
         if delayed:
             rows.extend([
                 f"⏰ Gecikmeli ölçüm: {now:%d.%m.%Y %H:%M} TRT.",
@@ -620,16 +667,18 @@ def build_report(now=None):
                 rows.append(f"{platform}: {delta_text} | Genel {total_text}")
                 rows.append(f"  {publication_status}")
             rows.append("")
+        progress_known = all(item[3] is not None for item in report_accounts.values())
         rows.extend([
             "━━━━━━━━━━━━━━━━━━", "🏆 TÜM HESAPLARIN TOPLAMI",
             f"🎯 Video hedefi: {target_total}" if target_total else "🎯 Video hedefi: ⚠️ Veri alınamadı",
-            f"✅ Tamamlanan: {completed_total}" if target_total else "✅ Tamamlanan: ⚠️ Veri alınamadı",
-            f"❌ Eksik: {max(target_total - completed_total, 0)}" if target_total else "❌ Eksik: ⚠️ Veri alınamadı",
+            f"✅ Tamamlanan: {completed_total}" if progress_known else "✅ Tamamlanan: N/A (yayın arşivi erişilemiyor)",
+            f"❌ Eksik: {max(target_total - completed_total, 0)}" if progress_known else "❌ Eksik: N/A (yayın arşivi erişilemiyor)",
             f"📈 BUGÜNKÜ TOPLAM: {'Kısmi: ' if len(all_daily) < sum(len(x[2]) for x in report_accounts.values()) else ''}+{tr_number(sum(all_daily))}" if all_daily else ("📈 BUGÜNKÜ TOPLAM: N/A (ilk ölçüm / karşılaştırılamıyor)" if len(all_lifetime) == sum(len(x[2]) for x in report_accounts.values()) else "📈 BUGÜNKÜ TOPLAM: ⚠️ Veri alınamadı"),
             f"👀 GENEL TOPLAM: {'Kısmi: ' if len(all_lifetime) < sum(len(x[2]) for x in report_accounts.values()) else ''}{tr_number(sum(all_lifetime))}" if all_lifetime else "👀 GENEL TOPLAM: ⚠️ Veri alınamadı",
-            f"🚨 Yayın hatası: {failed_total}" if target_total else "🚨 Yayın hatası: ⚠️ Veri alınamadı",
-            f"✅ Başarılı platform gönderileri: {posts_total}" if target_total else "✅ Başarılı platform gönderileri: ⚠️ Veri alınamadı",
+            f"🚨 Yayın hatası: {failed_total}" if progress_known else "🚨 Yayın hatası: N/A",
+            f"✅ Başarılı platform gönderileri: {posts_total}" if progress_known else "✅ Başarılı platform gönderileri: N/A",
             "📊 Günlük fark: önceki gün sonu snapshot'ına göre; platform sayaç tanımları farklıdır.",
+            f"🗄️ Geçmiş: {'GitHub artifact için hazırlandı (yükleme doğrulanmalı)' if archive_saved else '⚠️ GitHub artifact hazırlanamadı'}" if meta_only else
             f"🗄️ Geçmiş: {'Drive’a kaydedildi' if archive_saved else '⚠️ Drive arşivi kaydedilemedi'}",
         ])
         if errors:
