@@ -59,6 +59,9 @@ def load_runtime():
 
 
 runtime = load_runtime()
+# Mocked safety regressions intentionally generate synthetic errors. Never
+# write those to production-run error artifacts or send false phone alarms.
+runtime.record_error = Mock()
 
 
 class LinkRuntimeSafety(unittest.TestCase):
