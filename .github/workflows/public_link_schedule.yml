@@ -99,24 +99,11 @@ jobs:
           path: link-runtime/report.md
           if-no-files-found: ignore
           retention-days: 30
-      - name: Generate per-run incident and recovery ledger (no API writes)
-        if: always()
-        continue-on-error: true
-        env:
-          GITHUB_RUN_ID: ${{ github.run_id }}
-        run: python publisher_incident_report.py
-      - name: Persist incident report even after failed publishing
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: link-incident-report
-          path: link-runtime/incidents.json
-          if-no-files-found: warn
-          retention-days: 90
       - name: Per-post Telegram and ntfy notifications plus failure alerts (no uploads)
         # A failed notification must never retry or reclassify a Meta publication.
         if: ${{ always() && (github.event_name == 'schedule' || inputs.mode == 'publish') }}
         continue-on-error: true
+        id: notify
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -126,3 +113,29 @@ jobs:
           PLAN_STEP_OUTCOME: ${{ steps.plan.outcome }}
           PUBLISH_STEP_OUTCOME: ${{ steps.publish.outcome }}
         run: python telegram_publish_report.py
+      - name: Generate final per-run incident and recovery ledger (no API writes)
+        if: always()
+        continue-on-error: true
+        env:
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          OUTCOME_VERIFY: ${{ steps.verify.outcome }}
+          OUTCOME_PLAN: ${{ steps.plan.outcome }}
+          OUTCOME_PUBLISH: ${{ steps.publish.outcome }}
+          OUTCOME_NOTIFY: ${{ steps.notify.outcome }}
+        run: python publisher_incident_report.py
+      - name: Preserve final incident report including notification failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: link-incident-report
+          path: link-runtime/incidents.json
+          if-no-files-found: warn
+          retention-days: 90
+      - name: Preserve every safe structured error event for the run
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: link-error-journal
+          path: link-runtime/errors.jsonl
+          if-no-files-found: ignore
+          retention-days: 90
