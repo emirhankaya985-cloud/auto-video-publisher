@@ -44,6 +44,17 @@ class TelegramPublishReportTests(unittest.TestCase):
         self.assertIn("Belirsiz yükleme: 2", message)
         self.assertNotIn("Yeni doğrulanan gönderi", message)
 
+    def test_failed_ig_http400_reports_safe_reason_without_remote_message(self):
+        state = {"entries": {"ig": {
+            "run_id": "333", "status": "uncertain", "route": "film", "platform": "instagram",
+            "failure": {"reason": "invalid_media_or_graph_request",
+                        "message": "top-secret-token-should-not-leak"}
+        }}}
+        msg, kind = report.publication_summary(state, "333", publish_outcome="failure")
+        self.assertEqual(kind, "alert")
+        self.assertIn("invalid_media_or_graph_request: 1", msg)
+        self.assertNotIn("top-secret-token-should-not-leak", msg)
+
     def test_failed_publisher_alerts_without_previous_state(self):
         message, kind = report.publication_summary(
             {"entries": {}}, "333", plan_outcome="failure", publish_outcome="skipped"
