@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   report:
-    if: vars.META_REPORTING_ENABLED != 'false'
+    if: vars.META_REPORTING_ENABLED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
