@@ -17,6 +17,7 @@ from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
 from ntfy_notifications import send_ntfy
+from instagram_tagging import reels_user_tags_payload
 
 SCOPES_YOUTUBE = ["https://www.googleapis.com/auth/youtube.upload"]
 SCOPES_YOUTUBE_CHANNEL_READ = [
@@ -637,7 +638,7 @@ def _upload_instagram_binary(upload_uri: str, page_token: str, video_path: str, 
 
 def upload_instagram_reel(
     page, video_path: str, caption: str, append_store_link: bool = True,
-    publish: bool = True, forbidden_container_ids=None,
+    publish: bool = True, forbidden_container_ids=None, user_tags=None,
 ):
     ig_user_id = page.get("instagram_id")
     if not ig_user_id:
@@ -651,6 +652,10 @@ def upload_instagram_reel(
         "access_token": page_token, "upload_type": "resumable",
         "media_type": "REELS", "caption": caption
     }
+    if user_tags:
+        # Reels accepts username-only tags; x/y coordinates are for images.
+        # Validate *before* the first Meta write. Never tag all videos globally.
+        container_data["user_tags"] = reels_user_tags_payload(user_tags)
     init_res = _graph_json(
         requests.post(container_url, data=container_data, timeout=30),
         "Instagram container oluşturma",
