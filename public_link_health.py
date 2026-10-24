@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 import requests
 
 from ntfy_notifications import send_ntfy
+from telegram_notifications import send_telegram, telegram_configured
 
 EXPECTED_REPO = "emirhankaya985-cloud/auto-video-publisher"
 WORKFLOW = "public_link_schedule.yml"
@@ -88,23 +89,29 @@ def main():
                          f"- This is an Actions health check, not proof of individual published posts.\n")
     if verdict["status"] == "healthy":
         return 0
+    title = "🚨 985 Meta video yayıncısı kontrolü"
+    message = ("985 hesabındaki otomatik Meta yayınlarının son 3 saatte "
+               "başarıyla tamamlandığı doğrulanamadı. "
+               f"Durum: {verdict['status']}; neden: {verdict.get('reason', 'unknown')}. "
+               "Bu bir otomasyon arızası uyarısıdır, paylaşım sonucu değildir.")
     if os.getenv("NTFY_TOPIC", "").strip() or os.getenv("NTFY_TOPIC_URL", "").strip():
         try:
             send_ntfy(
-                "🚨 985 Meta video yayıncısı kontrolü",
-                "985 hesabındaki otomatik Meta yayınlarının son 3 saatte "
-                "başarıyla tamamlandığı doğrulanamadı. "
-                f"Durum: {verdict['status']}; neden: {verdict.get('reason', 'unknown')}. "
-                "Bu bir otomasyon arızası uyarısıdır, paylaşım sonucu değildir.",
-                priority=4, tags=["warning"], timeout=20, require_ack=True,
+                title, message, priority=4, tags=["warning"], timeout=20, require_ack=True,
                 click=f"https://github.com/{EXPECTED_REPO}/actions/workflows/{WORKFLOW}",
             )
             print('{"alert": "ntfy_server_ack", "phone_delivery_verified": false}', flush=True)
         except Exception as exc:
-            # A private ntfy topic or request URL must never appear in logs.
-            print(json.dumps({"alert": "failed", "error_type": type(exc).__name__}), flush=True)
+            # Private ntfy topics and authorization URLs must not appear in logs.
+            print(json.dumps({"alert": "ntfy_failed", "error_type": type(exc).__name__}), flush=True)
     else:
         print('{"alert": "ntfy_not_configured"}', flush=True)
+    if telegram_configured():
+        try:
+            send_telegram(title, message)
+            print('{"alert": "telegram_server_ack", "phone_delivery_verified": false}', flush=True)
+        except Exception as exc:
+            print(json.dumps({"alert": "telegram_failed", "error_type": type(exc).__name__}), flush=True)
     return 1
 
 
