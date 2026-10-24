@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - 'stats_reporter.py'
+      - 'public_link_runtime.py'
+      - 'test_public_link_runtime.py'
       - 'analytics_github_history.py'
       - 'test_meta_reporting_independence.py'
       - '.github/workflows/daily_stats.yml'
@@ -31,6 +33,8 @@ jobs:
         run: python -m py_compile stats_reporter.py analytics_github_history.py test_meta_reporting_independence.py
       - name: Run all unittest regressions, no outbound publishing
         run: python -m unittest discover -v -p 'test*.py'
+      - name: Check publisher reconciliation regressions without Meta uploads
+        run: python -m unittest -v test_public_link_runtime.py
       - name: Check reporting & nightly workflow gates
         run: |
           python - <<'PYCODE'
