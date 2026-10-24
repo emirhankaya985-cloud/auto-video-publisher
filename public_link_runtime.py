@@ -277,6 +277,13 @@ def apply_verified_migration(state):
         }
 
 
+def toonzone_cover_coverage(videos, covers):
+    """Count exact part-specific PNG matches; never reuse another part's artwork."""
+    stems = [Path(name).stem for name in videos if name.lower().endswith(".mp4")]
+    matched = sum(stem + ".png" in covers for stem in stems)
+    return matched, len(stems) - matched
+
+
 def plan(audit=False):
     now = datetime.now(TR)
     day = now.date().isoformat()
@@ -293,6 +300,11 @@ def plan(audit=False):
             report.append(f"HELD source {key}: {type(exc).__name__}")
     for key, files in catalogs.items():
         report.append(f"{key}: MP4={sum(n.lower().endswith('.mp4') for n in files)}, TXT={sum(n.lower().endswith('.txt') for n in files)}, total={len(files)}")
+    if catalogs.get("toonzone"):
+        matched, missing = toonzone_cover_coverage(catalogs["toonzone"], catalogs["covers"])
+        report.append(f"ToonZone exact part covers: matched={matched}; missing={missing}")
+        if missing:
+            report.append("WARNING: ToonZone videos without exact PNG artwork will be held, not posted with an incorrect cover.")
     plans = []
     planned_counts = {}
     batch_limit = 8 if os.getenv("CATCHUP_BATCH_DATE") == day else 1
