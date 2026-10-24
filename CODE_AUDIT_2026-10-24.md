@@ -26,3 +26,17 @@ Observed CI: https://github.com/emirhankaya985-cloud/auto-video-publisher/action
 ## Safety
 
 Keep LINK_AUTOMATION_ENABLED and AUTOMATION_ENABLED distinct. Never enable a parallel legacy publisher for the same accounts. Persist and reconcile publication intent/results before deciding whether retry is safe. CI, API access, Meta post IDs, daily quota completion and views are different validation levels.
+
+## Live scheduled Meta check after the fixes
+
+Run https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/40064851111
+at 2026-10-24 08:04 TRT completed successfully. All 19 runtime safety
+tests passed; the workflow read the actual shared Drive catalogs and Meta
+history, persisted state artifacts and completed the publish step.
+No video was due or published at that early hour; workflow success must not
+be counted as a real post.
+
+The live audit measured 159 ToonZone MP4s, **48 matching exact PNG covers**
+and **111 missing exact covers**, with zero ToonZone TXT files.
+A later reporting fix distinguishes NOT DUE from a completed daily target
+when the daily target is zero.
