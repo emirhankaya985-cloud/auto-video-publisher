@@ -658,7 +658,7 @@ def upload_instagram_reel(
         container_data["user_tags"] = reels_user_tags_payload(user_tags)
     try:
         init_res = _graph_json(
-            requests.post(container_url, data=container_data, timeout=30),
+            requests.post(container_url, data=dict(container_data), timeout=30),
             "Instagram container oluşturma",
         )
     except MetaAPIError as exc:
@@ -673,7 +673,7 @@ def upload_instagram_reel(
         print("Instagram user_tags desteği bu hedefte reddedildi; "
               "Reel yalnızca açıklama @mention ile devam edecek.", flush=True)
         init_res = _graph_json(
-            requests.post(container_url, data=container_data, timeout=30),
+            requests.post(container_url, data=dict(container_data), timeout=30),
             "Instagram container oluşturma (etiketsiz güvenli geri dönüş)",
         )
     container_id = init_res["id"]
