@@ -1,0 +1,59 @@
+name: YouTube authorization check (no upload)
+
+on:
+  pull_request:
+    paths:
+      - youtube_readonly_connection.py
+      - test_youtube_readonly_connection.py
+      - .github/workflows/youtube_readonly_connection.yml
+  push:
+    branches: [main]
+    paths:
+      - youtube_readonly_connection.py
+      - test_youtube_readonly_connection.py
+      - .github/workflows/youtube_readonly_connection.yml
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Select a channel to verify without uploading videos
+        required: true
+        type: choice
+        default: channel1
+        options:
+          - channel1
+          - channel2
+          - daily_laugh
+
+permissions:
+  contents: read
+
+jobs:
+  no-network-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: pip install --require-hashes -r requirements.txt
+      - run: python -m unittest -v test_youtube_readonly_connection.py
+
+  google-readonly:
+    if: github.event_name == 'workflow_dispatch'
+    needs: no-network-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: pip install --require-hashes -r requirements.txt
+      - name: Read OAuth token and check YouTube channel identity (no upload)
+        env:
+          YT_CONNECTION_TARGET: ${{ inputs.channel }}
+          TOKEN_CHANNEL1_JSON: ${{ secrets.TOKEN_CHANNEL1_JSON }}
+          TOKEN_CHANNEL2_JSON: ${{ secrets.TOKEN_CHANNEL2_JSON }}
+          TOKEN_DAILY_LAUGH_LAB_JSON: ${{ secrets.TOKEN_DAILY_LAUGH_LAB_JSON }}
+        run: python youtube_readonly_connection.py "$YT_CONNECTION_TARGET"
