@@ -30,7 +30,9 @@ def build_incident_report(state, run_id, *, plan_text=""):
         status = row.get("status")
         if status not in _SAFE_STATUSES:
             raise ValueError("Unknown ledger status")
-        counts[status] += 1
+        # A green result needs a real platform post identifier.
+        if status != "done" or str(row.get("post_id", "")).strip():
+            counts[status] += 1
         detail = row.get("failure")
         if not isinstance(detail, dict):
             continue
