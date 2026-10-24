@@ -61,6 +61,7 @@ jobs:
       - name: Verify state, account and caption safety without API writes
         run: python -m unittest -v test_public_link_runtime.py
       - name: Check public folders, captions, histories and prepare intent
+        id: plan
         env:
           MODE: ${{ inputs.mode || 'publish' }}
         run: |
@@ -78,6 +79,7 @@ jobs:
           if-no-files-found: error
           retention-days: 90
       - name: Publish explicitly planned Meta videos
+        id: publish
         if: success() && (github.event_name == 'schedule' || inputs.mode == 'publish')
         run: python public_link_runtime.py publish
       - name: Preserve all results, including partial failures
@@ -96,3 +98,13 @@ jobs:
           path: link-runtime/report.md
           if-no-files-found: ignore
           retention-days: 30
+      - name: Telegram confirmed publication and error summary (no uploads)
+        # A failed Telegram push must not reclassify or retry a Meta publication.
+        if: ${{ always() && (github.event_name == 'schedule' || inputs.mode == 'publish') }}
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          PLAN_STEP_OUTCOME: ${{ steps.plan.outcome }}
+          PUBLISH_STEP_OUTCOME: ${{ steps.publish.outcome }}
+        run: python telegram_publish_report.py
