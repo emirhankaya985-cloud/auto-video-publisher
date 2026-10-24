@@ -65,5 +65,30 @@ jobs:
           rows.append("Meta-only publication uses LINK_AUTOMATION_ENABLED and META_ACCESS_TOKEN. Disabled legacy workflows may lack optional Drive/YouTube secrets.")
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as output:
               output.write('\n'.join(rows) + '\n')
+          def status(enabled):
+              return 'READY' if enabled else 'NOT READY'
+
+          telegram_ready = bool(os.environ.get('TELEGRAM_BOT_TOKEN') and os.environ.get('TELEGRAM_CHAT_ID'))
+          meta_ready = (os.environ.get('LINK_AUTOMATION_ENABLED') == 'true'
+                        and bool(os.environ.get('META_ACCESS_TOKEN')))
+          ntfy_ready = bool(os.environ.get('NTFY_TOPIC') or os.environ.get('NTFY_TOPIC_URL'))
+          legacy_on = os.environ.get('AUTOMATION_ENABLED') == 'true'
+          drive_ready = bool(os.environ.get('DRIVE_TOKEN_JSON'))
+          rows = [
+              "",
+              "### Operational readiness — separate publishing paths",
+              f"- Meta public-link publisher configured: **{status(meta_ready)}** (LINK_AUTOMATION_ENABLED + META_ACCESS_TOKEN).",
+              f"- Telegram notification channel configured: **{status(telegram_ready)}**; actual delivery needs a separate smoke test.",
+              f"- ntfy additional notification channel: **{status(ntfy_ready)}** (optional while Telegram is working).",
+              f"- Legacy Drive/YouTube publisher: **{'ON' if legacy_on else 'OFF'}** (AUTOMATION_ENABLED).",
+              f"- Legacy Drive credential present: **{'YES' if drive_ready else 'NO'}**.",
+              "- Do not enable the legacy publisher until credentials, route permissions, previous AFK publisher state and Drive claims have been reconciled.",
+              "- Green Actions jobs are not proof that a video was published; confirm individual platform post IDs.",
+              "",
+              f"[Add missing Secrets](https://github.com/emirhankaya985-cloud/auto-video-publisher/settings/secrets/actions) | [Review Variables](https://github.com/emirhankaya985-cloud/auto-video-publisher/settings/variables/actions) | [Publishing logs](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/workflows/public_link_schedule.yml)",
+          ]
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as output:
+              output.write('\\n'.join(rows) + '\\n')
           print(f"Configured secret names: {sum(bool(os.environ.get(n)) for n in names)}/{len(names)}")
+          print(f"Readiness: telegram={status(telegram_ready)}; public_meta={status(meta_ready)}; ntfy_optional={status(ntfy_ready)}; legacy_enabled={legacy_on}; drive_present={drive_ready}")
           PYCODE

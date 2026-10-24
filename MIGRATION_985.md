@@ -60,3 +60,15 @@ AFK deposundaki 19 Actions değişkeni 985 deposuna aynı değerlerle aktarıld�
 ## Public runner ve Meta-only yayın
 
 985 deposu 22 Ekim 2026 tarihinde public yapıldı. Ana/yedek publisher standart `ubuntu-latest` kullanır. Publisher workflow ortamı `YOUTUBE_PUBLISHING_ENABLED=false` ve `ENABLE_NEW_YOUTUBE_ROUTES=false` uygular; YouTube işleri plana alınmaz ve istemci kimlik bilgileri yüklenmeden durdurulur. Tokenlar kaynak kodunda tutulmaz. Meta kimlik denetimi başarılıdır. Drive erişimi kurulmadan gerçek yayın veya geçmiş uzlaştırması tamamlanmış sayılmaz.
+
+
+## 24 Ekim 2026 — Telegram ve iki ayrı yayıncıyı karıştırma
+
+- Yeni **Meta public-link** yayın yolu `public_link_schedule.yml` için `LINK_AUTOMATION_ENABLED=true` ve `META_ACCESS_TOKEN` GitHub yapılandırmasında mevcuttur. Başarılı zamanlı Actions işi *yayın yapılmış* demek değildir; `link-state-result` artefaktları ve platform gönderi ID'leri kontrol edilmelidir.
+- Telegram `TELEGRAM_BOT_TOKEN` ve `TELEGRAM_CHAT_ID` 985 Secrets içinde mevcut. [Telegram smoke #3](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/40067496169) `telegram_server_acknowledged` ve `server_ack=true` döndürdü; kullanıcının telefonunda push bildirimi görmesi ayrı konudur.
+- `NTFY_TOPIC_URL` veya `NTFY_TOPIC` **opsiyoneldir**: ntfy'de de bildirim isteniyorsa 985 Secrets'a değer eklenmelidir. Bunları public repoya veya koda yazmayın. [Secrets ekle](https://github.com/emirhankaya985-cloud/auto-video-publisher/settings/secrets/actions).
+- Eski **Drive/YouTube çok-kanallı** yayın yolu `omnichannel_schedule.yml` için `AUTOMATION_ENABLED=false` olarak bilinçli biçimde tutulmaktadır. 985 tarafında `DRIVE_TOKEN_JSON`, YouTube OAuth JSON'ları ve diğer rotaya özel sırlar eksiktir. [Secrets ekle](https://github.com/emirhankaya985-cloud/auto-video-publisher/settings/secrets/actions).
+- İki yayıncı aynı videoları ve geçmiş kayıtları bağımsız işleyebileceğinden eski AFK yayıncısının durumu, Drive claim/intent kayıtları ve hesap/rota izinleri doğrulanmadan **`AUTOMATION_ENABLED` değerini `true` yapmayın**. [Actions Variables](https://github.com/emirhankaya985-cloud/auto-video-publisher/settings/variables/actions).
+- 23 isimlik setup sayacı tüm opsiyonel entegrasyonları içerir. `4/23` **19 zorunlu eksik** anlamına gelmez. GitHub tarafından otomatik verilen `GITHUB_TOKEN` ayrıca girilmez.
+- Çalışan mevcut Meta-only yayın yolu için Telegram ve Meta tokenı dışında yeni bir kurulum eylemi gerekmiyor. ntfy ikinci bildirim kanalı olarak ayrıca tercih edilebilir.
+- Test/rapor kanıtları: [985 CI](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/workflows/migration_ci.yml), [Meta yayıncı](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/workflows/public_link_schedule.yml), [Telegram smoke](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/workflows/telegram_smoke.yml).
