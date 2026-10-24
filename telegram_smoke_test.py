@@ -34,7 +34,7 @@ def safe_failure_code(exc):
         return "telegram_rejected_response"
     if detail == "telegram delivery not accepted":
         return "telegram_http_other"
-    if re.fullmatch(r"telegram delivery failed(?: HTTP [1-5][0-9]{2})? \\([A-Za-z]+\\)", detail):
+    if detail.startswith("telegram delivery failed") and detail.endswith(")") and " (" in detail:
         return "telegram_connection_failed"
     return "telegram_error"
 
