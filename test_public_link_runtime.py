@@ -72,7 +72,7 @@ class LinkRuntimeSafety(unittest.TestCase):
             source = Path(tmp) / "source.txt"
             source.write_text("Ronaldo goal analysis", encoding="utf-8")
             with patch.object(runtime, "download", return_value=source), \
-                    patch("instagram_tagging.load_rules", return_value=rules):
+                    patch.dict(runtime.enhance_instagram_caption.__globals__, {"load_rules": lambda: rules}):
                 captions, origin = runtime.copies(
                     "film", {"name": "ronaldo_goal_01.mp4"},
                     {"ronaldo_goal_01.txt": {"id": "test"}}, Path(tmp),
