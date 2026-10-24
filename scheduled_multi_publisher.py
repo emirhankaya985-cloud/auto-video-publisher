@@ -33,6 +33,7 @@ from cover_artwork import (
 from ordered_channels import CARTOON_FOLDER_ID, CHANNELS as ORDERED_CHANNELS, analyze_files, toonzone_metadata
 from threads_publisher import build_threads_video_url, publish_threads_video, threads_configured
 from ntfy_notifications import send_ntfy
+from telegram_notifications import send_telegram, telegram_configured
 from toonzone_schedule import due_toonzone_slots, toonzone_part_eligible
 
 from cloud_omnichannel_publisher import (
@@ -217,7 +218,8 @@ def is_first_daily_slot(route, slot):
 
 def notify(route, slot, stem, results, errors, *, drive=None, folder_id=None, resolved=False,
            grouped_items=None):
-    if not os.environ.get("NTFY_TOPIC_URL", "").strip() and not os.environ.get("NTFY_TOPIC", "").strip():
+    if not (os.environ.get("NTFY_TOPIC_URL", "").strip() or
+            os.environ.get("NTFY_TOPIC", "").strip() or telegram_configured()):
         return False
 
     status = "HATA" if errors else ("DÜZELDİ" if resolved else "BAŞARILI")
@@ -260,20 +262,26 @@ def notify(route, slot, stem, results, errors, *, drive=None, folder_id=None, re
             print(f"ntfy ilerleme bilgisi alınamadı: {type(exc).__name__}", flush=True)
     title = (f"✅ DÜZELDİ — {route}" if resolved else
              f"❌ YAYIN HATASI — {route}" if errors else f"✅ YAYIN BAŞARILI — {route}")
-    try:
-        run_url = ""
-        if os.getenv("GITHUB_RUN_ID") and os.getenv("GITHUB_REPOSITORY"):
-            run_url = f"\n🔗 Actions: {os.getenv('GITHUB_SERVER_URL', 'https://github.com')}/{os.getenv('GITHUB_REPOSITORY')}/actions/runs/{os.getenv('GITHUB_RUN_ID')}"
-        send_ntfy(title, "\n".join(rows) + run_url, priority=4 if errors else 3,
-                  tags=["warning"] if errors else ["white_check_mark"])
-        return True
-    except Exception as exc:
-        # Bildirim servisi yayın durumunu değiştirmemeli veya başarılı yayını
-        # başarısız gösterip aynı slotun tekrar denenmesine yol açmamalı.
-        status = getattr(getattr(exc, "response", None), "status_code", None)
-        safe = f"{type(exc).__name__}" + (f" HTTP {status}" if status is not None else "")
-        print(f"ntfy bildirimi gönderilemedi: {safe}", flush=True)
-        return False
+    run_url = ""
+    if os.getenv("GITHUB_RUN_ID") and os.getenv("GITHUB_REPOSITORY"):
+        run_url = f"\n🔗 Actions: {os.getenv('GITHUB_SERVER_URL', 'https://github.com')}/{os.getenv('GITHUB_REPOSITORY')}/actions/runs/{os.getenv('GITHUB_RUN_ID')}"
+    body = "\n".join(rows) + run_url
+    accepted = False
+    if os.environ.get("NTFY_TOPIC_URL", "").strip() or os.environ.get("NTFY_TOPIC", "").strip():
+        try:
+            send_ntfy(title, body, priority=4 if errors else 3,
+                      tags=["warning"] if errors else ["white_check_mark"])
+            accepted = True
+        except Exception as exc:
+            print(f"ntfy bildirimi gönderilemedi: {type(exc).__name__}", flush=True)
+    if telegram_configured():
+        try:
+            send_telegram(title, body)
+            accepted = True
+        except Exception as exc:
+            print(f"telegram bildirimi gönderilemedi: {type(exc).__name__}", flush=True)
+    # Do not change publication status when a transport fails.
+    return accepted
 
 
 def sanitize_error(value):

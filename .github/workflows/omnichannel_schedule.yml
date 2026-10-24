@@ -305,6 +305,8 @@ jobs:
           META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
           NTFY_TOPIC_URL: ${{ secrets.NTFY_TOPIC_URL }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
           PENGUEN_THREADS_VIDEO_URL_TEMPLATE: ${{ secrets.PENGUEN_THREADS_VIDEO_URL_TEMPLATE }}
           ENABLE_PENGUEN_THREADS: ${{ vars.ENABLE_PENGUEN_THREADS }}
