@@ -143,6 +143,45 @@ class InstagramBinaryUploadTests(unittest.TestCase):
         self.assertEqual(get.call_args_list[1].kwargs["params"]["fields"], "id,permalink")
         self.assertEqual(post.call_count, 2)  # Container creation + exactly one publish.
 
+    def test_reels_tags_are_sent_at_container_creation_only(self):
+        with patch("cloud_omnichannel_publisher.os.path.getsize", return_value=5), \
+             patch("cloud_omnichannel_publisher._sha256_file", return_value="a" * 64), \
+             patch("cloud_omnichannel_publisher._upload_instagram_binary"), \
+             patch("cloud_omnichannel_publisher.time.sleep"), \
+             patch("cloud_omnichannel_publisher.requests.post") as post, \
+             patch("cloud_omnichannel_publisher.requests.get") as get:
+            post.side_effect = [
+                Mock(status_code=200, json=lambda: {"id": "container", "uri": "https://rupload.facebook.com/1"}),
+                Mock(status_code=200, json=lambda: {"id": "media"}),
+            ]
+            get.side_effect = [
+                Mock(status_code=200, json=lambda: {"status_code": "FINISHED"}),
+                Mock(status_code=200, json=lambda: {"id": "media", "permalink": "https://www.instagram.com/reel/id/"}),
+            ]
+            self.assertEqual(
+                upload_instagram_reel(
+                    {"instagram_id": "ig", "page_token": "secret"}, "video.mp4",
+                    "Cristiano Ronaldo @cristiano #CR7",
+                    append_store_link=False, user_tags=["cristiano"],
+                ), "media"
+            )
+        import json
+        init = post.call_args_list[0].kwargs["data"]
+        self.assertEqual(json.loads(init["user_tags"]), [{"username": "cristiano"}])
+        self.assertIn("@cristiano", init["caption"])
+        self.assertNotIn("user_tags", post.call_args_list[1].kwargs["data"])
+        self.assertEqual(post.call_count, 2)
+
+    def test_invalid_user_tag_is_rejected_before_any_api_post(self):
+        with patch("cloud_omnichannel_publisher.os.path.getsize", return_value=5), \
+             patch("cloud_omnichannel_publisher.requests.post") as post:
+            with self.assertRaisesRegex(ValueError, "Invalid Instagram username"):
+                upload_instagram_reel(
+                    {"instagram_id": "ig", "page_token": "secret"},
+                    "video.mp4", "caption", user_tags=["not valid user"]
+                )
+        post.assert_not_called()
+
     def test_upload_only_waits_for_finished_container_without_publishing(self):
         with patch("cloud_omnichannel_publisher.os.path.getsize", return_value=5), \
              patch("cloud_omnichannel_publisher._sha256_file", return_value="a" * 64), \
