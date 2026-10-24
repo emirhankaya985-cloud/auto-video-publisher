@@ -65,3 +65,42 @@ uyarı verilir. İkinci yayıncı `AUTOMATION_ENABLED` etkinleştirilmez.
 **Kapsam dışı kullanıcı işi:** NTFY Secret'ları, eski YouTube/Drive OAuth tokenları
 ve `AUTOMATION_ENABLED` kullanıcı tarafından başka sohbette ele alınıyor.
 Bu dosyaya bakarak legacy yayıncıyı açma. Sezon 2 kapaklarını kullanıcı ekleyecek.
+
+## Yapılandırılmış tüm hata kayıtları (24 Ekim 2026)
+
+Son yayıncının `publisher_error_journal.py` modülü her gerçek üretim
+koşumunda oluşan Drive envanter, Meta hesap/geçmiş, TXT, kapak, kaynak video,
+Instagram hazırlık, Facebook/Instagram API ve Telegram/ntfy teslim hata
+olaylarını ayrı JSONL satırlarında yazar. Her olay şu alanları taşır:
+
+- Zaman (UTC), ilgili GitHub Actions run ID ve çalışma linki.
+- Kanal/hesap rotası, Facebook veya Instagram platformu, dosya adı.
+- İşlemin aşaması, güvenli hata sınıfı, exception türü.
+- Varsa HTTP durumu, Graph kodu ve alt kodu, `uncertain` durumu ve
+  güvenli tekrar politikası.
+- Bildirim verilemeyen durumlarda da aynı kayıt oluşturulur.
+- GitHub Actions testlerinin kasıtlı mock hataları gerçek hata dosyasına
+  **yazılmaz**, sahte telefon alarmı oluşturmaz.
+
+Her yayın iş akışı sonunda iki artefakt tutulur: `link-error-journal`
+(tüm yapılandırılmış olaylar, `errors.jsonl`) ve
+`link-incident-report` (tüm olayları içeren `incidents.json`,
+her adımın verify/plan/publish/notify sonucu). Dosyalar GitHub Actions
+artefaktlarında **90 gün** tutulur. Bu kayıtların süresiz
+arşivlendiği iddia edilmemelidir; kalıcı teknik nedenler, düzeltme ve
+kanıt linkleri bu runbook'a eklenmeye devam edilmelidir. Ham loglar GitHub
+Actions job loglarında ayrıca incelenebilir; bunları gizli token/özel URL
+içerme ihtimaline karşı halka açık belgelerde aynen kopyalama.
+
+**Gerçek olay:** [24 Ekim planlı yayın #40073539771](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/40073539771)
+yeni Instagram etiketleme testindeki modül patch hatası yüzünden
+`Verify...` aşamasında durdu ve video paylaşamadı.
+Kod, [düzeltme CI #40074189541](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/40074189541)
+ile doğrulandı. Gelecekte yeni testler gerçek yayın workflow'unda test
+hatası üretirse `verify` adımının sonucunu ayrıca hata defterine
+kaydet; GitHub Actions başarılı/başarısız ile gerçekten yeni post ID
+üretildiğini karıştırma.
+
+**Yeni hata kaydı sahibi**: AI/Codex bakımında her gerçek olayın
+run linkini ve giderilen kök nedenini bu dosyaya ekle; olay dosyasını
+ham metinle veya erişim tokenıyla hiçbir zaman birleştirme.
