@@ -32,6 +32,7 @@ def load_runtime():
     auth.load_meta_auth = Mock(return_value={"pages": []})
     compat = types.ModuleType("instagram_media_compat")
     compat.prepare_instagram_upload = Mock()
+    compat.probe = Mock(return_value={"streams": [{"codec_type": "video"}], "format": {"duration": "12.0"}})
     ordered = types.ModuleType("ordered_channels")
     ordered.parse_order = Mock(return_value=(1, 2, 2, "title"))
     def fake_toonzone_metadata(stem):
@@ -364,6 +365,17 @@ class LinkRuntimeSafety(unittest.TestCase):
                     runtime.plan()
                 self.assertEqual(json.loads((root / "plan.json").read_text()), [])
                 self.assertEqual(caption_mock.call_count, 1)
+
+    def test_invalid_mp4_codec_metadata_blocks_upload_before_meta(self):
+        with patch.object(runtime, "probe", return_value={"streams": [], "format": {"duration": "10"}}):
+            with self.assertRaisesRegex(RuntimeError, "ön doğrulaması"):
+                runtime.verify_source_video(Path("fake.mp4"))
+
+    def test_ffprobe_timeout_blocks_meta_without_leaking_video_path(self):
+        with patch.object(runtime, "probe", side_effect=TimeoutError("private-file-location")):
+            with self.assertRaises(RuntimeError) as raised:
+                runtime.verify_source_video(Path("private.mp4"))
+            self.assertNotIn("private-file-location", str(raised.exception))
 
     def test_local_ig_prepare_failure_keeps_fb_publishable(self):
         with tempfile.TemporaryDirectory() as td:
