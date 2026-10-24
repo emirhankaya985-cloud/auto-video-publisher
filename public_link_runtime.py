@@ -29,7 +29,9 @@ from instagram_media_compat import prepare_instagram_upload, probe
 from meta_auth_loader import load_meta_auth
 from ordered_channels import TOONZONE_ETSY_LINK, parse_order, toonzone_metadata
 from publication_safety import route_paused
-from publisher_recovery import read_with_retry, classify_meta_failure
+from publisher_recovery import (
+    read_with_retry, classify_meta_failure, known_pre_publish_media_rejection,
+)
 from scheduled_multi_publisher import (
     platform_content_from_txt, TARLADAKI_HOURS, PENGUEN_HOURS,
     GONLE_HOURS, FILM_HOURS, daily_laugh_hours_for_date,
@@ -591,7 +593,14 @@ def plan(audit=False):
                 report.append("Caption preview: " + captions[pending[0]][:450].replace("\n", " "))
             if not audit:
                 for p in pending:
-                    state["entries"][f"{route}:{p}:{item['id']}"] = {"route": route, "platform": p, "status": "intent", "caption_hash": caption_key(captions[p]), "file": item["name"], "day": clock.date().isoformat(), "run_id": os.environ["GITHUB_RUN_ID"]}
+                    key = f"{route}:{p}:{item['id']}"
+                    old_attempts = state["entries"].get(key, {}).get("prepublish_retry_count", 0)
+                    state["entries"][key] = {
+                        "route": route, "platform": p, "status": "intent",
+                        "caption_hash": caption_key(captions[p]), "file": item["name"],
+                        "day": clock.date().isoformat(), "run_id": os.environ["GITHUB_RUN_ID"],
+                        "prepublish_retry_count": old_attempts,
+                    }
                 plans.append(selected)
                 for p in pending:
                     planned_counts[(route, p)] = planned_counts.get((route, p), 0) + 1
@@ -669,7 +678,8 @@ def publish():
                 try:
                     prepared_ig = prepare_instagram_upload(
                         video, temp / "instagram.mp4", prefer_remux=True,
-                        film_compact=item["route"] in {"film", "film_second", "gonle"},
+                        film_compact=(item["route"] in {"film", "film_second", "gonle"}
+                                      or state["entries"][f"{item['route']}:instagram:{item['id']}"].get("prepublish_retry_count", 0) > 0),
                         toonzone_compact=item["route"] == "toonzone",
                     )
                 except Exception as exc:
@@ -704,7 +714,17 @@ def publish():
                     # A rejected API request and a timed-out *accepted* upload
                     # are indistinguishable without remote reconciliation.
                     diagnostic = classify_meta_failure(exc)
-                    state["entries"][key].update(status="uncertain", failure=diagnostic)
+                    entry = state["entries"][key]
+                    previous = entry.get("prepublish_retry_count", 0)
+                    if (platform == "instagram" and isinstance(exc, MetaAPIError)
+                            and known_pre_publish_media_rejection(exc, item["route"], previous)):
+                        # This native uploader has not reached media_publish.
+                        # Remote history was read during planning and will be
+                        # checked again before trying the stricter encoding.
+                        entry.update(status="ready", prepublish_retry_count=1,
+                                     failure=diagnostic)
+                    else:
+                        entry.update(status="uncertain", failure=diagnostic)
                     safe = str(exc) if isinstance(exc, MetaAPIError) else type(exc).__name__
                     failures.append(item["page"] + " " + platform + ": " + safe)
                 finally:
