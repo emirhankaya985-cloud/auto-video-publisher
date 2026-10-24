@@ -82,6 +82,7 @@ class LinkRuntimeSafety(unittest.TestCase):
         with patch.dict(os.environ, {"COMPLETE_DAY_DATE": "2026-10-23"}):
             self.assertEqual(runtime.target_count("film", datetime(2026, 10, 24, 9, tzinfo=runtime.TR)), 0)
             self.assertEqual(runtime.target_count("film", datetime(2026, 10, 24, 18, tzinfo=runtime.TR)), 5)
+            self.assertEqual(runtime.target_count("toonzone", datetime(2026, 10, 24, 7, tzinfo=runtime.TR)), 0)
             self.assertEqual(runtime.target_count("toonzone", datetime(2026, 10, 24, 12, 20, tzinfo=runtime.TR)), 3)
 
     def test_catchup_preserves_daily_laugh_eight_target(self):
@@ -139,7 +140,9 @@ class LinkRuntimeSafety(unittest.TestCase):
             initial = {"schema": 1, "episode_days": {}, "entries": {
                 "toonzone:facebook:a": {"route": "toonzone", "platform": "facebook", "status": "uncertain", "caption_hash": "old"}}}
             with patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(root / "summary.md"), "GITHUB_RUN_ID": "123"}), patch.object(runtime, "ROOT", root), patch.object(runtime, "STATE", root / "state.json"), patch.object(runtime, "PLAN", root / "plan.json"), patch.object(runtime, "FOLDERS", {"toonzone": "folder", "covers": "coverfolder"}), patch.object(runtime, "ROUTES", {"toonzone": ("toonzone", "ToonZone")}), patch.object(runtime, "restore", return_value=initial), patch.object(runtime, "load_meta_auth", return_value={"pages": [{"page_name": "ToonZone"}]}), patch.object(runtime, "inventory", side_effect=lambda folder: source if folder == "folder" else {}), patch.object(runtime, "graph_rows", return_value=[]), patch.object(runtime, "seed_done", return_value=False), patch.object(runtime, "copies", return_value=({"facebook": "caption", "instagram": "caption"}, "matching-txt")) as caption_mock:
-                runtime.plan()
+                # Exercise uncertain-intent protection independently of CI clock time.
+                with patch.object(runtime, "target_count", return_value=4):
+                    runtime.plan()
                 self.assertEqual(json.loads((root / "plan.json").read_text()), [])
                 self.assertEqual(caption_mock.call_count, 1)
 
