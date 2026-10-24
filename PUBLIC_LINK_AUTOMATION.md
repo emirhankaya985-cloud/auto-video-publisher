@@ -91,15 +91,20 @@ platform gönderi kimlikleri kontrol edilmelidir.
   ve başlık kullanılır. İşletim amaçlı TXT arşivi,
   `Generate ToonZone TXT archive` workflow artifact'ından alınabilir.
   Public Drive klasörüne otomatik TXT **yüklenmez**; okuma erişimi vardır.
-- Diğer hesaplarda MP4 adına **tam eşleşen, dolu ve okunabilir TXT** zorunludur.
-  TXT yoksa veya Drive erişimi hata verirse yanlış/genel açıklamayla
-  yayın yapılmaz; ilgili içerik HELD raporlanır.
-- Canlı ad eşleşmesi denetiminde ortak mizah 851/851, Gönle 314/314,
-  Film 877/877 doğrulandı. Daily Laugh'ta 175 MP4'ün yalnızca 58'inin
-  aynı adlı TXT'si vardı; **117 tanesi eşleşmedi**. Klasörde 561 TXT
-  olması yeterli değildir; 101.mp4 gibi videolara 101.txt eşlenemiyor.
-  Bunlar otomatik olarak rastgele başka TXT'lerle eşleştirilmemelidir.
-- ToonZone görselleri için aynı denetimde 159 MP4'ün 48'inin tam adlı
-  kapağı bulundu; 111 kapak eksik. Eksik kapaklar ayrı bir yayın engelidir.
-- Doğrulama: 24 Ekim CI 365 unittest + 57 fonksiyon kontrolü başarılı;
-  TXT arşivi canlı GitHub Actions işinde 159/159 oluşturuldu.
+- Tarladaki, Penguen, Gönle ve Film kaynaklarında tam eşleşen, dolu ve
+  okunabilir TXT zorunludur. TXT indirme hatası varsa yanlış açıklamayla
+  yayın yapılmaz.
+- Daily Laugh kaynağında 175 MP4'ün 58'ine orijinal TXT adı tam uyuyor.
+  Diğer **117 video** için yayın öncesi numaraya bağlı, İngilizce, sahne
+  ayrıntısı uydurmayan TXT yerel çalışma klasöründe otomatik üretilir.
+  Mevcut 58 orijinal TXT değiştirilmez veya üzerine yazılmaz.
+  GitHub Actions arşivinde 117/117 otomatik TXT üretimi doğrulandı.
+- ToonZone kapak klasörü, kullanıcının verdiği
+  `1YlGz6rKfW_S2eMW82zOs09flCGtwYWMO` Drive klasörüdür.
+  Burada Sezon 1'in 12 bölümüne ait 48 PNG eksiksiz bulunuyor.
+  Sezon 2 videolarının 111 PNG kapağı ise bu klasörde **henüz yok**.
+  Yanlış bölüm/part görseli yerine geçici olarak yayın güvenli biçimde
+  bekletilir. Kapaklar otomatik olarak Drive'a yüklenmiş değildir.
+- Doğrulama: 24 Ekim CI 388 unittest + 57 fonksiyon kontrolü başarılı;
+  TXT arşivi canlı GitHub Actions işinde ToonZone 159/159,
+  Daily Laugh eksik TXT 117/117 üretildi.
