@@ -8,6 +8,7 @@ import os
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
+from publisher_error_journal import read_errors
 
 ROOT = Path("link-runtime")
 _SAFE_REASONS = {
@@ -18,7 +19,7 @@ _SAFE_REASONS = {
 _SAFE_STATUSES = {"done", "ready", "uncertain", "intent"}
 
 
-def build_incident_report(state, run_id, *, plan_text=""):
+def build_incident_report(state, run_id, *, plan_text="", errors=None, step_outcomes=None):
     if not str(run_id).isdigit():
         raise ValueError("GitHub run ID invalid")
     if not isinstance(state, dict) or not isinstance(state.get("entries"), dict):
@@ -58,13 +59,23 @@ def build_incident_report(state, run_id, *, plan_text=""):
     }
     blockers = {name: sum(line.startswith(marker) for line in plan_text.splitlines())
                 for name, marker in markers.items()}
+    # Journal events are emitted at each individual exception/hold, even if
+    # the state is later reconciled or a different account publishes.
+    # Never persist raw provider responses or secret-bearing tracebacks.
+    events = [event for event in (errors or []) if event.get("run_id") == run_id]
+    outcomes = {k: v for k, v in (step_outcomes or {}).items()
+                if k in ("verify", "plan", "publish", "notify")
+                and v in ("success", "failure", "skipped", "cancelled")}
     return {
-        "schema": 1, "run_id": run_id,
+        "schema": 2, "run_id": run_id,
         "created_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "confirmed_new_posts": counts["done"],
         "safe_pre_upload_retries": counts["ready"],
         "uncertain_pending_reconciliation": counts["intent"] + counts["uncertain"],
         "incidents": incidents, "planning_blocker_counts": blockers,
+        "all_error_events": events, "error_event_count": len(events),
+        "step_outcomes": outcomes,
+        "run_url": f"https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/{run_id}",
         "message": "No automatic Meta POST retries. Confirm remote history before reattempting an ambiguous upload.",
     }
 
@@ -78,12 +89,18 @@ def main():
         state = {"entries": {}}
     report_path = ROOT / "report.md"
     plan_text = report_path.read_text(encoding="utf-8") if report_path.is_file() else ""
-    summary = build_incident_report(state, run_id, plan_text=plan_text)
+    outcomes = {key: os.getenv("OUTCOME_" + key.upper(), "")
+                for key in ("verify", "plan", "publish", "notify")}
+    summary = build_incident_report(
+        state, run_id, plan_text=plan_text,
+        errors=read_errors(run_id=run_id), step_outcomes=outcomes,
+    )
     ROOT.mkdir(parents=True, exist_ok=True)
     (ROOT / "incidents.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({key: summary[key] for key in ("run_id", "confirmed_new_posts",
                       "safe_pre_upload_retries", "uncertain_pending_reconciliation",
-                      "planning_blocker_counts")}, ensure_ascii=False), flush=True)
+                      "planning_blocker_counts", "error_event_count", "step_outcomes")},
+                     ensure_ascii=False), flush=True)
 
 
 if __name__ == "__main__":
