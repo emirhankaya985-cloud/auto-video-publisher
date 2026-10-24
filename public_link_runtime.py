@@ -27,6 +27,7 @@ from cloud_omnichannel_publisher import (
 )
 from instagram_media_compat import prepare_instagram_upload, probe
 from instagram_tagging import enhance_instagram_caption
+from publisher_error_journal import record_error
 from meta_auth_loader import load_meta_auth
 from ordered_channels import TOONZONE_ETSY_LINK, parse_order, toonzone_metadata
 from publication_safety import route_paused
@@ -435,6 +436,8 @@ def plan(audit=False):
         except Exception as exc:
             catalogs[key] = {}
             report.append(f"HELD source {key}: {type(exc).__name__}")
+            record_error("drive_inventory", "drive_unavailable", route=key,
+                         error=exc, safe_to_retry=True)
     for key, files in catalogs.items():
         report.append(f"{key}: MP4={sum(n.lower().endswith('.mp4') for n in files)}, TXT={sum(n.lower().endswith('.txt') for n in files)}, total={len(files)}")
     if catalogs.get("daily_laugh"):
@@ -461,6 +464,7 @@ def plan(audit=False):
         page = pages.get(page_name)
         if not page:
             report.append("HELD: Meta page not available.")
+            record_error("meta_account", "meta_account_missing", route=route)
             continue
         ig_enabled = not (route == "gonle" and route_paused("gonle_ig")) and not (route == "daily_laugh" and route_paused("daily_laugh_instagram"))
         platforms = ["facebook"] + (["instagram"] if page.get("instagram_id") and route != "film_second" and ig_enabled else [])
@@ -474,6 +478,8 @@ def plan(audit=False):
                 histories[p] = history_cache[cache_key]
         except RuntimeError as exc:
             report.append("HELD: " + str(exc))
+            record_error("meta_history", "meta_history_unavailable",
+                         route=route, error=exc)
             continue
         remote = {p: {caption_key(row.get("description") or row.get("caption")): row for row in rows} for p, rows in histories.items()}
         for platform, rows in histories.items():
@@ -519,6 +525,8 @@ def plan(audit=False):
                     other_humor_hashes.update(caption_key(r.get("description") or r.get("caption")) for r in history_cache[ck])
             except RuntimeError as exc:
                 report.append("HELD: " + str(exc))
+                record_error("shared_account_history", "meta_history_unavailable",
+                             route=route, error=exc)
                 continue
             videos = [v for v in videos if not any(
                 k.endswith(":" + v["id"]) and e["route"] in {"tarladaki", "penguen"} and e["route"] != route
@@ -548,6 +556,8 @@ def plan(audit=False):
                     captions, origin = copies(route, item, files, Path(tmp))
             except (RuntimeError, UnicodeError, ValueError) as exc:
                 report.append("HELD TXT/caption: " + str(exc))
+                record_error("txt_caption", "txt_unavailable", route=route,
+                             video=item["name"], error=exc, safe_to_retry=True)
                 if source in {"film", "toonzone"}:
                     break
                 continue
@@ -593,6 +603,8 @@ def plan(audit=False):
                 cover = catalogs["covers"].get(Path(item["name"]).stem + ".png")
                 if not cover:
                     report.append("HELD: exact ToonZone cover missing.")
+                    record_error("toonzone_cover", "cover_missing",
+                                 route=route, video=item["name"])
                     break
                 selected["cover_id"] = cover["id"]
                 state["episode_days"][day] = ep
@@ -676,6 +688,10 @@ def publish():
                                  "error_type": type(exc).__name__,
                                  "safe_to_repost": True},
                     )
+                for platform in item["platforms"]:
+                    record_error("source_video", "source_or_cover_preparation_failed",
+                                 route=item["route"], platform=platform,
+                                 video=item["name"], error=exc, safe_to_retry=True)
                 save(STATE, state)
                 continue
             # Instagram transcoding is local preparation, not a Meta API
@@ -699,6 +715,9 @@ def publish():
                     )
                     failures.append(item["page"] + " instagram: local media preparation "
                                     + type(exc).__name__ + " (no Meta upload attempted)")
+                    record_error("instagram_preparation", "media_preparation_failed",
+                                 route=item["route"], platform="instagram",
+                                 video=item["name"], error=exc, safe_to_retry=True)
                     save(STATE, state)
             for platform in item["platforms"]:
                 if platform == "instagram" and prepared_ig is None:
@@ -737,6 +756,11 @@ def publish():
                         entry.update(status="uncertain", failure=diagnostic)
                     safe = str(exc) if isinstance(exc, MetaAPIError) else type(exc).__name__
                     failures.append(item["page"] + " " + platform + ": " + safe)
+                    record_error(f"{platform}_publish", diagnostic["reason"],
+                                 route=item["route"], platform=platform,
+                                 video=item["name"], error=exc,
+                                 status=entry["status"],
+                                 safe_to_retry=entry["status"] == "ready")
                 finally:
                     save(STATE, state)
     if failures:
