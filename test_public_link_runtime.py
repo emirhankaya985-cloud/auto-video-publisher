@@ -85,6 +85,27 @@ class LinkRuntimeSafety(unittest.TestCase):
             self.assertEqual(runtime.target_count("toonzone", datetime(2026, 10, 24, 7, tzinfo=runtime.TR)), 0)
             self.assertEqual(runtime.target_count("toonzone", datetime(2026, 10, 24, 12, 20, tzinfo=runtime.TR)), 3)
 
+    def test_instagram_history_counts_videos_not_photos(self):
+        response = Mock(status_code=200)
+        response.json.return_value = {"data": [
+            {"id": "photo", "media_type": "IMAGE", "caption": "photo", "timestamp": "2026-10-24T10:00:00Z"},
+            {"id": "carousel", "media_type": "CAROUSEL_ALBUM", "caption": "album", "timestamp": "2026-10-24T10:00:00Z"},
+            {"id": "reel", "media_type": "VIDEO", "caption": "reel", "timestamp": "2026-10-24T10:00:00Z"},
+        ]}
+        with patch.object(runtime.requests, "get", create=True, return_value=response) as fetch:
+            result = runtime.graph_rows({"instagram_id": "123", "page_token": "test-token"}, "instagram")
+        self.assertEqual([row["id"] for row in result], ["reel"])
+        self.assertIn("media_type", fetch.call_args.kwargs["params"]["fields"])
+
+    def test_instagram_history_without_media_type_fails_closed(self):
+        response = Mock(status_code=200)
+        response.json.return_value = {"data": [
+            {"id": "unclassified", "caption": "cannot determine video"}
+        ]}
+        with patch.object(runtime.requests, "get", create=True, return_value=response):
+            with self.assertRaisesRegex(RuntimeError, "medya türü"):
+                runtime.graph_rows({"instagram_id": "123", "page_token": "test-token"}, "instagram")
+
     def test_daily_laugh_confirmed_post_uses_new_york_calendar_day(self):
         # 00:30 UTC on Oct 24 is Oct 24 in Istanbul, Oct 23 in New York.
         row = {"created_time": "2026-10-24T00:30:00Z"}
