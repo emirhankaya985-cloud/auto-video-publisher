@@ -4,9 +4,13 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 
 import telegram_publish_report as report
+
+# Intentional synthetic failures in unittest must NEVER leak into the live
+# GitHub run's incident journal or trigger false Telegram/ntfy alerts.
+report.record_error = Mock()
 
 
 class TelegramPublishReportTests(unittest.TestCase):
