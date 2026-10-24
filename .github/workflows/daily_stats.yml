@@ -43,6 +43,8 @@ jobs:
           TOONZONE_DRIVE_FOLDER_ID: 14ee4AnUdf03dYUAdtfpHa-E9Zxyh4UZF
           NTFY_TOPIC_URL: ${{ secrets.NTFY_TOPIC_URL }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python stats_reporter.py
       - name: Failure notice (does not replace the failed daily report)
         if: ${{ failure() }}
@@ -50,4 +52,6 @@ jobs:
         env:
           NTFY_TOPIC_URL: ${{ secrets.NTFY_TOPIC_URL }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python ntfy_report_failure_alert.py

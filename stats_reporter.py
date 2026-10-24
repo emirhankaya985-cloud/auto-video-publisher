@@ -19,6 +19,7 @@ from cloud_omnichannel_publisher import (
 from analytics_archive import make_record, upsert_records, export_csv
 from analytics_drive_store import get_or_create_archive_folder, download_history, save_history_and_csv
 from ntfy_notifications import send_ntfy
+from telegram_notifications import send_telegram, telegram_configured
 from ntfy_phone_report import compact_phone_report
 
 
@@ -638,15 +639,30 @@ def build_report(now=None):
 
 
 def notify(message):
-    receipt = send_ntfy(
-        "🌙 Günlük Sosyal Medya Raporu",
-        compact_phone_report(message, ACCOUNT_TARGETS),
-        timeout=20,
-        require_ack=True,
-    )
-    # Only record server-level receipt, never claim Android push delivery.
-    print(f"ntfy sunucu alındısı doğrulandı: HTTP {receipt['http_status']}; "
-          "telefon teslimatı doğrulanmadı.", flush=True)
+    title = "🌙 Günlük Sosyal Medya Raporu"
+    body = compact_phone_report(message, ACCOUNT_TARGETS)
+    ntfy_error = None
+    try:
+        receipt = send_ntfy(title, body, timeout=20, require_ack=True)
+        print(f"ntfy sunucu alındısı doğrulandı: HTTP {receipt['http_status']}; "
+              "telefon teslimatı doğrulanmadı.", flush=True)
+    except Exception as exc:
+        ntfy_error = exc
+    telegram_ok = False
+    if telegram_configured():
+        try:
+            receipt = send_telegram(title, body)
+            telegram_ok = receipt["server_ack"]
+            print("telegram sunucu alındısı doğrulandı; telefon teslimatı doğrulanmadı.",
+                  flush=True)
+        except Exception as exc:
+            print(f"telegram raporu gönderilemedi: {type(exc).__name__}", flush=True)
+    if ntfy_error:
+        if telegram_ok:
+            print(f"ntfy raporu gönderilemedi: {type(ntfy_error).__name__}", flush=True)
+        else:
+            # Preserve existing ntfy failure semantics and sanitized errors.
+            raise ntfy_error
 
 
 if __name__ == "__main__":

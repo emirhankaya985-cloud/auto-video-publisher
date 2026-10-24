@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, time, timezone
 import requests
 
 from ntfy_notifications import send_ntfy
+from telegram_notifications import send_telegram, telegram_configured
 
 
 EXPECTED_REPOSITORY = "emirhankaya985-cloud/auto-video-publisher"
@@ -91,12 +92,25 @@ def main():
             title = "⚠️ Günlük rapor sağlık kontrolü başarısız"
             message = ("Dünkü günlük raporun GitHub Actions durumuna erişilemedi. "
                        "Bu sonuç raporun çalıştığını veya çalışmadığını kanıtlamaz.")
-        receipt = send_ntfy(
-            title, message, priority=4, tags=["warning"], timeout=20,
-            click=f"https://github.com/{EXPECTED_REPOSITORY}/actions/workflows/daily_stats.yml",
-            require_ack=True,
-        )
-        print(json.dumps({"state": verdict["status"], "alert_server_ack": receipt["server_ack"],
+        ntfy_ack = False
+        telegram_ack = False
+        try:
+            receipt = send_ntfy(
+                title, message, priority=4, tags=["warning"], timeout=20,
+                click=f"https://github.com/{EXPECTED_REPOSITORY}/actions/workflows/daily_stats.yml",
+                require_ack=True,
+            )
+            ntfy_ack = receipt["server_ack"]
+        except Exception as exc:
+            print(json.dumps({"ntfy_error_type": type(exc).__name__}), flush=True)
+        if telegram_configured():
+            try:
+                receipt = send_telegram(title, message)
+                telegram_ack = receipt["server_ack"]
+            except Exception as exc:
+                print(json.dumps({"telegram_error_type": type(exc).__name__}), flush=True)
+        print(json.dumps({"state": verdict["status"], "alert_server_ack": ntfy_ack,
+                          "telegram_server_ack": telegram_ack,
                           "phone_delivery_verified": False}), flush=True)
         # The watchdog job stays red on a missing nightly report even when
         # the NTFY alert was accepted; ACK is not a successful daily report.
