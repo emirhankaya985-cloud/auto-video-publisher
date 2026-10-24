@@ -16,11 +16,11 @@ STATE_PATH = Path("link-runtime/state.json")
 ALLOWED_STEP_RESULTS = {"success", "failure", "skipped", "cancelled", ""}
 
 
-def publication_summary(state, run_id, *, plan_outcome="success", publish_outcome="success"):
+def publication_summary(state, run_id, *, verify_outcome="success", plan_outcome="success", publish_outcome="success"):
     """Return text and category; never claim publication from workflow status."""
     if not run_id or not run_id.isdigit():
         return None, "invalid_run_id"
-    if plan_outcome not in ALLOWED_STEP_RESULTS or publish_outcome not in ALLOWED_STEP_RESULTS:
+    if any(result not in ALLOWED_STEP_RESULTS for result in (verify_outcome, plan_outcome, publish_outcome)):
         return None, "invalid_step_outcome"
     if not isinstance(state, dict) or not isinstance(state.get("entries"), dict):
         return None, "invalid_state"
@@ -33,7 +33,7 @@ def publication_summary(state, run_id, *, plan_outcome="success", publish_outcom
             if row.get("status") == "done" and str(row.get("post_id", "")).strip()]
     unknown = [row for row in matched if row.get("status") in {"intent", "uncertain"}]
     # A failed planning step can have left an older valid state untouched.
-    failed = plan_outcome == "failure" or publish_outcome == "failure"
+    failed = any(result == "failure" for result in (verify_outcome, plan_outcome, publish_outcome))
     if not failed and not unknown and not done:
         return None, "nothing_to_report"
     lines = ["🚨 985 Meta yayın uyarısı" if failed or unknown else "✅ 985 Meta video yayınları",
@@ -59,7 +59,8 @@ def main():
     run_id = os.getenv("GITHUB_RUN_ID", "")
     plan_outcome = os.getenv("PLAN_STEP_OUTCOME", "")
     publish_outcome = os.getenv("PUBLISH_STEP_OUTCOME", "")
-    if plan_outcome == "skipped" and publish_outcome == "skipped":
+    verify_outcome = os.getenv("VERIFY_STEP_OUTCOME", "")
+    if plan_outcome == "skipped" and publish_outcome == "skipped" and verify_outcome != "failure":
         return 0
     state = {"entries": {}}
     if STATE_PATH.is_file():
@@ -69,7 +70,7 @@ def main():
             print('{"status":"telegram_report_invalid_state"}', flush=True)
             return 1
     message, category = publication_summary(
-        state, run_id, plan_outcome=plan_outcome, publish_outcome=publish_outcome
+        state, run_id, verify_outcome=verify_outcome, plan_outcome=plan_outcome, publish_outcome=publish_outcome
     )
     if not message:
         print(json.dumps({"status": category, "message_sent": False}), flush=True)
