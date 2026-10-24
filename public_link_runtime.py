@@ -26,6 +26,7 @@ from cloud_omnichannel_publisher import (
     upload_facebook_reel, upload_instagram_reel, _sanitize_meta_text,
 )
 from instagram_media_compat import prepare_instagram_upload, probe
+from instagram_tagging import enhance_instagram_caption
 from meta_auth_loader import load_meta_auth
 from ordered_channels import TOONZONE_ETSY_LINK, parse_order, toonzone_metadata
 from publication_safety import route_paused
@@ -342,6 +343,9 @@ def copies(route, item, files, temp, use_txt=True):
         # Reused TXT bodies are paired to specific videos to avoid ambiguous reconciliation.
         reference = f"Daily Laugh Lab · Video {stem}\n\n"
         fb, ig = reference + fb, reference + ig
+    # IG-only tagging, applied before caption hash/remote reconciliation.
+    # FB caption remains unchanged; non-approved videos are bit-for-bit unchanged.
+    ig, _tags = enhance_instagram_caption(ig, route, stem)
     if not fb.strip() or not ig.strip() or len(ig) > 2200 or "<html" in fb.lower():
         raise RuntimeError("Platform açıklaması geçersiz")
     return {"facebook": fb, "instagram": ig}, origin
@@ -581,6 +585,10 @@ def plan(audit=False):
             if not pending:
                 continue
             selected = dict(item, route=route, page=page_name, platforms=pending, captions=captions, caption_source=origin)
+            if "instagram" in pending:
+                _, selected_tags = enhance_instagram_caption(captions["instagram"], route, Path(item["name"]).stem)
+                if selected_tags:
+                    selected["instagram_user_tags"] = selected_tags
             if source == "toonzone":
                 cover = catalogs["covers"].get(Path(item["name"]).stem + ".png")
                 if not cover:
@@ -700,9 +708,11 @@ def publish():
                     if platform == "facebook":
                         post = upload_facebook_reel(page, str(video), item["captions"][platform])
                     else:
+                        tag_options = ({"user_tags": item["instagram_user_tags"]}
+                                       if item.get("instagram_user_tags") else {})
                         post = upload_instagram_reel(
                             page, str(prepared_ig), item["captions"][platform],
-                            append_store_link=False,
+                            append_store_link=False, **tag_options,
                         )
                     if not post:
                         raise RuntimeError("Publication has no post ID")
