@@ -67,8 +67,12 @@ class RecoveryPolicyTests(unittest.TestCase):
                                 http_status=400, code=100)
         self.assertTrue(known_pre_publish_media_rejection(error, "daily_laugh", 0))
         self.assertTrue(known_pre_publish_media_rejection(error, "penguen", 0))
+        self.assertTrue(known_pre_publish_media_rejection(error, "film", 0))
+        self.assertTrue(known_pre_publish_media_rejection(error, "toonzone", 0))
+        self.assertFalse(known_pre_publish_media_rejection(error, "film", 1))
+        self.assertFalse(known_pre_publish_media_rejection(error, "toonzone", 1))
         self.assertFalse(known_pre_publish_media_rejection(error, "daily_laugh", 1))
-        self.assertFalse(known_pre_publish_media_rejection(error, "film", 0))
+        self.assertFalse(known_pre_publish_media_rejection(error, "film", 1))
         self.assertFalse(known_pre_publish_media_rejection(error, "toonzone", 0))
 
     def test_ig_media_publish_or_unknown_transport_is_never_auto_retried(self):
