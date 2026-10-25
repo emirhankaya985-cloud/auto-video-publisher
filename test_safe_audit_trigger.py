@@ -13,14 +13,19 @@ class SafeAuditTriggerTests(unittest.TestCase):
     def test_marker_push_must_never_publish_or_notify(self):
         workflow = Path(".github/workflows/public_link_schedule.yml").read_text(encoding="utf-8")
         self.assertIn("'docs/publisher-safe-audit-2026-10-25.md'", workflow)
+        self.assertIn("'docs/publisher-one-shot-2026-10-25.md'", workflow)
         self.assertIn("github.event_name == 'push' && 'audit'", workflow)
+        self.assertIn("authorized-once-meta-publish-2026-10-25", workflow)
         publisher_step = workflow.split("- name: Publish explicitly planned Meta videos", 1)[1].split(
             "- name: Preserve all results", 1)[0]
         self.assertIn("github.event_name == 'schedule' || inputs.mode == 'publish'", publisher_step)
-        self.assertNotIn("github.event_name == 'push'", publisher_step)
+        self.assertIn("github.event_name == 'push'", publisher_step)
+        self.assertIn("contains(github.event.head_commit.added, 'docs/publisher-one-shot-2026-10-25.md')", publisher_step)
+        self.assertIn("authorized-once-meta-publish-2026-10-25", publisher_step)
         notifications = workflow.split("- name: Per-post Telegram and ntfy", 1)[1].split(
             "- name: Generate final per-run incident", 1)[0]
-        self.assertNotIn("github.event_name == 'push'", notifications)
+        self.assertIn("contains(github.event.head_commit.added, 'docs/publisher-one-shot-2026-10-25.md')", notifications)
+        self.assertIn("authorized-once-meta-publish-2026-10-25", notifications)
         self.assertIn("github.event_name == 'schedule' || inputs.mode == 'publish'", notifications)
 
     def test_missing_publication_id_fails_after_preserving_incident(self):
