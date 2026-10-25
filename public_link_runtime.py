@@ -645,6 +645,14 @@ def plan(audit=False):
                     continue
                 if existing and existing.get("status") != "ready":
                     report.append(f"HELD: {item['name']} {p} has an uncertain previous intent.")
+                    # A green GitHub run is NOT proof these queues are healthy.
+                    # Alert once, then keep the alert flag in persisted state
+                    # so half-hourly polls cannot spam the phone.
+                    if not audit and not existing.get("hold_alerted_at"):
+                        record_error("previous_intent_hold", "unreconciled_previous_intent",
+                                     route=route, platform=p, video=item["name"],
+                                     status="uncertain")
+                        existing["hold_alerted_at"] = now.isoformat()
                     held = True
                     continue
                 target = target_count(route, now)
@@ -772,7 +780,11 @@ def publish():
             if "instagram" in item["platforms"]:
                 try:
                     prepared_ig = prepare_instagram_upload(
-                        video, temp / "instagram.mp4", prefer_remux=True,
+                        video, temp / "instagram.mp4",
+                        # 24-25 Oct: repeated Meta HTTP 400 ProcessingFailedError
+                        # despite a valid faststart stream-copy remux. Re-encode
+                        # short humour/Daily Reels to 30fps H.264 + AAC instead.
+                        prefer_remux=item["route"] not in {"tarladaki", "penguen", "daily_laugh"},
                         film_compact=(item["route"] in {"film", "film_second", "gonle"}
                                       or state["entries"][f"{item['route']}:instagram:{item['id']}"].get("prepublish_retry_count", 0) > 0),
                         toonzone_compact=item["route"] == "toonzone",
