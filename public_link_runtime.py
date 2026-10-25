@@ -821,6 +821,7 @@ def publish():
                         toonzone_compact=(
                             item["route"] == "toonzone" and not alternate_compact_profile
                         ),
+                        force_transcode=alternate_compact_profile,
                     )
                 except Exception as exc:
                     key = f"{item['route']}:instagram:{item['id']}"
