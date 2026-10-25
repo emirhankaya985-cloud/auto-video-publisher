@@ -27,6 +27,7 @@ from cloud_omnichannel_publisher import (
     upload_facebook_reel, upload_instagram_reel, _sanitize_meta_text,
 )
 from instagram_media_compat import prepare_instagram_upload, probe
+from toonzone_cover_fallback import generate_part_cover
 from instagram_tagging import enhance_instagram_caption
 from publisher_error_journal import record_error
 from meta_auth_loader import load_meta_auth
@@ -719,12 +720,22 @@ def plan(audit=False):
                     selected["instagram_user_tags"] = selected_tags
             if source == "toonzone":
                 cover = catalogs["covers"].get(Path(item["name"]).stem + ".png")
-                if not cover:
-                    report.append("HELD: exact ToonZone cover missing.")
+                if cover:
+                    selected["cover_id"] = cover["id"]
+                elif os.getenv("TOONZONE_AUTO_COVER_ENABLED", "true").lower() == "true":
+                    # Preserve the exact-part requirement; prepare this
+                    # video's own frame-based cover BEFORE any Meta POST.
+                    # The source itself is the only visual input.
+                    selected["generate_toonzone_cover"] = True
+                    report.append(
+                        f"COVER FALLBACK: {item['name']} has no exact Drive PNG; "
+                        "a branded cover will be generated from this part's MP4."
+                    )
+                else:
+                    report.append("HELD: exact ToonZone cover missing; fallback disabled.")
                     record_error("toonzone_cover", "cover_missing",
                                  route=route, video=item["name"])
                     break
-                selected["cover_id"] = cover["id"]
                 state["episode_days"][day] = ep
             report.append(f"NEXT: {item['name']}; caption_source={origin}; platforms={','.join(pending)}")
             if source == "toonzone":
@@ -797,6 +808,17 @@ def publish():
                         raise RuntimeError("Human-approved content checksum mismatch")
                 if item.get("cover_id"):
                     cover = download(item["cover_id"], temp / "cover.png")
+                    video = create_instagram_cover_video(video, cover, temp / "covered.mp4")
+                elif item.get("generate_toonzone_cover"):
+                    if item["route"] != "toonzone":
+                        raise RuntimeError("Otomatik kapak sadece ToonZone için kullanılabilir")
+                    # The generated image and exact MP4 part share their name.
+                    # Fail BEFORE uploading to Meta if extraction/validation
+                    # fails; never publish without its intended cover.
+                    cover = generate_part_cover(
+                        video, item["name"],
+                        ROOT / "generated_toonzone_covers" / (Path(item["name"]).stem + ".png"),
+                    )
                     video = create_instagram_cover_video(video, cover, temp / "covered.mp4")
             except Exception as exc:
                 failures.append(item["page"] + ": " + type(exc).__name__ + ": " + _sanitize_meta_text(str(exc))[:400])
