@@ -9,6 +9,10 @@ on:
   schedule:
     - cron: '59 20 * * *'
   workflow_dispatch:
+  # One-time live verification only when the unique audit marker lands on main.
+  push:
+    branches: [main]
+    paths: ['docs/meta-readonly-verification-2026-10-25.md']
 
 concurrency:
   group: daily-stats-report
@@ -16,7 +20,8 @@ concurrency:
 
 jobs:
   report:
-    if: vars.META_REPORTING_ENABLED == 'true'
+    # Default enabled after explicit owner approval; variable=false is a kill switch.
+    if: vars.META_REPORTING_ENABLED != 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

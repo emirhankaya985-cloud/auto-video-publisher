@@ -1,6 +1,10 @@
 name: Read-only Meta connection audit
 
 on:
+  # One-time read-only audit on approved main merge; no media publish calls.
+  push:
+    branches: [main]
+    paths: ['docs/meta-readonly-verification-2026-10-25.md']
   workflow_dispatch:
     inputs:
       film_claim_audit:
