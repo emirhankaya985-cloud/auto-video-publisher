@@ -116,10 +116,12 @@ jobs:
           retention-days: 30
       - name: Per-post Telegram and ntfy notifications plus failure alerts (no uploads)
         # A failed notification must never retry or reclassify a Meta publication.
+        # A missing required delivery channel makes the WORKFLOW fail, never
+        # reruns the successful Meta upload; later always() artifacts remain.
         if: ${{ always() && (github.event_name == 'schedule' || inputs.mode == 'publish') }}
-        continue-on-error: true
         id: notify
         env:
+          REQUIRE_DUAL_NOTIFICATIONS: 'true'
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
