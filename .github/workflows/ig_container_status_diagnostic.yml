@@ -3,6 +3,11 @@ on:
   push:
     branches: [main]
     paths: ['docs/ig-container-status-recheck-2026-10-25.md']
+  pull_request:
+    paths:
+      - 'ig_container_status_diagnostic.py'
+      - 'test_ig_container_status_diagnostic.py'
+      - '.github/workflows/ig_container_status_diagnostic.yml'
   workflow_dispatch:
 permissions:
   contents: read
@@ -19,6 +24,7 @@ jobs:
       - name: Verify no-send diagnostic behavior
         run: python -m unittest -v test_ig_container_status_diagnostic.py
       - name: Read only prior failed containers without uploads
+        if: github.event_name != 'pull_request'
         env:
           META_AUTH_JSON: ${{ secrets.META_AUTH_JSON }}
           META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
