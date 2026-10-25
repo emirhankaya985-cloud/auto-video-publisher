@@ -265,6 +265,30 @@ class InstagramMediaCompatibilityTests(unittest.TestCase):
                 create_diagnostic_clip("source.mp4", "diagnostic.mp4", 120)
         run.assert_not_called()
 
+    def test_one_time_recovery_forces_new_bitstream_not_direct_or_remux(self):
+        # A previous Film/ToonZone compact binary upload returned Graph
+        # ProcessingFailedError *before* media_publish. Recovery must not
+        # just remux the same bits or return the source unchanged.
+        media = supported_probe()
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "source.mp4"
+            target = Path(directory) / "alt.mp4"
+            source.write_bytes(b"source")
+            def encode(src, dst):
+                Path(dst).write_bytes(b"completely-new-encoded-bitstream")
+            with patch("instagram_media_compat.probe", return_value=media), \
+                 patch("instagram_media_compat.mp4_atom_structure", return_value=ATOM_OK), \
+                 patch("instagram_media_compat._transcode_vertical", side_effect=encode) as transcoder, \
+                 patch("instagram_media_compat.remux_mp4_faststart") as remux:
+                result = prepare_instagram_upload(
+                    source, target, prefer_remux=True,
+                    film_compact=False, toonzone_compact=False,
+                    force_transcode=True, return_method=True
+                )
+        self.assertEqual(result, (target, "transcode"))
+        transcoder.assert_called_once_with(source, target)
+        remux.assert_not_called()
+
     def test_compliant_original_is_not_transcoded(self):
         with patch("instagram_media_compat.probe", return_value=supported_probe()), patch(
             "instagram_media_compat.mp4_atom_structure", return_value=ATOM_OK
