@@ -108,7 +108,7 @@ def main():
     ROOT.mkdir(parents=True, exist_ok=True)
     (ROOT / "incidents.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({key: summary[key] for key in ("run_id", "confirmed_new_posts",
-                      "safe_pre_upload_retries", "uncertain_pending_reconciliation",
+                      "unverified_done_entries", "safe_pre_upload_retries", "uncertain_pending_reconciliation",
                       "planning_blocker_counts", "error_event_count", "step_outcomes")},
                      ensure_ascii=False), flush=True)
 
