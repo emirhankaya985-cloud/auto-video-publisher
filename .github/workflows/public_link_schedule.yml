@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - 'docs/publisher-safe-audit-2026-10-25.md'
+      - 'docs/publisher-one-shot-2026-10-25.md'
   schedule:
     # Normal checks every half hour; GitHub schedules may start late.
     - cron: '7,37 * * * *'
@@ -71,7 +72,7 @@ jobs:
       - name: Check public folders, captions, histories and prepare intent
         id: plan
         env:
-          MODE: ${{ github.event_name == 'push' && 'audit' || inputs.mode || 'publish' }}
+          MODE: ${{ (github.event_name == 'push' && contains(github.event.head_commit.added, 'docs/publisher-one-shot-2026-10-25.md') && contains(github.event.head_commit.message, 'authorized-once-meta-publish-2026-10-25')) && 'publish' || github.event_name == 'push' && 'audit' || inputs.mode || 'publish' }}
         run: |
           if [ "$MODE" = audit ]; then
             python public_link_runtime.py audit
@@ -79,7 +80,7 @@ jobs:
             python public_link_runtime.py plan
           fi
       - name: Persist intent before any Meta upload
-        if: success() && (github.event_name == 'schedule' || inputs.mode == 'publish')
+        if: success() && (github.event_name == 'schedule' || inputs.mode == 'publish' || (github.event_name == 'push' && contains(github.event.head_commit.added, 'docs/publisher-one-shot-2026-10-25.md') && contains(github.event.head_commit.message, 'authorized-once-meta-publish-2026-10-25')))
         uses: actions/upload-artifact@v4
         with:
           name: link-state-intent
@@ -88,7 +89,7 @@ jobs:
           retention-days: 90
       - name: Publish explicitly planned Meta videos
         id: publish
-        if: success() && (github.event_name == 'schedule' || inputs.mode == 'publish')
+        if: success() && (github.event_name == 'schedule' || inputs.mode == 'publish' || (github.event_name == 'push' && contains(github.event.head_commit.added, 'docs/publisher-one-shot-2026-10-25.md') && contains(github.event.head_commit.message, 'authorized-once-meta-publish-2026-10-25')))
         run: python public_link_runtime.py publish
       - name: Preserve all results, including partial failures
         if: always()
@@ -118,7 +119,7 @@ jobs:
         # A failed notification must never retry or reclassify a Meta publication.
         # A missing required delivery channel makes the WORKFLOW fail, never
         # reruns the successful Meta upload; later always() artifacts remain.
-        if: ${{ always() && (github.event_name == 'schedule' || inputs.mode == 'publish') }}
+        if: ${{ always() && (github.event_name == 'schedule' || inputs.mode == 'publish' || (github.event_name == 'push' && contains(github.event.head_commit.added, 'docs/publisher-one-shot-2026-10-25.md') && contains(github.event.head_commit.message, 'authorized-once-meta-publish-2026-10-25'))) }}
         id: notify
         env:
           REQUIRE_DUAL_NOTIFICATIONS: 'true'
