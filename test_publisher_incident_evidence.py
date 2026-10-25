@@ -26,5 +26,22 @@ class IncidentEvidenceTests(unittest.TestCase):
         self.assertEqual(report["unverified_done_entries"], 0)
 
 
+    def test_prior_uncertain_intent_is_visible_in_new_green_run(self):
+        ledger = {"entries": {
+            "old_film": {"run_id": "11111", "status": "uncertain",
+                         "route": "film", "platform": "instagram"},
+            "old_toon": {"run_id": "22222", "status": "uncertain",
+                         "route": "toonzone", "platform": "instagram"},
+            "new_post": {"run_id": "12345", "status": "done", "post_id": "333",
+                         "route": "daily_laugh", "platform": "facebook"}
+        }}
+        result = build_incident_report(ledger, "12345")
+        self.assertEqual(result["confirmed_new_posts"], 1)
+        self.assertEqual(result["uncertain_pending_reconciliation"], 0)
+        self.assertEqual(result["previous_unreconciled_intents"], 2)
+        self.assertEqual(result["previous_unreconciled_by_route"],
+                         {"film": 1, "toonzone": 1})
+
+
 if __name__ == "__main__":
     unittest.main()
