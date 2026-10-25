@@ -10,3 +10,5 @@ This cannot assert publishing success and must not authorize another retry.
 Follow-up read-only status sample after initial IN_PROGRESS observations; no API writes.
 
 Another strictly read-only GET after the confirmed Daily Laugh #40228042183 publication and normal #40228310735 schedule. Report exact status only; do not mutate state or create a new container.
+
+Follow-up GET sample archived through central evidence issue #11. This does not grant POST permissions.
