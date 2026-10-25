@@ -10,6 +10,7 @@ on:
       - 'test_meta_reporting_independence.py'
       - '.github/workflows/daily_stats.yml'
       - '.github/workflows/daily_report_watch.yml'
+      - '.github/workflows/meta_connection_audit.yml'
       - '.github/workflows/meta_reporting_ci.yml'
   workflow_dispatch:
 
@@ -53,4 +54,8 @@ jobs:
           assert "META_ONLY_REPORTING: 'true'" in nightly
           assert "meta-daily-analytics-history" in nightly
           assert "DRIVE_TOKEN_JSON:" not in nightly
+          audit = Path(".github/workflows/meta_connection_audit.yml").read_text()
+          assert "workflow_dispatch:" in audit
+          assert "vars.AUTOMATION_ENABLED" not in audit
+          assert "python meta_connection_audit.py" in audit
           PYCODE
