@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-import public_link_runtime as runtime
+from test_public_link_runtime import runtime
 from toonzone_cover_fallback import generate_part_cover
 
 
@@ -23,7 +23,8 @@ class ToonZoneCoverFallbackTests(unittest.TestCase):
             source.write_bytes(b"source")
             filename = "S01E03_Caffeinated_Concert_Tickets_Part3.mp4"
             dest = root / filename.replace(".mp4", ".png")
-            with patch("toonzone_cover_fallback.subprocess.run") as ffmpeg:
+            with patch("toonzone_cover_fallback.parse_order", return_value=(1, 3, 3, "episode")), \
+                 patch("toonzone_cover_fallback.subprocess.run") as ffmpeg:
                 ffmpeg.side_effect = lambda command, **kwargs: Path(command[-1]).write_bytes(valid_header())
                 self.assertEqual(generate_part_cover(source, filename, dest), dest)
             self.assertEqual(dest.read_bytes()[:8], b"\x89PNG\r\n\x1a\n")
@@ -40,7 +41,10 @@ class ToonZoneCoverFallbackTests(unittest.TestCase):
             root = Path(tmp)
             source = root / "clip.mp4"
             source.write_bytes(b"source")
-            with patch("toonzone_cover_fallback.subprocess.run") as ffmpeg:
+            with patch("toonzone_cover_fallback.parse_order",
+                       side_effect=lambda stem, _: (1, 3, 3, "episode")
+                       if stem == "S01E03_Caffeinated_Concert_Tickets_Part3" else None), \
+                 patch("toonzone_cover_fallback.subprocess.run") as ffmpeg:
                 with self.assertRaises(ValueError):
                     generate_part_cover(source, "bad.mp4", root / "bad.png")
                 with self.assertRaises(ValueError):
@@ -55,7 +59,8 @@ class ToonZoneCoverFallbackTests(unittest.TestCase):
             source.write_bytes(b"source")
             name = "S01E03_Caffeinated_Concert_Tickets_Part3.mp4"
             dest = root / name.replace(".mp4", ".png")
-            with patch("toonzone_cover_fallback.subprocess.run") as ffmpeg:
+            with patch("toonzone_cover_fallback.parse_order", return_value=(1, 3, 3, "episode")), \
+                 patch("toonzone_cover_fallback.subprocess.run") as ffmpeg:
                 ffmpeg.side_effect = lambda command, **kwargs: Path(command[-1]).write_bytes(b"bad png")
                 with self.assertRaisesRegex(RuntimeError, "hazırlanamadı"):
                     generate_part_cover(source, name, dest)
