@@ -12,3 +12,9 @@ This documentation-only update deliberately triggers the existing read-only
 and, when configured, token validity; it does not dispatch or repeat any media
 publication. A missing optional debug-token credential is not proof of a
 revoked page token. Do not log token values.
+
+## Post-CI current account recheck
+
+This marker update triggers read-only Meta connection auditing after the latest
+confirmed mock CI pass. This is not a new token request, not a media upload,
+and not proof of a confirmed Facebook or Instagram post.
