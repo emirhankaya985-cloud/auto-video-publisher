@@ -14,6 +14,7 @@ import re
 import time
 import tempfile
 import zipfile
+from types import SimpleNamespace
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -643,6 +644,26 @@ def plan(audit=False):
                             report.append("HELD: remote caption matches but source identity is unverified.")
                             held = True
                     continue
+                # Historical compact IG uploads that failed *before*
+                # media_publish were incorrectly treated as uncertain forever.
+                # Reclassify only exact, persisted pre-publish HTTP400 evidence,
+                # after successfully reading the remote account's history.
+                # One alternate encoder is permitted, never an ambiguous POST.
+                prior_failure = existing.get("failure") if isinstance(existing, dict) else None
+                if (not audit and p == "instagram" and existing.get("status") == "uncertain"
+                        and isinstance(prior_failure, dict)):
+                    prior = SimpleNamespace(
+                        stage=prior_failure.get("stage"),
+                        http_status=prior_failure.get("http_status"),
+                        code=prior_failure.get("graph_code"),
+                    )
+                    previous_attempts = existing.get("prepublish_retry_count", 0)
+                    if known_pre_publish_media_rejection(prior, route, previous_attempts):
+                        existing.update(status="ready", prepublish_retry_count=1)
+                        report.append(
+                            f"RECOVERY: {item['name']} instagram previously rejected "
+                            "before media_publish; safe alternate encoding authorized once."
+                        )
                 if existing and existing.get("status") != "ready":
                     report.append(f"HELD: {item['name']} {p} has an uncertain previous intent.")
                     # A green GitHub run is NOT proof these queues are healthy.
@@ -779,15 +800,26 @@ def publish():
             prepared_ig = None
             if "instagram" in item["platforms"]:
                 try:
+                    retry_count = state["entries"][
+                        f"{item['route']}:instagram:{item['id']}"
+                    ].get("prepublish_retry_count", 0)
+                    alternate_compact_profile = (
+                        retry_count > 0 and item["route"] in {"film", "toonzone"}
+                    )
                     prepared_ig = prepare_instagram_upload(
                         video, temp / "instagram.mp4",
                         # 24-25 Oct: repeated Meta HTTP 400 ProcessingFailedError
                         # despite a valid faststart stream-copy remux. Re-encode
                         # short humour/Daily Reels to 30fps H.264 + AAC instead.
                         prefer_remux=item["route"] not in {"tarladaki", "penguen", "daily_laugh"},
-                        film_compact=(item["route"] in {"film", "film_second", "gonle"}
-                                      or state["entries"][f"{item['route']}:instagram:{item['id']}"].get("prepublish_retry_count", 0) > 0),
-                        toonzone_compact=item["route"] == "toonzone",
+                        film_compact=(
+                            not alternate_compact_profile and
+                            (item["route"] in {"film", "film_second", "gonle"}
+                             or retry_count > 0)
+                        ),
+                        toonzone_compact=(
+                            item["route"] == "toonzone" and not alternate_compact_profile
+                        ),
                     )
                 except Exception as exc:
                     key = f"{item['route']}:instagram:{item['id']}"
