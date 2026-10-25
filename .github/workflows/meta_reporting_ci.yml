@@ -59,5 +59,7 @@ jobs:
           assert "workflow_dispatch:" in audit
           assert "vars.AUTOMATION_ENABLED" not in audit
           assert "python meta_connection_audit.py" in audit
-          assert "paths: ['docs/meta-readonly-verification-2026-10-25.md']" in audit
+          assert "docs/meta-readonly-verification-2026-10-25.md" in audit
+          assert "docs/meta-audit-recheck-2026-10-25.md" in audit
+          assert "META_APP_ID" in audit and "token expiry remains unverified" in audit
           PYCODE
