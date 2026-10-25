@@ -49,6 +49,8 @@ jobs:
       ENABLE_FILM_ROUTES: ${{ vars.ENABLE_FILM_ROUTES }}
       FILM_RIGHTS_APPROVED: ${{ vars.FILM_RIGHTS_APPROVED }}
       ENABLE_TOONZONE_ROUTES: ${{ vars.ENABLE_TOONZONE_ROUTES }}
+      # Default enabled for rights-approved ToonZone; can be set to false.
+      TOONZONE_AUTO_COVER_ENABLED: ${{ vars.TOONZONE_AUTO_COVER_ENABLED || 'true' }}
       # Owner explicitly requested today's catch-up before the evening check.
       # Subsequent dates automatically return to the existing per-route times.
       COMPLETE_DAY_DATE: '2026-10-23'
@@ -94,6 +96,14 @@ jobs:
         with:
           name: link-state-result
           path: link-runtime/state.json
+          if-no-files-found: ignore
+          retention-days: 90
+      - name: Archive validated ToonZone fallback artwork (no Drive writes)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: toonzone-generated-part-covers
+          path: link-runtime/generated_toonzone_covers/*.png
           if-no-files-found: ignore
           retention-days: 90
       - name: Save caption and account audit report
