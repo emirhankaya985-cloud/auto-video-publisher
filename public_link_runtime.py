@@ -615,13 +615,21 @@ def plan(audit=False):
                 continue
             pending = []
             held = False
+            skip_unproven_daily = False
             for p in platforms:
                 key = f"{route}:{p}:{item['id']}"
                 existing = state["entries"].get(key, {})
                 cap_hash = caption_key(captions[p])
                 if cap_hash in ambiguous_captions[p]:
-                    report.append("HELD: multiple Meta posts share the same caption; manual reconciliation required.")
-                    held = True
+                    if route == "daily_laugh" and not existing:
+                        # Several real posts use this caption, but none proves
+                        # which Drive file was sent. Never republish or invent
+                        # a result ID; simply look for another eligible clip.
+                        report.append(f"SKIP Daily Laugh {item['name']} {p}: repeated remote caption; source unverified.")
+                        skip_unproven_daily = True
+                    else:
+                        report.append("HELD: multiple Meta posts share the same caption; manual reconciliation required.")
+                        held = True
                     continue
                 match = remote[p].get(cap_hash)
                 if existing.get("status") == "done" or seed_done(route, p, item["name"]) or match:
@@ -639,10 +647,16 @@ def plan(audit=False):
                                 reconciliation_proof="unique_platform_history_caption",
                             )
                         elif not existing:
-                            # Same caption is NOT proof that this video was posted;
-                            # do not claim success or publish a possible duplicate.
-                            report.append("HELD: remote caption matches but source identity is unverified.")
-                            held = True
+                            # Same caption is NOT proof that this video was posted.
+                            # Daily Laugh has many reused texts: leave the
+                            # original history untouched and try the next clip
+                            # instead of freezing the entire scheduled route.
+                            if route == "daily_laugh":
+                                report.append(f"SKIP Daily Laugh {item['name']} {p}: remote caption already exists; source unverified.")
+                                skip_unproven_daily = True
+                            else:
+                                report.append("HELD: remote caption matches but source identity is unverified.")
+                                held = True
                     continue
                 # Historical compact IG uploads that failed *before*
                 # media_publish were incorrectly treated as uncertain forever.
@@ -691,6 +705,11 @@ def plan(audit=False):
                 pending.append(p)
             if held:
                 break
+            if skip_unproven_daily:
+                # A matched/ambiguous remote caption means no trustworthy
+                # Drive-file identity: never upload this candidate to either
+                # platform. An unrelated clean candidate may still be planned.
+                continue
             if not pending:
                 continue
             selected = dict(item, route=route, page=page_name, platforms=pending, captions=captions, caption_source=origin)
