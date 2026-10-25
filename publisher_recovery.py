@@ -70,12 +70,13 @@ def known_pre_publish_media_rejection(exc, route, previous_retries=0):
     """Authorize one stricter *new preparation*, not a blind Meta repost.
 
     Binary-upload and processing errors in upload_instagram_reel() are raised
-    before it ever executes media_publish. Only ordinary noncompact routes
-    have a different safe encoding to attempt. A failed media_publish or
+    before it ever executes media_publish. The Film/ToonZone compact uploads
+    also qualify for ONE alternative standards-compliant encoding. A second
+    failure, a publish-stage timeout, or missing stage evidence never qualifies. A failed media_publish or
     timeout may have published, so they NEVER qualify.
     """
     return bool(
-        route in {"tarladaki", "penguen", "daily_laugh"}
+        route in {"tarladaki", "penguen", "daily_laugh", "film", "toonzone"}
         and previous_retries == 0
         and getattr(exc, "stage", None) in {
             "Instagram ikili video aktarımı",
