@@ -651,6 +651,7 @@ def plan(audit=False):
                 # One alternate encoder is permitted, never an ambiguous POST.
                 prior_failure = existing.get("failure") if isinstance(existing, dict) else None
                 if (not audit and p == "instagram" and existing.get("status") == "uncertain"
+                        and existing.get("caption_hash") == cap_hash
                         and isinstance(prior_failure, dict)):
                     prior = SimpleNamespace(
                         stage=prior_failure.get("stage"),
