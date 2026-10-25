@@ -403,7 +403,7 @@ def _validate_remux_timing(source_media, output_media):
 
 def prepare_instagram_upload(
     source, converted_path, prefer_remux=False, film_compact=False,
-    toonzone_compact=False, return_method=False,
+    toonzone_compact=False, return_method=False, force_transcode=False,
 ):
     """Return the original if compliant; otherwise convert and verify before upload."""
     source = Path(source)
@@ -420,6 +420,12 @@ def prepare_instagram_upload(
         original_probe = {}
         original_ok = False
         original_issues = ["FFprobe kaynağı okuyamadı"]
+    if force_transcode:
+        # One-time verified pre-publish HTTP 400: the previous compact
+        # bitstream was rejected. This must encode a DIFFERENT bitstream,
+        # not pass the source through or just remux its MP4 atoms.
+        original_issues.append("IG recovery: force alternate bitstream re-encode")
+        original_ok = False
     if compact_profile:
         # Film's successful compact profile is also forced for ToonZone's
         # cover-composited output: the generic compatibility checks previously
@@ -444,7 +450,7 @@ def prepare_instagram_upload(
         flush=True,
     )
     atom_only_issues = {"MP4 moov atomu önde değil", "MP4 edit list (edts/elst) bulunuyor"}
-    if prefer_remux and not film_compact and set(original_issues) and set(original_issues) <= atom_only_issues:
+    if prefer_remux and not force_transcode and not film_compact and set(original_issues) and set(original_issues) <= atom_only_issues:
         try:
             remuxed = remux_mp4_faststart(source, converted_path)
             remuxed_probe = probe(remuxed)
