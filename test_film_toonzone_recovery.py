@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-import public_link_runtime as runtime
+from test_public_link_runtime import runtime
 
 
 class FilmToonZoneRecoveryTests(unittest.TestCase):
