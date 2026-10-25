@@ -378,6 +378,7 @@ class LinkRuntimeSafety(unittest.TestCase):
         self.assertEqual(set(result), {"2.mp4"})
 
     def test_uncertain_toonzone_part_blocks_later_parts(self):
+        runtime.record_error.reset_mock()
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             source = {"a.mp4": {"name": "a.mp4", "id": "a"}, "b.mp4": {"name": "b.mp4", "id": "b"}}
