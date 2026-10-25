@@ -115,7 +115,8 @@ def main():
 
     telegram_on = telegram_configured()
     ntfy_on = bool(os.getenv("NTFY_TOPIC_URL", "").strip() or os.getenv("NTFY_TOPIC", "").strip())
-    if not telegram_on and not ntfy_on:
+    require_both = os.getenv("REQUIRE_DUAL_NOTIFICATIONS", "").strip().lower() == "true"
+    if not telegram_on and not ntfy_on and not require_both:
         print('{"status":"notifications_not_configured"}', flush=True)
         return 0
     try:
@@ -164,6 +165,25 @@ def main():
     run_url = f"https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/{run_id}"
     acknowledged = {"telegram": 0, "ntfy": 0}
     failures = 0
+    if require_both:
+        # Publishing remains committed; missing phone channels are separately
+        # recorded as a DELIVERY failure, never a reason to repeat Meta POST.
+        missing = []
+        if not telegram_on:
+            missing.append("Telegram")
+            failures += 1
+            record_error("telegram_notification", "notification_delivery_failed",
+                         error=RuntimeError("Telegram configuration missing"))
+        if not ntfy_on:
+            missing.append("ntfy")
+            failures += 1
+            record_error("ntfy_notification", "notification_delivery_failed",
+                         error=RuntimeError("ntfy configuration missing"))
+        if missing and (telegram_on or ntfy_on):
+            messages.append(("🚨 Bildirim kanalı eksik",
+                             "Gönderi yeniden yayımlanmayacak. Eksik kanal: "
+                             + ", ".join(missing)
+                             + "\n🔎 " + run_url))
     for title, body in messages:
         if telegram_on:
             try:
