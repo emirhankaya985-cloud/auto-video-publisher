@@ -402,6 +402,92 @@ class LinkRuntimeSafety(unittest.TestCase):
                 runtime.record_error.assert_not_called()
                 self.assertEqual(json.loads((root / "plan.json").read_text()), [])
 
+    def test_old_film_binary_http400_is_safely_reconciled_before_one_alternate_retry(self):
+        # Film Part 16 historically failed during rupload before media_publish.
+        # It must not remain permanently blocked as an "unknown publish".
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            name = "Yoksul_1986_Part_16.mp4"
+            caption = "FILM-IG-original-caption"
+            old = {"schema": 1, "episode_days": {}, "entries": {
+                "film:instagram:vid": {
+                    "route": "film", "platform": "instagram", "file": name,
+                    "status": "uncertain", "caption_hash": runtime.caption_key(caption),
+                    "prepublish_retry_count": 0, "run_id": "40107188749",
+                    "failure": {"stage": "Instagram ikili video aktarımı",
+                                "http_status": 400, "graph_code": None,
+                                "reason": "invalid_media_or_graph_request"}
+                }
+            }}
+            inventory = {name: {"name": name, "id": "vid"}}
+            with patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(root / "summary.md"),
+                                         "GITHUB_RUN_ID": "500"}), \
+                 patch.object(runtime, "ROOT", root), \
+                 patch.object(runtime, "STATE", root / "state.json"), \
+                 patch.object(runtime, "PLAN", root / "plan.json"), \
+                 patch.object(runtime, "FOLDERS", {"film": "folder"}), \
+                 patch.object(runtime, "ROUTES", {"film": ("film", "Film Mağarası")}), \
+                 patch.object(runtime, "restore", return_value=old), \
+                 patch.object(runtime, "apply_verified_migration"), \
+                 patch.object(runtime, "load_meta_auth", return_value={"pages": [
+                     {"page_name": "Film Mağarası", "instagram_id": "123"}]}), \
+                 patch.object(runtime, "inventory", return_value=inventory), \
+                 patch.object(runtime, "graph_rows", return_value=[]), \
+                 patch.object(runtime, "target_count", return_value=1), \
+                 patch.object(runtime, "seed_done", return_value=False), \
+                 patch.object(runtime, "copies", return_value=(
+                     {"facebook": "FB-caption", "instagram": caption}, "matching-txt")):
+                runtime.plan()
+            plans = json.loads((root / "plan.json").read_text())
+            ledger = json.loads((root / "state.json").read_text())
+            self.assertEqual(len(plans), 1)
+            self.assertIn("instagram", plans[0]["platforms"])
+            self.assertEqual(ledger["entries"]["film:instagram:vid"]["status"], "intent")
+            self.assertEqual(ledger["entries"]["film:instagram:vid"]["prepublish_retry_count"], 1)
+            self.assertIn("RECOVERY: Yoksul_1986_Part_16.mp4",
+                          (root / "report.md").read_text())
+
+    def test_old_media_publish_timeout_remains_held_and_notified_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            name = "Yoksul_1986_Part_16.mp4"
+            caption = "FILM-IG-original-caption"
+            old = {"schema": 1, "episode_days": {}, "entries": {
+                "film:instagram:vid": {
+                    "route": "film", "platform": "instagram", "file": name,
+                    "status": "uncertain", "caption_hash": runtime.caption_key(caption),
+                    "prepublish_retry_count": 0,
+                    "failure": {"stage": "Instagram media_publish", "http_status": 400,
+                                "graph_code": 100}
+                }
+            }}
+            inventory = {name: {"name": name, "id": "vid"}}
+            runtime.record_error.reset_mock()
+            with patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(root / "summary.md"),
+                                         "GITHUB_RUN_ID": "500"}), \
+                 patch.object(runtime, "ROOT", root), \
+                 patch.object(runtime, "STATE", root / "state.json"), \
+                 patch.object(runtime, "PLAN", root / "plan.json"), \
+                 patch.object(runtime, "FOLDERS", {"film": "folder"}), \
+                 patch.object(runtime, "ROUTES", {"film": ("film", "Film Mağarası")}), \
+                 patch.object(runtime, "restore", return_value=old), \
+                 patch.object(runtime, "apply_verified_migration"), \
+                 patch.object(runtime, "load_meta_auth", return_value={"pages": [
+                     {"page_name": "Film Mağarası", "instagram_id": "123"}]}), \
+                 patch.object(runtime, "inventory", return_value=inventory), \
+                 patch.object(runtime, "graph_rows", return_value=[]), \
+                 patch.object(runtime, "target_count", return_value=1), \
+                 patch.object(runtime, "seed_done", return_value=False), \
+                 patch.object(runtime, "copies", return_value=(
+                     {"facebook": "FB-caption", "instagram": caption}, "matching-txt")):
+                runtime.plan()
+                runtime.plan()
+            self.assertEqual(json.loads((root / "plan.json").read_text()), [])
+            self.assertEqual(old["entries"]["film:instagram:vid"]["status"], "uncertain")
+            self.assertEqual(runtime.record_error.call_count, 1)
+            self.assertEqual(runtime.record_error.call_args.args[:2],
+                             ("previous_intent_hold", "unreconciled_previous_intent"))
+
     def test_invalid_mp4_codec_metadata_blocks_upload_before_meta(self):
         with patch.object(runtime, "probe", return_value={"streams": [], "format": {"duration": "10"}}):
             with self.assertRaisesRegex(RuntimeError, "ön doğrulaması"):
