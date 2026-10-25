@@ -389,6 +389,17 @@ class LinkRuntimeSafety(unittest.TestCase):
                     runtime.plan()
                 self.assertEqual(json.loads((root / "plan.json").read_text()), [])
                 self.assertEqual(caption_mock.call_count, 1)
+                self.assertEqual(runtime.record_error.call_count, 1)
+                self.assertEqual(runtime.record_error.call_args.args[:2],
+                                 ("previous_intent_hold", "unreconciled_previous_intent"))
+                state = json.loads((root / "state.json").read_text())
+                self.assertTrue(state["entries"]["toonzone:facebook:a"].get("hold_alerted_at"))
+                # The same unresolved old intent must remain blocked, but
+                # half-hourly runs must not send duplicate phone alerts.
+                runtime.record_error.reset_mock()
+                runtime.plan()
+                runtime.record_error.assert_not_called()
+                self.assertEqual(json.loads((root / "plan.json").read_text()), [])
 
     def test_invalid_mp4_codec_metadata_blocks_upload_before_meta(self):
         with patch.object(runtime, "probe", return_value={"streams": [], "format": {"duration": "10"}}):
@@ -460,6 +471,7 @@ class LinkRuntimeSafety(unittest.TestCase):
                 self.assertEqual(first["status"], "ready")
                 self.assertEqual(first["prepublish_retry_count"], 1)
                 self.assertFalse(prepare.call_args.kwargs["film_compact"])
+                self.assertFalse(prepare.call_args.kwargs["prefer_remux"])
                 ig.assert_called_once()
                 state = json.loads(state_path.read_text())
                 state["entries"]["penguen:instagram:vid"]["status"] = "intent"
