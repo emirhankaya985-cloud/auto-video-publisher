@@ -18,7 +18,7 @@ _ALLOWED_STAGE = {
     "txt_caption", "toonzone_cover", "source_video", "instagram_preparation",
     "facebook_publish", "instagram_publish", "workflow_verify", "workflow_plan",
     "workflow_publish", "telegram_notification", "ntfy_notification",
-    "state_restore", "other",
+    "state_restore", "previous_intent_hold", "other",
 }
 _ALLOWED_REASON = {
     "drive_unavailable", "meta_account_missing", "meta_history_unavailable",
@@ -26,7 +26,8 @@ _ALLOWED_REASON = {
     "media_preparation_failed", "credentials_or_permissions", "rate_limit",
     "meta_server_or_network", "invalid_media_or_graph_request",
     "unclassified_upload_result", "workflow_step_failed",
-    "notification_delivery_failed", "state_restore_failed", "other",
+    "notification_delivery_failed", "state_restore_failed",
+    "unreconciled_previous_intent", "other",
 }
 
 
