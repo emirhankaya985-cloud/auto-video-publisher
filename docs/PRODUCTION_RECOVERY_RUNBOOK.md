@@ -113,3 +113,34 @@ ham metinle veya erişim tokenıyla hiçbir zaman birleştirme.
 - **CI kod kanıtı:** İlk [PR rapor CI #40075587481](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/40075587481) test-only ortamda eksik `PyYAML` yüzünden iki modülü import edemedi (uygulama hatası değil). Sabit PyYAML eklendikten sonra [CI #40075636728](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/40075636728) **458 Python unittest** ve workflow koşul kontrolü ile başarılıydı; **bu, sonraki publisher uzlaştırma commit'inin CI kanıtı değildir**. Son commit için yeni CI ayrıca incelenmeli.
 - **Henüz canlı kabul yok:** Draft PR birleştirilmedi, `META_REPORTING_ENABLED` ayarlanmadı, planlı 23:59 raporu ve 07:10 watcher gerçek koşumda doğrulanmadı; Telegram/ntfy sunucu ACK'si ve Android telefon teslimatı birbirinden ayrıdır. Hesap kimliklerinin tamamı, aynı paylaşım için kalıcı bildirim kuyruğu ve tüm rota/hedef blokajları hâlâ bağımsız çalışma ister. Üretim yayın workflow'u zorla tetiklenmedi.
 - **Geri dönüş:** PR birleştirilmeden hiçbir üretim değişikliği yok. Birleşirse `META_REPORTING_ENABLED=false` ile rapor/watch salt-okunur işlerini kapat; kod geri alma için PR commit'lerini tersine al. Eski `AUTOMATION_ENABLED` anahtarını açma. GitHub istatistik/publisher intent/result artefaktlarını ve eski geçmişi silme.
+
+
+## 25 Ekim 2026 — toplu canlı log denetimi ve yeni kurtarma politikası
+
+[Kapsam, tam hata listesi ve GitHub run bağlantıları](META_LOG_AUDIT_2026-10-25.md)
+
+- 610 GitHub Actions run durum kaydı indekslendi. Aktif Meta yayıncısında
+  110 çalışma: 75 `success`, 35 `failure`; başarısızın bir kısmı eski
+  dönem Drive/CI testleri, 24–25 Ekim yeni dönemi ağırlıkla Instagram
+  `rupload` `ProcessingFailedError` / HTTP 400.
+- Sadece `faststart` remux bazı 1080p 30/60fps videolarda yeterli olmadı;
+  Tarladaki/Penguen/Daily Laugh için 30fps H.264/AAC normalize medya
+  seçildi. Tam başarı yalnız yeni sürümün canlı yayınında kanıtlanabilir.
+- Film `Yoksul_1986_Part_16.mp4` ve ToonZone
+  `S01E03_Caffeinated_Concert_Tickets_Part3.mp4` önceki
+  `HTTP400` sonrası `uncertain` durumuyla kilitlenmişti. Yeni kod,
+  **yalnız daha önce `media_publish` çağrılmadığı stage, HTTP ve eski
+  `caption_hash` ile kanıtlanan** vakayı uzaktan Meta geçmişi kontrol
+  edildikten sonra bir kez yeniden kodlamaya alabilir. Eski hatalı
+  kompakt bitstream'i tekrar kullanmaz. İkinci hata belirsiz durumunu
+  temizlemez veya otomatik Meta POST tekrarlamaz.
+- Başka `uncertain` intent'lerin sessiz kalmasına izin verme: Bir kez
+  `previous_intent_hold` olayını hata jurnaline yaz ve telefon alarmı
+  gönder; sonraki 30 dakikalık yoklamaları spam'e çevirme.
+- [25 Ekim gerçek 5 gönderili yayın #40221619361](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/40221619361)
+  **eski SHA** üzerindedir: bu yeni kurtarma kodunun gerçek
+  Instagram HTTP 400'ü düzelttiğini kanıtlamaz.
+- **Gizlilik:** API yanıtındaki ham metin, Meta erişim tokenı ve imzalı
+  Drive adresleri public kurtarma defterine yazılmaz. Tüm olaylar için
+  `link-error-journal` ve `link-incident-report` 90 günlük
+  artefaktları incelenir. GitHub run URL'leri kalıcı kanıttır.
