@@ -12,3 +12,9 @@ Safety contract:
 - A green audit or CI run is NOT evidence that every planned video is published.
 
 Triggered after the updated no-send regression tests were added.
+
+## Verified CI follow-through
+
+Run an additional source-inventory and Meta history audit after the 489-test
+credential-free regression passed on current code. Push is audit-only and must
+never invoke media_publish, upload video, or phone notifications.
