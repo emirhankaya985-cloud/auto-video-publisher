@@ -1,6 +1,11 @@
 name: Public link Meta automation
 
 on:
+  # Exact marker commit automatically runs a read-only audit; NEVER a publish.
+  push:
+    branches: [main]
+    paths:
+      - 'docs/publisher-safe-audit-2026-10-25.md'
   schedule:
     # Normal checks every half hour; GitHub schedules may start late.
     - cron: '7,37 * * * *'
@@ -26,7 +31,7 @@ concurrency:
 
 jobs:
   meta:
-    if: github.event_name == 'workflow_dispatch' || vars.LINK_AUTOMATION_ENABLED == 'true'
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push' || vars.LINK_AUTOMATION_ENABLED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -64,7 +69,7 @@ jobs:
       - name: Check public folders, captions, histories and prepare intent
         id: plan
         env:
-          MODE: ${{ inputs.mode || 'publish' }}
+          MODE: ${{ github.event_name == 'push' && 'audit' || inputs.mode || 'publish' }}
         run: |
           if [ "$MODE" = audit ]; then
             python public_link_runtime.py audit
