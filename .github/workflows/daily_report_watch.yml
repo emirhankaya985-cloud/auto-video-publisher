@@ -17,7 +17,8 @@ concurrency:
 
 jobs:
   verify-previous-night:
-    if: vars.META_REPORTING_ENABLED == 'true'
+    # Keep the independent 07:10 TRT watchdog enabled unless explicitly disabled.
+    if: vars.META_REPORTING_ENABLED != 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
