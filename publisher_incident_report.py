@@ -32,7 +32,16 @@ def build_incident_report(state, run_id, *, plan_text="", errors=None, step_outc
         if status not in _SAFE_STATUSES:
             raise ValueError("Unknown ledger status")
         # A green result needs a real platform post identifier.
-        if status != "done" or str(row.get("post_id", "")).strip():
+        if status == "done" and not str(row.get("post_id", "")).strip():
+            counts["unverified_done"] += 1
+            incidents.append({
+                "route": str(row.get("route", ""))[:45],
+                "platform": row.get("platform") if row.get("platform") in ("facebook", "instagram") else "unknown",
+                "status": "done",
+                "reason": "missing_confirmed_post_id",
+                "action": "verify_remote_post_before_claiming_success",
+            })
+        else:
             counts[status] += 1
         detail = row.get("failure")
         if not isinstance(detail, dict):
@@ -70,6 +79,7 @@ def build_incident_report(state, run_id, *, plan_text="", errors=None, step_outc
         "schema": 2, "run_id": run_id,
         "created_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "confirmed_new_posts": counts["done"],
+        "unverified_done_entries": counts["unverified_done"],
         "safe_pre_upload_retries": counts["ready"],
         "uncertain_pending_reconciliation": counts["intent"] + counts["uncertain"],
         "incidents": incidents, "planning_blocker_counts": blockers,
