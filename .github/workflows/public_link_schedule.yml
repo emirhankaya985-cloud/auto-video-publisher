@@ -44,6 +44,8 @@ jobs:
       ENABLE_FILM_ROUTES: ${{ vars.ENABLE_FILM_ROUTES }}
       FILM_RIGHTS_APPROVED: ${{ vars.FILM_RIGHTS_APPROVED }}
       ENABLE_TOONZONE_ROUTES: ${{ vars.ENABLE_TOONZONE_ROUTES }}
+      # Default on for rights-approved ToonZone; owner can set 'false' to hold missing covers.
+      TOONZONE_AUTO_COVER_ENABLED: ${{ vars.TOONZONE_AUTO_COVER_ENABLED || 'true' }}
       # Owner explicitly requested today's catch-up before the evening check.
       # Subsequent dates automatically return to the existing per-route times.
       COMPLETE_DAY_DATE: '2026-10-23'
