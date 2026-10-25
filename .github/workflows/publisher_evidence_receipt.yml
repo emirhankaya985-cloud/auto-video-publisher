@@ -5,6 +5,7 @@ on:
       - 985 Migration CI and setup status
       - Public link Meta automation
       - Read-only Meta connection audit
+      - Film ToonZone failed IG container status read-only
     types: [completed]
 
 permissions:
@@ -43,6 +44,7 @@ jobs:
               "985 Migration CI and setup status": "ci",
               "Public link Meta automation": "publisher",
               "Read-only Meta connection audit": "meta_audit",
+              "Film ToonZone failed IG container status read-only": "ig_status",
           }
           name = os.environ["RUN_NAME"]
           if name not in names:
@@ -110,7 +112,8 @@ jobs:
               print("Publisher live run metadata unavailable:", type(exc).__name__)
 
           titles = {"ci": "Mock CI", "publisher": "Meta publisher / audit",
-                    "meta_audit": "Read-only Meta account verification"}
+                    "meta_audit": "Read-only Meta account verification",
+                    "ig_status": "Read-only Film / ToonZone IG container status"}
           lines = [
               "## Otomasyon CI ve yayın koşumu durum kanıtları",
               "",
@@ -121,7 +124,7 @@ jobs:
               "| Denetim | Sonuç | Çalışma | Commit | Olay | Güncellendi (UTC) |",
               "| --- | --- | --- | --- | --- | --- |",
           ]
-          for k in ("ci", "publisher", "meta_audit"):
+          for k in ("ci", "publisher", "meta_audit", "ig_status"):
               val = state.get(k, {})
               if not val:
                   lines.append(f"| {titles[k]} | Doğrulanmadı | - | - | - | - |")
