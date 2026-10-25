@@ -1,0 +1,113 @@
+name: Publisher evidence receipt (no Meta API writes)
+on:
+  workflow_run:
+    workflows:
+      - 985 Migration CI and setup status
+      - Public link Meta automation
+      - Read-only Meta connection audit
+    types: [completed]
+
+permissions:
+  issues: write
+
+concurrency:
+  group: publisher-evidence-receipt
+  cancel-in-progress: false
+
+jobs:
+  receipt:
+    if: ${{ github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Record public run status without checkout or credentials exposure
+        env:
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          RUN_NAME: ${{ github.event.workflow_run.name }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          RUN_RESULT: ${{ github.event.workflow_run.conclusion }}
+          RUN_EVENT: ${{ github.event.workflow_run.event }}
+          RUN_FINISHED: ${{ github.event.workflow_run.updated_at }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import urllib.request
+
+          names = {
+              "985 Migration CI and setup status": "ci",
+              "Public link Meta automation": "publisher",
+              "Read-only Meta connection audit": "meta_audit",
+          }
+          name = os.environ["RUN_NAME"]
+          if name not in names:
+              raise SystemExit("Unexpected upstream workflow")
+          api_url = "https://api.github.com/repos/" + os.environ["REPO"] + "/issues/11"
+          headers = {
+              "Accept": "application/vnd.github+json",
+              "Authorization": "Bearer " + os.environ["GH_TOKEN"],
+              "X-GitHub-Api-Version": "2022-11-28",
+              "Content-Type": "application/json",
+          }
+          def request(method, data=None):
+              payload = None if data is None else json.dumps(data).encode("utf-8")
+              req = urllib.request.Request(
+                  api_url, data=payload, headers=headers, method=method)
+              with urllib.request.urlopen(req, timeout=20) as response:
+                  return json.load(response)
+
+          issue = request("GET")
+          marker = re.search(
+              r"<!-- publisher-receipts-json\s*(\{.*?\})\s*-->",
+              issue.get("body") or "", flags=re.S)
+          state = json.loads(marker.group(1)) if marker else {}
+          if not isinstance(state, dict):
+              raise SystemExit("Invalid existing receipt")
+          key = names[name]
+          new_id = int(os.environ["RUN_ID"])
+          old = state.get(key)
+          if isinstance(old, dict) and int(old.get("run_id", 0)) > new_id:
+              raise SystemExit(0)  # older completion must not overwrite newer
+          state[key] = {
+              "workflow": name,
+              "run_id": new_id,
+              "conclusion": os.environ["RUN_RESULT"],
+              "commit": os.environ["RUN_SHA"][:12],
+              "event": os.environ["RUN_EVENT"],
+              "finished_at": os.environ["RUN_FINISHED"],
+              "url": os.environ["RUN_URL"],
+          }
+          titles = {"ci": "Mock CI", "publisher": "Meta publisher / audit",
+                    "meta_audit": "Read-only Meta account verification"}
+          lines = [
+              "## Otomasyon CI ve yayın koşumu durum kanıtları",
+              "",
+              "Bu tabloda workflow sonucu yer alır. **Başarılı workflow, "
+              "tek başına gönderi yayımlandığının kanıtı değildir.**",
+              "Gönderi kabulü için link-state-result artifact'ında gerçek post_id gerekir.",
+              "",
+              "| Denetim | Sonuç | Çalışma | Commit | Olay | Güncellendi (UTC) |",
+              "| --- | --- | --- | --- | --- | --- |",
+          ]
+          for k in ("ci", "publisher", "meta_audit"):
+              val = state.get(k, {})
+              if not val:
+                  lines.append(f"| {titles[k]} | Doğrulanmadı | - | - | - | - |")
+                  continue
+              label = val["conclusion"]
+              link = f'[#{val["run_id"]}]({val["url"]})'
+              lines.append(
+                  f'| {titles[k]} | {label} | {link} | '
+                  f'{val["commit"]} | {val["event"]} | {val["finished_at"]} |')
+          lines += ["", "Yalnızca GitHub run metaverileri saklanır; "
+                    "tokenlar, MP4 içerikleri ve ham API yanıtları kaydedilmez.",
+                    "", "<!-- publisher-receipts-json",
+                    json.dumps(state, ensure_ascii=False, sort_keys=True),
+                    "-->", ""]
+          request("PATCH", {"body": "\n".join(lines)})
+          print("Receipt updated:", key, new_id, os.environ["RUN_RESULT"])
+          PY
