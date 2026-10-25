@@ -75,6 +75,20 @@ def build_incident_report(state, run_id, *, plan_text="", errors=None, step_outc
     outcomes = {k: v for k, v in (step_outcomes or {}).items()
                 if k in ("verify", "plan", "publish", "notify")
                 and v in ("success", "failure", "skipped", "cancelled")}
+    # Preserve visibility of earlier uncertain publish attempts. Counts scoped
+    # only to the current run otherwise misreport a held queue as fully healthy.
+    previous_held = [
+        row for row in state["entries"].values()
+        if isinstance(row, dict)
+        and row.get("status") in ("intent", "uncertain")
+        and str(row.get("run_id", "")) != str(run_id)
+    ]
+    safe_routes = {"tarladaki", "penguen", "gonle", "daily_laugh",
+                   "film", "film_second", "toonzone"}
+    previous_held_routes = dict(Counter(
+        row.get("route") if row.get("route") in safe_routes else "unknown"
+        for row in previous_held
+    ))
     return {
         "schema": 2, "run_id": run_id,
         "created_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -82,6 +96,8 @@ def build_incident_report(state, run_id, *, plan_text="", errors=None, step_outc
         "unverified_done_entries": counts["unverified_done"],
         "safe_pre_upload_retries": counts["ready"],
         "uncertain_pending_reconciliation": counts["intent"] + counts["uncertain"],
+        "previous_unreconciled_intents": len(previous_held),
+        "previous_unreconciled_by_route": previous_held_routes,
         "incidents": incidents, "planning_blocker_counts": blockers,
         "all_error_events": events, "error_event_count": len(events),
         "step_outcomes": outcomes,
@@ -109,6 +125,7 @@ def main():
     (ROOT / "incidents.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({key: summary[key] for key in ("run_id", "confirmed_new_posts",
                       "unverified_done_entries", "safe_pre_upload_retries", "uncertain_pending_reconciliation",
+                      "previous_unreconciled_intents", "previous_unreconciled_by_route",
                       "planning_blocker_counts", "error_event_count", "step_outcomes")},
                      ensure_ascii=False), flush=True)
     # Do not let an apparently green workflow conceal a completed entry with
