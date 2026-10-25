@@ -91,6 +91,14 @@ jobs:
           path: link-runtime/state.json
           if-no-files-found: ignore
           retention-days: 90
+      - name: Archive validated ToonZone fallback artwork (no Drive writes)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: toonzone-generated-part-covers
+          path: link-runtime/generated_toonzone_covers/*.png
+          if-no-files-found: ignore
+          retention-days: 90
       - name: Save caption and account audit report
         if: always()
         uses: actions/upload-artifact@v4
