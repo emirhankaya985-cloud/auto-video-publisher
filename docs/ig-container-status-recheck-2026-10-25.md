@@ -6,3 +6,5 @@ Only status GET is performed. No Meta container creation, rupload,
 media publish, video transfer, duplicate Facebook post or saved state reset.
 
 This cannot assert publishing success and must not authorize another retry.
+
+Follow-up read-only status sample after initial IN_PROGRESS observations; no API writes.
