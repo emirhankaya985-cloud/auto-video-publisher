@@ -10,7 +10,7 @@ from test_public_link_runtime import runtime
 
 
 class FilmToonZoneRecoveryTests(unittest.TestCase):
-    def _run(self, route, name, retry_count=0):
+    def _run(self, route, name, retry_count=0, run_id="40107188749"):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             caption = "RECOVERY-IG-EXACT"
@@ -23,7 +23,7 @@ class FilmToonZoneRecoveryTests(unittest.TestCase):
                 f"{route}:instagram:clip": {
                     "route": route, "platform": "instagram", "status": "uncertain",
                     "caption_hash": runtime.caption_key(caption), "file": name,
-                    "day": "2026-10-24", "run_id": "40107188749",
+                    "day": "2026-10-24", "run_id": run_id,
                     "prepublish_retry_count": retry_count,
                     "failure": {
                         "stage": "Instagram ikili video aktarımı",
@@ -88,6 +88,39 @@ class FilmToonZoneRecoveryTests(unittest.TestCase):
         self.assertEqual(state["toonzone:facebook:clip"]["status"], "done")
         self.assertEqual(state["toonzone:instagram:clip"]["prepublish_retry_count"], 1)
         self.assertIn("RECOVERY: S01E03_Caffeinated_Concert_Tickets_Part3.mp4", report)
+
+    def test_one_last_ig_720p_attempt_for_two_verified_pre_publish_400(self):
+        for route, filename in (
+            ("film", "Yoksul_1986_Part_16.mp4"),
+            ("toonzone", "S01E03_Caffeinated_Concert_Tickets_Part3.mp4"),
+        ):
+            with self.subTest(route=route):
+                plans, state, report = self._run(
+                    route, filename, retry_count=1, run_id="40224351466")
+                self.assertEqual(len(plans), 1)
+                self.assertEqual(plans[0]["platforms"], ["instagram"])
+                self.assertEqual(state[f"{route}:instagram:clip"]["status"], "intent")
+                self.assertEqual(state[f"{route}:instagram:clip"]["prepublish_retry_count"], 2)
+                self.assertEqual(state[f"{route}:facebook:clip"]["status"], "done")
+                self.assertIn("RECOVERY V3", report)
+
+    def test_no_fourth_try_and_no_non_audited_video_override(self):
+        for route, filename in (
+            ("film", "Yoksul_1986_Part_16.mp4"),
+            ("toonzone", "S01E03_Caffeinated_Concert_Tickets_Part3.mp4"),
+        ):
+            plans, state, report = self._run(
+                route, filename, retry_count=2, run_id="40224351466")
+            self.assertEqual(plans, [])
+            self.assertEqual(state[f"{route}:instagram:clip"]["status"], "uncertain")
+        wrong = {"status": "uncertain", "run_id": "40224351466",
+                 "prepublish_retry_count": 1,
+                 "failure": {"stage": "Instagram media_publish", "http_status": 400}}
+        self.assertFalse(runtime.audited_ig_v3_eligible(
+            "film", "instagram", "Yoksul_1986_Part_16.mp4", wrong))
+        wrong["failure"]["stage"] = "Instagram ikili video aktarımı"
+        self.assertFalse(runtime.audited_ig_v3_eligible(
+            "film", "instagram", "Yoksul_1986_Part_17.mp4", wrong))
 
     def test_second_failed_attempt_never_restarts_film(self):
         plans, state, report = self._run("film", "Yoksul_1986_Part_16.mp4", retry_count=1)
