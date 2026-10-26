@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import publisher_incident_report as incidents
-from publisher_one_shot_gate import MARKER, SUBJECT, IG_RESCUE_MARKER, IG_RESCUE_SUBJECT, is_ig_rescue_push, determine_mode
+from publisher_one_shot_gate import MARKER, SUBJECT, IG_RESCUE_MARKER, IG_RESCUE_SUBJECT, is_ig_rescue_push, determine_mode, IG_V4_MARKER, IG_V4_SUBJECT, is_v4_recovery_push
 
 
 class SafeAuditTriggerTests(unittest.TestCase):
@@ -54,6 +54,21 @@ class SafeAuditTriggerTests(unittest.TestCase):
         workflow = Path(".github/workflows/public_link_schedule.yml").read_text()
         self.assertIn(IG_RESCUE_MARKER, workflow)
         self.assertIn("IG_AUDITED_RESCUE_ONLY", workflow)
+
+    def test_v4_only_exact_one_time_main_marker_can_publish(self):
+        self.assertEqual(determine_mode(
+            "push", "refs/heads/main", IG_V4_SUBJECT, (IG_V4_MARKER,)), "publish")
+        self.assertTrue(is_v4_recovery_push(
+            "push", "refs/heads/main", IG_V4_SUBJECT, (IG_V4_MARKER,)))
+        for subject, added, ref in (
+            (IG_V4_SUBJECT, (), "refs/heads/main"),
+            ("invalid-subject", (IG_V4_MARKER,), "refs/heads/main"),
+            (IG_V4_SUBJECT, (IG_V4_MARKER,), "refs/heads/branch"),
+        ):
+            self.assertEqual(determine_mode("push", ref, subject, added), "audit")
+        workflow = Path(".github/workflows/public_link_schedule.yml").read_text()
+        self.assertIn(IG_V4_MARKER, workflow)
+        self.assertIn("steps.release_gate.outputs.recovery_only", workflow)
 
     def test_schedule_and_manual_modes_preserved(self):
         self.assertEqual(determine_mode("schedule", "refs/heads/main"), "publish")
