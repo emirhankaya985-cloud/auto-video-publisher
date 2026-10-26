@@ -6,6 +6,7 @@ on:
       - Public link Meta automation
       - Read-only Meta connection audit
       - Film ToonZone failed IG container status read-only
+      - Film ToonZone short clip upload-only diagnostic (NO publish)
     types: [completed]
 
 permissions:
@@ -45,6 +46,7 @@ jobs:
               "Public link Meta automation": "publisher",
               "Read-only Meta connection audit": "meta_audit",
               "Film ToonZone failed IG container status read-only": "ig_status",
+              "Film ToonZone short clip upload-only diagnostic (NO publish)": "ig_shortclip",
           }
           name = os.environ["RUN_NAME"]
           if name not in names:
@@ -113,7 +115,8 @@ jobs:
 
           titles = {"ci": "Mock CI", "publisher": "Meta publisher / audit",
                     "meta_audit": "Read-only Meta account verification",
-                    "ig_status": "Read-only Film / ToonZone IG container status"}
+                    "ig_status": "Read-only Film / ToonZone IG container status",
+                    "ig_shortclip": "15-second Meta upload-only diagnostic (no publish)"}
           lines = [
               "## Otomasyon CI ve yayın koşumu durum kanıtları",
               "",
@@ -124,7 +127,7 @@ jobs:
               "| Denetim | Sonuç | Çalışma | Commit | Olay | Güncellendi (UTC) |",
               "| --- | --- | --- | --- | --- | --- |",
           ]
-          for k in ("ci", "publisher", "meta_audit", "ig_status"):
+          for k in ("ci", "publisher", "meta_audit", "ig_status", "ig_shortclip"):
               val = state.get(k, {})
               if not val:
                   lines.append(f"| {titles[k]} | Doğrulanmadı | - | - | - | - |")
