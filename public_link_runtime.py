@@ -478,6 +478,9 @@ def publication_day(route, row):
 
 
 def target_count(route, now):
+    if (os.getenv("IG_AUDITED_RESCUE_ONLY") == "true"
+            and route in _AUDITED_IG_V3_FILES):
+        return 1
     clock = route_clock(route, now)
     hours = {"tarladaki": TARLADAKI_HOURS, "penguen": PENGUEN_HOURS,
              "gonle": GONLE_HOURS, "film": FILM_HOURS, "film_second": FILM_HOURS}
@@ -557,7 +560,10 @@ def plan(audit=False):
     planned_counts = {}
     batch_limit = 8 if os.getenv("CATCHUP_BATCH_DATE") == day else 1
     history_cache = {}
+    rescue_only = os.getenv("IG_AUDITED_RESCUE_ONLY") == "true"
     for route, (source, page_name) in ROUTES.items():
+        if rescue_only and route not in _AUDITED_IG_V3_FILES:
+            continue
         report.extend(["", f"## {page_name}"])
         if not route_enabled(route):
             report.append("HELD: existing route/rights switch is disabled.")
@@ -569,6 +575,11 @@ def plan(audit=False):
             continue
         ig_enabled = not (route == "gonle" and route_paused("gonle_ig")) and not (route == "daily_laugh" and route_paused("daily_laugh_instagram"))
         platforms = ["facebook"] + (["instagram"] if page.get("instagram_id") and route != "film_second" and ig_enabled else [])
+        if rescue_only:
+            if "instagram" not in platforms:
+                report.append("HELD: audited IG rescue requires linked Instagram identity.")
+                continue
+            platforms = ["instagram"]
         clock = route_clock(route, now)
         try:
             histories = {}
@@ -613,6 +624,10 @@ def plan(audit=False):
             sum(e["route"] == route and e["platform"] == p and e["status"] == "done"
                 and e.get("day") == clock.date().isoformat() for e in state["entries"].values())
         ) for p in platforms}
+        if rescue_only:
+            # An exact orphaned prepublish attempt is independent of the daily
+            # account quota. Exact caption reconciliation still runs above.
+            counts = {p: 0 for p in platforms}
         due = target_count(route, now)
         if due == 0:
             report.append("NOT DUE: publication hours have not started for this route's local day.")
@@ -622,6 +637,8 @@ def plan(audit=False):
             continue
         files = catalogs[source]
         videos = [v for n, v in files.items() if n.lower().endswith(".mp4")]
+        if rescue_only:
+            videos = [v for v in videos if v["name"] == _AUDITED_IG_V3_FILES[route]]
         other_humor_hashes = set()
         if route in {"tarladaki", "penguen"}:
             # Match the existing normal publisher's explicit TP activation gate.
@@ -790,7 +807,7 @@ def plan(audit=False):
                     and e.get("day") == clock.date().isoformat()
                     for e in state["entries"].values()
                 )
-                today_count = max(today_count, confirmed_in_ledger)
+                today_count = 0 if rescue_only else max(today_count, confirmed_in_ledger)
                 # A tick catches up one item per account; no all-night busy polling.
                 if today_count + planned_counts.get((route, p), 0) >= target:
                     continue
@@ -856,6 +873,7 @@ def plan(audit=False):
             if route_selected >= batch_limit:
                 fb_due = (not audit and route in _AUDITED_IG_V3_FILES
                           and "instagram" in blocked_platforms
+                          and "facebook" in platforms
                           and "facebook" not in blocked_platforms
                           and planned_counts.get((route, "facebook"), 0) < batch_limit
                           and counts.get("facebook", 0) < target_count(route, now))
