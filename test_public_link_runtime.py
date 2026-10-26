@@ -395,6 +395,93 @@ class LinkRuntimeSafety(unittest.TestCase):
             result = runtime.inventory(runtime.FOLDERS["daily_laugh"])
         self.assertEqual(set(result), {"2.mp4"})
 
+    def test_film_and_toonzone_facebook_advance_without_reposting_held_ig(self):
+        for route, stem1, stem2 in (
+            ("film", "Yoksul_1986_Part_16", "Yoksul_1986_Part_17"),
+            ("toonzone", "S01E03_Caffeinated_Concert_Tickets_Part3",
+             "S01E03_Caffeinated_Concert_Tickets_Part4"),
+        ):
+            with self.subTest(route=route), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                file1, file2 = stem1 + ".mp4", stem2 + ".mp4"
+                items = {
+                    file1: {"name": file1, "id": "old"},
+                    file2: {"name": file2, "id": "next"},
+                }
+                entry = {
+                    "route": route, "platform": "instagram",
+                    "file": file1, "status": "uncertain",
+                    "caption_hash": runtime.caption_key("IG caption"),
+                    "prepublish_retry_count": 1,
+                    "run_id": "40224351466",
+                    "failure": {
+                        "stage": "Instagram ikili video aktarımı",
+                        "http_status": 400, "graph_code": 100,
+                    },
+                    "hold_alerted_at": datetime.now(ZoneInfo("Europe/Istanbul")).isoformat(),
+                }
+                state = {
+                    "schema": 1, "episode_days": {}, "entries": {
+                        f"{route}:facebook:old": {
+                            "route": route, "platform": "facebook",
+                            "file": file1, "status": "done", "post_id": "fb-original",
+                            "day": "2026-10-25",
+                        },
+                        f"{route}:instagram:old": entry,
+                    },
+                }
+                page_name = "Film Mağarası" if route == "film" else "ToonZone"
+                folders = {route: "videos", "covers": "covers"}
+                def catalog(folder):
+                    return items if folder == "videos" else {}
+                with patch.dict(os.environ, {
+                        "GITHUB_STEP_SUMMARY": str(root / "summary.md"),
+                        "GITHUB_RUN_ID": "77777",
+                        "TOONZONE_AUTO_COVER_ENABLED": "true",
+                    }), patch.object(runtime, "ROOT", root), patch.object(
+                        runtime, "STATE", root / "state.json"
+                    ), patch.object(runtime, "PLAN", root / "plan.json"), patch.object(
+                        runtime, "FOLDERS", folders
+                    ), patch.object(runtime, "ROUTES", {route: (route, page_name)}), patch.object(
+                        runtime, "restore", return_value=state
+                    ), patch.object(runtime, "apply_verified_migration"), patch.object(
+                        runtime, "load_meta_auth", return_value={
+                            "pages": [{"page_name": page_name, "instagram_id": "ig123"}]
+                        }
+                    ), patch.object(runtime, "inventory", side_effect=catalog), patch.object(
+                        runtime, "graph_rows", return_value=[]
+                    ), patch.object(runtime, "target_count", return_value=1), patch.object(
+                        runtime, "seed_done", return_value=False
+                    ), patch.object(runtime, "copies", return_value=(
+                        {"facebook": "FB caption", "instagram": "IG caption"}, "matching-txt"
+                    )), patch.object(runtime, "generate_toonzone_txts", return_value=(0, 0)), patch.object(
+                        runtime, "toonzone_cover_coverage", return_value=(0, 2)):
+                    runtime.plan()
+                planned = json.loads((root / "plan.json").read_text())
+                self.assertEqual(len(planned), 1)
+                self.assertEqual(planned[0]["name"], file2)
+                self.assertEqual(planned[0]["platforms"], ["facebook"])
+                saved = json.loads((root / "state.json").read_text())
+                self.assertEqual(saved["entries"][f"{route}:instagram:old"]["status"], "uncertain")
+                self.assertEqual(saved["entries"][f"{route}:facebook:old"]["post_id"], "fb-original")
+                self.assertNotIn(f"{route}:instagram:next", saved["entries"])
+
+    def test_old_ig_publish_stage_uncertainty_still_blocks_everything(self):
+        old = {
+            "status": "uncertain", "prepublish_retry_count": 1,
+            "failure": {"stage": "Instagram media_publish",
+                        "http_status": 400, "graph_code": 100},
+        }
+        self.assertFalse(runtime.facebook_can_continue_past_ig_rejection(
+            "film", "instagram", old))
+        old["failure"]["stage"] = "Instagram ikili video aktarımı"
+        self.assertTrue(runtime.facebook_can_continue_past_ig_rejection(
+            "film", "instagram", old))
+        self.assertFalse(runtime.facebook_can_continue_past_ig_rejection(
+            "gonle", "instagram", old))
+        self.assertFalse(runtime.facebook_can_continue_past_ig_rejection(
+            "film", "facebook", old))
+
     def test_uncertain_toonzone_part_blocks_later_parts(self):
         runtime.record_error.reset_mock()
         with tempfile.TemporaryDirectory() as tmp:
