@@ -77,15 +77,7 @@ jobs:
         run: python publisher_one_shot_gate.py
       - name: Verify state, account and caption safety without API writes
         id: verify
-        run: |
-          # The offline unit tests intentionally print mocked "HELD"/"HTTP 400"
-          # examples. Do not mix that output with REAL publishing diagnostics.
-          # On any failing assertion, preserve complete test output in the
-          # GitHub job log; never proceed to Meta posting.
-          logfile="${RUNNER_TEMP}/meta-publisher-offline-preflight.log"
-          if python -m unittest -v test_public_link_runtime.py > "$logfile" 2>&1; then
-            echo "✅ Offline publisher preflight: PASS (no Meta API writes)"
-            grep -E '^Ran [0-9]+ tests|^OK
+        run: python -m unittest -v test_public_link_runtime.py
       - name: Check public folders, captions, histories and prepare intent
         id: plan
         env:
