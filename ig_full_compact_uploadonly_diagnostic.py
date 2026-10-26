@@ -28,9 +28,11 @@ def require_exact_commit_gate():
         raise RuntimeError("Full-length upload-only release marker missing")
 
 
-def full_compact_trial(page, source, filename, workdir):
+def full_compact_trial(page, source, filename, workdir, *, upload=None):
     from instagram_media_compat import prepare_instagram_upload, probe
-    from cloud_omnichannel_publisher import upload_instagram_reel
+    if upload is None:
+        from cloud_omnichannel_publisher import upload_instagram_reel
+        upload = upload_instagram_reel
     source = Path(source)
     full = Path(workdir) / "full_compact_unpublished.mp4"
     converted, method = prepare_instagram_upload(
@@ -41,7 +43,7 @@ def full_compact_trial(page, source, filename, workdir):
     duration = float(media.get("format", {}).get("duration") or 0)
     if not 175 <= duration <= 185:
         raise RuntimeError("Full diagnostic lost original 180-second duration")
-    result = upload_instagram_reel(
+    result = upload(
         page, str(converted),
         "Unpublished full-length upload compatibility check",
         append_store_link=False, publish=False)
