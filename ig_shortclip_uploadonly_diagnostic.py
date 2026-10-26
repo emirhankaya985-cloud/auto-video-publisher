@@ -9,6 +9,11 @@ import os
 import tempfile
 from pathlib import Path
 
+SOURCE_FOLDERS = {
+    "film": "1NvEuGQ83BmCMrzdK6ziI1nC_0zzshqJW",
+    "toonzone": "14ee4AnUdf03dYUAdtfpHa-E9Zxyh4UZF",
+}
+
 SOURCES = (
     ("film", "Yoksul_1986_Part_16.mp4",
      "1239298989276639", "17841477990224124"),
@@ -62,9 +67,13 @@ def upload_only_trial(page, source, original_name, workdir, *, diagnostic_clip=N
 def execute(*, inventory=None, download=None, loader=None,
             trial=None, paused=None):
     require_explicit_one_shot()
-    from public_link_runtime import FOLDERS
+    # Keep mocked CI independent of the optional runtime-only gdown module.
+    # Production validates these exact public Drive allowlist IDs against the
+    # publisher's source mapping before downloading either video.
     if inventory is None or download is None:
-        from public_link_runtime import inventory as real_inventory, download as real_download
+        from public_link_runtime import FOLDERS, inventory as real_inventory, download as real_download
+        if any(FOLDERS[route] != folder for route, folder in SOURCE_FOLDERS.items()):
+            raise RuntimeError("Approved Drive source mapping changed; diagnostic halted")
         inventory = inventory or real_inventory
         download = download or real_download
     if loader is None:
@@ -96,7 +105,7 @@ def execute(*, inventory=None, download=None, loader=None,
     rows = []
     for route, filename, page in verified:
         try:
-            files = inventory(FOLDERS[route])
+            files = inventory(SOURCE_FOLDERS[route])
             item = selected_video(files, filename)
             with tempfile.TemporaryDirectory(prefix="safe-ig-upload-only-") as folder:
                 root = Path(folder)
