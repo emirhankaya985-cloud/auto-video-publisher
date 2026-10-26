@@ -1,0 +1,63 @@
+name: Instagram 180s low-size unpublished binary diagnostic
+
+on:
+  pull_request:
+    paths:
+      - 'ig_180s_under12mb_diagnostic.py'
+      - 'test_ig_180s_under12mb_diagnostic.py'
+      - '.github/workflows/ig_180s_low_size_diagnostic.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'docs/ig-180s-low-size-uploadonly-2026-10-26.md'
+
+permissions:
+  contents: read
+
+# This job never posts to Meta profiles or changes publication intent.
+# PR and one-time main push use separate queues, isolated from publisher cron.
+concurrency:
+  group: ig-180s-under12mb-unpublished-${{ github.event_name }}
+  cancel-in-progress: false
+
+jobs:
+  low-size-upload-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install runtime only for pinned main push
+        if: github.event_name == 'push'
+        run: |
+          pip install --require-hashes -r requirements.txt
+          pip install gdown==6.4.2
+          command -v ffmpeg && command -v ffprobe
+      - name: Verify zero-publish and 12MB diagnostic envelope
+        run: python -m unittest -v test_ig_180s_under12mb_diagnostic.py
+      - name: Upload at most two full-duration small binaries, never publish
+        if: github.event_name == 'push'
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_REF: ${{ github.ref }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          IG_SHORTCLIP_UPLOADONLY_APPROVED: 'true'
+          IG_LONGCLIP_UPLOADONLY_APPROVED: 'true'
+          META_AUTH_JSON: ${{ secrets.META_AUTH_JSON }}
+          META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+          ENABLE_FILM_ROUTES: ${{ vars.ENABLE_FILM_ROUTES }}
+          FILM_RIGHTS_APPROVED: ${{ vars.FILM_RIGHTS_APPROVED }}
+          ENABLE_TOONZONE_ROUTES: ${{ vars.ENABLE_TOONZONE_ROUTES }}
+          ENABLE_NEW_META_ROUTES: ${{ vars.ENABLE_NEW_META_ROUTES }}
+          META_NEW_ROUTES_RIGHTS_APPROVED: ${{ vars.META_NEW_ROUTES_RIGHTS_APPROVED }}
+        run: python ig_180s_under12mb_diagnostic.py
+      - name: Preserve redacted result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ig-180s-low-size-unpublished-result
+          path: ig-180s-low-size-unpublished.json
+          retention-days: 30
+          if-no-files-found: ignore
