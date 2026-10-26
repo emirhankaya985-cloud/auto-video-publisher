@@ -129,8 +129,10 @@ class InstagramMediaCompatibilityTests(unittest.TestCase):
             self.assertIn("setsar=1", command)
             self.assertNotIn("scale=1080:1920", command)
             self.assertIn("aac_low", command)
+            self.assertEqual(command[command.index("-b:a") + 1], "112k")
             self.assertIn("+faststart", command)
             self.assertIn("open_gop=0", " ".join(command))
+        self.assertEqual(command[command.index("-b:a") + 1], "112k")
 
     def test_film_compact_command_matches_successful_full_length_profile(self):
         with patch("instagram_media_compat.subprocess.run") as run:
@@ -191,6 +193,33 @@ class InstagramMediaCompatibilityTests(unittest.TestCase):
             self.assertEqual(result, (output, "transcode"))
             transcode.assert_called_once_with(source, output)
             decode.assert_called_once_with(output)
+
+    def test_meta_audio_bitrate_ceiling_requires_guard_below_128kbps(self):
+        over = supported_probe()
+        over["streams"][1]["bit_rate"] = "129147"
+        self.assertIn("ses bitrate 128 kbps sınırını aşıyor",
+                      compatibility_issues(over, 1024, True, False, True))
+        accepted = supported_probe()
+        accepted["streams"][1]["bit_rate"] = "127983"
+        self.assertNotIn("ses bitrate 128 kbps sınırını aşıyor",
+                         compatibility_issues(accepted, 1024, True, False, True))
+        unspecified = supported_probe()
+        unspecified["streams"][1]["bit_rate"] = "N/A"
+        self.assertNotIn("ses bitrate 128 kbps sınırını aşıyor",
+                         compatibility_issues(unspecified, 1024, True, False, True))
+
+    def test_ig_transcodes_leave_aac_bitrate_margin(self):
+        from instagram_media_compat import _transcode_vertical, _transcode_film_compact
+        functions = (_transcode_vertical, _transcode_film_compact)
+        for fun in functions:
+            with self.subTest(encoder=fun.__name__), patch(
+                "instagram_media_compat.subprocess.run"
+            ) as run:
+                fun(Path("source.mp4"), Path("output.mp4"))
+                args = run.call_args.args[0]
+                self.assertEqual(args[args.index("-b:a") + 1], "112k")
+                self.assertIn("-profile:a", args)
+                self.assertEqual(args[args.index("-profile:a") + 1], "aac_low")
 
     def test_full_diagnostic_remuxes_without_reencoding_and_validates_faststart(self):
         with tempfile.TemporaryDirectory() as directory:
