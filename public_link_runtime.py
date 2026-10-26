@@ -425,6 +425,25 @@ def previous_intent_alert_due(entry, now):
     return seen.astimezone(TR).date() < now.astimezone(TR).date()
 
 
+def facebook_can_continue_past_ig_rejection(route, platform, entry):
+    """Only an exhausted, proven pre-media_publish IG 400 can hold IG alone.
+
+    This does not clear the uncertain intent, grant an Instagram retry, or skip
+    Film/ToonZone parts on Instagram. Facebook has a separate dedupe ledger.
+    """
+    if route not in {"film", "toonzone"} or platform != "instagram":
+        return False
+    if entry.get("status") != "uncertain" or entry.get("prepublish_retry_count") != 1:
+        return False
+    prior = entry.get("failure")
+    if not isinstance(prior, dict):
+        return False
+    marker = SimpleNamespace(stage=prior.get("stage"),
+                             http_status=prior.get("http_status"),
+                             code=prior.get("graph_code"))
+    return known_pre_publish_media_rejection(marker, route, previous_retries=0)
+
+
 def publication_day(route, row):
     """Use the account scheduling timezone for confirmed Meta history entries."""
     return route_clock(route, timestamp(row)).date().isoformat()
@@ -610,10 +629,12 @@ def plan(audit=False):
             videos.sort(key=lambda v: v["name"])
         selected = None
         route_selected = 0
+        blocked_platforms = set()
         for item in videos:
-            if all(counts[p] + planned_counts.get((route, p), 0) >= target_count(route, now) for p in platforms):
+            available = [p for p in platforms if p not in blocked_platforms]
+            if not available or all(counts[p] + planned_counts.get((route, p), 0) >= target_count(route, now) for p in available):
                 break
-            if all(seed_done(route, p, item["name"]) or state["entries"].get(f"{route}:{p}:{item['id']}", {}).get("status") == "done" for p in platforms):
+            if all(seed_done(route, p, item["name"]) or state["entries"].get(f"{route}:{p}:{item['id']}", {}).get("status") == "done" for p in available):
                 continue
             if source == "toonzone":
                 ep = list(parse_order(Path(item["name"]).stem, "cartoon")[:2])
@@ -636,6 +657,8 @@ def plan(audit=False):
             held = False
             skip_unproven_daily = False
             for p in platforms:
+                if p in blocked_platforms:
+                    continue
                 key = f"{route}:{p}:{item['id']}"
                 existing = state["entries"].get(key, {})
                 cap_hash = caption_key(captions[p])
@@ -708,7 +731,17 @@ def plan(audit=False):
                                      route=route, platform=p, video=item["name"],
                                      status="uncertain")
                         existing["hold_alerted_at"] = now.isoformat()
-                    held = True
+                    if facebook_can_continue_past_ig_rejection(route, p, existing):
+                        # After a proven failed binary upload with its one safe
+                        # IG retry consumed, keep IG in its original blocked
+                        # position. Later Facebook-only parts may proceed.
+                        blocked_platforms.add("instagram")
+                        report.append(
+                            "HELD Instagram sequence; Facebook may continue "
+                            "independently without changing the IG intent."
+                        )
+                    else:
+                        held = True
                     continue
                 target = target_count(route, now)
                 today_count = sum(route_clock(route, timestamp(row)).date() == clock.date() for row in histories[p])
