@@ -672,6 +672,7 @@ class LinkRuntimeSafety(unittest.TestCase):
                 self.assertEqual(first["prepublish_retry_count"], 1)
                 self.assertFalse(prepare.call_args.kwargs["film_compact"])
                 self.assertFalse(prepare.call_args.kwargs["prefer_remux"])
+                self.assertTrue(prepare.call_args.kwargs["force_transcode"])
                 ig.assert_called_once()
                 state = json.loads(state_path.read_text())
                 state["entries"]["penguen:instagram:vid"]["status"] = "intent"

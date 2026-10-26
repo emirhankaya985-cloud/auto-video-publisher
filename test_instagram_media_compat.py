@@ -337,7 +337,8 @@ class InstagramMediaCompatibilityTests(unittest.TestCase):
             with patch("instagram_media_compat.probe", return_value=media), \
                  patch("instagram_media_compat.mp4_atom_structure", return_value=ATOM_OK), \
                  patch("instagram_media_compat._transcode_vertical", side_effect=encode) as transcoder, \
-                 patch("instagram_media_compat.remux_mp4_faststart") as remux:
+                 patch("instagram_media_compat.remux_mp4_faststart") as remux, \
+                 patch("instagram_media_compat.check_full_decode") as decode:
                 result = prepare_instagram_upload(
                     source, target, prefer_remux=True,
                     film_compact=False, toonzone_compact=False,
@@ -345,6 +346,7 @@ class InstagramMediaCompatibilityTests(unittest.TestCase):
                 )
         self.assertEqual(result, (target, "transcode"))
         transcoder.assert_called_once_with(source, target)
+        decode.assert_called_once_with(target)
         remux.assert_not_called()
 
     def test_compliant_original_is_not_transcoded(self):
@@ -454,6 +456,8 @@ class InstagramMediaCompatibilityTests(unittest.TestCase):
             prepare_instagram_upload("source.mp4", "temp/converted.mp4")
         command = run.call_args.args[0]
         self.assertIn("-profile:v", command)
+        self.assertIn("-fps_mode", command)
+        self.assertEqual(command[command.index("-fps_mode") + 1], "cfr")
         self.assertIn("high", command)
         self.assertIn("-level:v", command)
         self.assertIn("4.1", command)
