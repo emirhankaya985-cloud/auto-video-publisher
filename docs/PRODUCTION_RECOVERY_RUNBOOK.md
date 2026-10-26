@@ -199,3 +199,16 @@ ham metinle veya erişim tokenıyla hiçbir zaman birleştirme.
 - **Kalan açık konu:** ToonZone'un 159 MP4'üne karşı Drive'da eşleşen **48 gerçek kapak ve 111 eksik özel kapak** var; alternatif yerel kapak oluşması bunların Drive'da tamamlandığı anlamına gelmez. Daily Laugh Lab'da ayrı önceki Instagram `ProcessingFailedError` örnekleri bulunmaktadır; ilk başarısız aktarımdan sonra sadece kanıtlı pre-publish senaryoda mevcut kontrollü alternatif medya hazırlama tekrarına izin verilir. Çift paylaşım için kör POST tekrarını asla açma.
 
 Yeni gerçek olayların sebeplerini, kaynak run linkini ve fix doğrulamasını önceki kayıtları silmeden bu dosyanın sonuna ekle.
+
+## 26 October 2026 — RESOLVED: Film Part 16 + ToonZone Part 3 Instagram blockers
+
+**Resolution (real Meta POSTs, verified IDs):** GitHub Actions [#40290059140](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/40290059140) published Film Mağarası `Yoksul_1986_Part_16.mp4` Instagram post ID `17962599149999265` and ToonZone `S01E03_Caffeinated_Concert_Tickets_Part3.mp4` Instagram post ID `18350065531269318`. `confirmed_new_posts=2`, `uncertain_pending_reconciliation=0`, `previous_unreconciled_intents=0`, `error_event_count=0`; both Telegram and ntfy providers returned 2 server ACKs. Server ACK does not independently prove phone UI delivery.
+
+**Root-cause isolation:** 720p/96k AAC 180s attempts returned HTTP 400 `ProcessingFailedError` at rupload (run #40281812561). Independent 15s tests succeeded and did not publish ([#40288506373](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/40288506373)). Full 180s **360x640 compact** H264 Main AAC-LC 112k upload-only checks also succeeded (HTTP200, FINISHED, no media_publish) on [#40289310065](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/40289310065). The one-time production compact release then published both successfully. The earlier 720p/large-file rejection mechanism was not independently proven, but lower-bandwidth compact encoding resolved this particular case.
+
+**Post-fix schedule proof:** [#40317296332](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/40317296332) on 26 Oct at ~14:46 TRT published Film Mağarası `Yoksul_1986_Part_19.mp4` to Facebook, post ID `890905460678274`; confirmed_new_posts=1, error_event_count=0, unresolved old intents=0, Telegram ACK=1, ntfy ACK=1. Normal scheduled engine still functions after the exact one-time rescue.
+
+**Current acceptance:** Film Part16 and ToonZone Part3 **Instagram publishing incidents are RESOLVED**, and original Facebook published IDs were not replayed. The above is evidence for these specific posts and runs only, not a promise that every future Meta request will succeed. Notifications now differentiate known recurring holds (daily information) from fresh API failures (urgent).
+
+**Automated CI verification:** [#40299351074](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/40299351074) passed 528 Python unittest cases, 57 function assertions and 15 Node tests. Existing permanent evidence issue [#11](https://github.com/emirhankaya985-cloud/auto-video-publisher/issues/11) remains the latest verified dashboard.
+
