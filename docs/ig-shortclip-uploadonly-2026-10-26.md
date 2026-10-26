@@ -22,3 +22,7 @@ Instagram are still unverified; both already-confirmed Facebook Part posts
 remain preserved. Same prior full-length media gave rupload HTTP400
 ProcessingFailedError; an amended sound-bitrate validator was merged through
 PR #13, but no new Reel or permission to replay was claimed.
+
+## 26 October targeted follow-up, no media publication
+
+Live full-length 720p/96kbps recoveries on run 40281812561 both failed before media_publish at rupload with HTTP 400 ProcessingFailedError. Trigger the existing 15-second diagnostic exactly for these sources, only with publish=False, do not change stored production intents. Record result in evidence issue #11. Never blindly retry the 180-second Reels.
