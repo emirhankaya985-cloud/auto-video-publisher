@@ -843,9 +843,23 @@ def plan(audit=False):
                 plans.append(selected)
                 for p in pending:
                     planned_counts[(route, p)] = planned_counts.get((route, p), 0) + 1
+                if (route in _AUDITED_IG_V3_FILES and
+                        item["name"] == _AUDITED_IG_V3_FILES[route] and
+                        "instagram" in pending and
+                        state["entries"][f"{route}:instagram:{item['id']}"]
+                        .get("prepublish_retry_count") == 2):
+                    # One IG-only recovery and one separate FB part can be
+                    # scheduled on the same tick. Never skip the next IG part.
+                    blocked_platforms.add("instagram")
             route_selected += 1
             if route_selected >= batch_limit:
-                break
+                fb_due = (not audit and route in _AUDITED_IG_V3_FILES
+                          and "instagram" in blocked_platforms
+                          and "facebook" not in blocked_platforms
+                          and planned_counts.get((route, "facebook"), 0) < batch_limit
+                          and counts.get("facebook", 0) < target_count(route, now))
+                if not fb_due:
+                    break
         if selected is None:
             report.append("No eligible unpublished item below the daily target.")
     save(STATE, state)
