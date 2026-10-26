@@ -19,7 +19,7 @@ permissions:
 # as recurring publisher schedules kept taking the only pending slot.
 # Keep serial execution among diagnostics but do NOT enter the publisher queue.
 concurrency:
-  group: ig-shortclip-uploadonly-no-publish
+  group: ig-shortclip-uploadonly-no-publish-${{ github.event_name }}
   cancel-in-progress: false
 
 jobs:
@@ -32,6 +32,9 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install locked dependencies
+        # PR tests mock every external API and use Python stdlib only.
+        # Never spend production package-install time on no-network PR tests.
+        if: github.event_name == 'push'
         run: |
           pip install --require-hashes -r requirements.txt
           pip install gdown==6.4.2
