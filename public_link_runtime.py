@@ -425,6 +425,34 @@ def previous_intent_alert_due(entry, now):
     return seen.astimezone(TR).date() < now.astimezone(TR).date()
 
 
+# Only these audited files are authorized for ONE additional recovery using
+# a materially different low-bandwidth media profile. No other route/video can
+# opt in, and previous media_publish uncertainty never qualifies.
+_AUDITED_IG_V3_FILES = {
+    "film": "Yoksul_1986_Part_16.mp4",
+    "toonzone": "S01E03_Caffeinated_Concert_Tickets_Part3.mp4",
+}
+
+
+def audited_ig_v3_eligible(route, platform, name, entry):
+    if route not in _AUDITED_IG_V3_FILES or platform != "instagram":
+        return False
+    if name != _AUDITED_IG_V3_FILES[route]:
+        return False
+    if not isinstance(entry, dict):
+        return False
+    if (entry.get("status") != "uncertain" or
+            entry.get("prepublish_retry_count") != 1 or
+            str(entry.get("run_id", "")) != "40224351466"):
+        return False
+    failure = entry.get("failure")
+    if not isinstance(failure, dict):
+        return False
+    return (failure.get("stage") == "Instagram ikili video aktarımı"
+            and failure.get("http_status") == 400
+            and failure.get("graph_code") in (None, 100))
+
+
 def facebook_can_continue_past_ig_rejection(route, platform, entry):
     """Only an exhausted, proven pre-media_publish IG 400 can hold IG alone.
 
@@ -721,6 +749,17 @@ def plan(audit=False):
                             f"RECOVERY: {item['name']} instagram previously rejected "
                             "before media_publish; safe alternate encoding authorized once."
                         )
+                if (not audit and audited_ig_v3_eligible(
+                        route, p, item["name"], existing)):
+                    # Remote history was read successfully and no unique or
+                    # ambiguous caption match was found above. Old 400 belongs
+                    # to the binary upload stage BEFORE media_publish. Preserve
+                    # all Facebook results and allow one new 720p/96k encode.
+                    existing.update(status="ready", prepublish_retry_count=2)
+                    report.append(
+                        f"RECOVERY V3: {item['name']} instagram audited "
+                        "pre-media_publish HTTP 400; one low-bitrate attempt."
+                    )
                 if existing and existing.get("status") != "ready":
                     report.append(f"HELD: {item['name']} {p} has an uncertain previous intent.")
                     # A green GitHub run is NOT proof these queues are healthy.
@@ -914,6 +953,9 @@ def publish():
                             item["route"] == "toonzone" and not alternate_compact_profile
                         ),
                         force_transcode=alternate_compact_profile,
+                        recovery_v3=(retry_count == 2 and
+                                     item["route"] in _AUDITED_IG_V3_FILES and
+                                     item["name"] == _AUDITED_IG_V3_FILES[item["route"]]),
                     )
                 except Exception as exc:
                     key = f"{item['route']}:instagram:{item['id']}"
