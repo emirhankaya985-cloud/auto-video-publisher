@@ -168,3 +168,14 @@ ham metinle veya erişim tokenıyla hiçbir zaman birleştirme.
 - **ToonZone kapakları:** 48 exact Drive PNG ve 111 eksik korunuyor; yeni uygulamada açık yetki/rota koşulları altında aynı part MP4 karesinden geçici kapak üretme seçeneği var. Bu seçenek Drive'a 111 gerçek tasarım kapağı yüklendiği anlamına gelmez; fail-before-POST kontrolünü atlama.
 - **Kabul kararı:** Mevcut Meta planlı yayın ve Daily Laugh iki platform canlı sonucu doğrulandı; fakat Film/ToonZone Instagram Part16/Part3 ve bütün hesapların tam günlük hedefleri **henüz tam kabul edilemez**. Güvenli ayrım: çalışan planlı motor, doğrulanmış gerçek paylaşımlar, bekleyen iki eski IG intent.
 
+
+
+## 26 Ekim 2026 — Canlı yayın kanıtı, günlük IG hata uyarıları ve Facebook akışının ayrılması
+
+- **Gerçek yeni gönderiler:** Planlı üretim [#40278112977](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/40278112977) `event=schedule` çalışması Tarladaki Fasulye `130.mp4` için **Facebook `1127865563037111`** ve **Instagram `17864488035695158`** post ID'lerini kaydetti. Ayrı bildirimler Telegram 2 ACK ve ntfy 2 ACK döndürdü; telefon ekranında gösterim hâlâ ayrıca kanıtlanmalı.
+- **Kalan Instagram engelleri:** [26 Ekim GET denetimi #40278175525](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/40278175525) Film Part16 ile ToonZone Part3 konteynerlerini `IN_PROGRESS` olarak bildirdi. Bu kontrol hiçbir POST göndermedi; durumu `PUBLISHED` olarak yorumlamak veya eski kimlikleri silmek yasak. Her iki hesapta eski `uncertain` state ve yayın geçmişi korunmalı.
+- **Artık günlük hatırlatma:** `previous_intent_alert_due` İstanbul takvim gününe göre aynı belirsiz intent için günde en fazla bir kez Telegram/ntfy hata uyarısı oluşturur; gün içindeki 30 dakikalık yoklamalar tekrar bildirim spam'i üretmez. Bu yalnız hata günlüğünü yeniler, Meta publish tekrarını başlatmaz. İlk gerçek uyarının kanal ACK'si yeni planlı koşumda ayrıca doğrulanmalıdır.
+- **Bağımsız Facebook kurtarma:** Film/ToonZone'da IG pre-`media_publish` HTTP 400 kanıtı bulunup `prepublish_retry_count=1` ise IG önceki bölümde `uncertain` bırakılır. Sadece Facebook'un kendi dedupe ve sıra kuralları altında sonraki FB bölümü planlanabilir; IG sonraki bölümlere atlamaz. Genel `media_publish` belirsizliğinde bu geçiş yasaktır. Eksik ToonZone kapakları için ayrı mevcut fallback güvenlik kontrolü ve rights switch aynen geçerlidir.
+- **CI kanıtı:** [#40278945534](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/40278945534) üzerinde **500 Python unittest, 57 fonksiyon kontrolü, 15 JavaScript testi** başarılı. Üretim Film/ToonZone yeni Facebook bölümü bu commit ile henüz doğrulanmış sayılmaz.
+- **24 saatlik takip:** Salt-okunur `ig_container_status_diagnostic.yml` günlük `06:18 UTC / 09:18 TRT` cron kontrolü eklendi (GitHub schedule gecikebilir); otomatik kontrol hiçbir medya upload, Graph write veya eski intent sıfırlaması yapmaz.
+
