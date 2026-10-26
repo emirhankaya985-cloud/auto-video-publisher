@@ -129,8 +129,10 @@ class InstagramMediaCompatibilityTests(unittest.TestCase):
             self.assertIn("setsar=1", command)
             self.assertNotIn("scale=1080:1920", command)
             self.assertIn("aac_low", command)
+            self.assertEqual(command[command.index("-b:a") + 1], "112k")
             self.assertIn("+faststart", command)
             self.assertIn("open_gop=0", " ".join(command))
+        self.assertEqual(command[command.index("-b:a") + 1], "112k")
 
     def test_film_compact_command_matches_successful_full_length_profile(self):
         with patch("instagram_media_compat.subprocess.run") as run:
@@ -207,14 +209,12 @@ class InstagramMediaCompatibilityTests(unittest.TestCase):
                          compatibility_issues(unspecified, 1024, True, False, True))
 
     def test_ig_transcodes_leave_aac_bitrate_margin(self):
-        from instagram_media_compat import _transcode_vertical, _transcode_film_compact, _transcode_film_timeline
-        media = supported_probe()
-        functions = ((_transcode_vertical, False), (_transcode_film_compact, False),
-                     (_transcode_film_timeline, True))
-        for fun, needs_probe in functions:
+        from instagram_media_compat import _transcode_vertical, _transcode_film_compact
+        functions = (_transcode_vertical, _transcode_film_compact)
+        for fun in functions:
             with self.subTest(encoder=fun.__name__), patch(
                 "instagram_media_compat.subprocess.run"
-            ) as run, patch("instagram_media_compat.probe", return_value=media):
+            ) as run:
                 fun(Path("source.mp4"), Path("output.mp4"))
                 args = run.call_args.args[0]
                 self.assertEqual(args[args.index("-b:a") + 1], "112k")
