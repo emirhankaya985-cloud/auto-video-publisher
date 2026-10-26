@@ -1022,7 +1022,16 @@ def publish():
                         toonzone_compact=(
                             item["route"] == "toonzone" and not alternate_compact_profile
                         ),
-                        force_transcode=alternate_compact_profile,
+                        # Apparent MP4/codec compliance did not prevent the
+                        # repeated short-Reels rupload ProcessingFailedError.
+                        # Always encode first-pass humour/Daily reels into a
+                        # controlled H.264/AAC bitstream, even if ffprobe says
+                        # the original is compliant. Other routes keep their
+                        # established profiles and one-shot retry gates.
+                        force_transcode=(
+                            alternate_compact_profile
+                            or item["route"] in {"tarladaki", "penguen", "daily_laugh"}
+                        ),
                         recovery_v3=(retry_count == 2 and
                                      item["route"] in _AUDITED_IG_V3_FILES and
                                      item["name"] == _AUDITED_IG_V3_FILES[item["route"]]),
