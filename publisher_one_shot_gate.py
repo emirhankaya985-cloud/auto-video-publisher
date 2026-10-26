@@ -10,6 +10,15 @@ MARKER = "docs/publisher-one-shot-v2-2026-10-25.md"
 SUBJECT = "ops: authorized-once-meta-publish-2026-10-25-v2"
 IG_RESCUE_MARKER = "docs/ig-v3-rescue-once-2026-10-26.md"
 IG_RESCUE_SUBJECT = "ops: authorized-once-exact-two-ig-v3-2026-10-26"
+IG_V4_MARKER = "docs/ig-v4-compact-publish-once-2026-10-26.md"
+IG_V4_SUBJECT = "ops: authorized-once-exact-two-ig-v4-compact-2026-10-26"
+
+
+def is_v4_recovery_push(event, ref, subject, added_paths):
+    return (event == "push" and ref == "refs/heads/main"
+            and subject == IG_V4_SUBJECT
+            and IG_V4_MARKER in added_paths)
+
 
 
 def is_ig_rescue_push(event, ref, subject, added_paths):
@@ -26,7 +35,8 @@ def determine_mode(event, ref, subject="", added_paths=(), requested_mode="audit
     if event == "push":
         normal = ref == "refs/heads/main" and subject == SUBJECT and MARKER in added_paths
         rescue = is_ig_rescue_push(event, ref, subject, added_paths)
-        return "publish" if normal or rescue else "audit"
+        v4 = is_v4_recovery_push(event, ref, subject, added_paths)
+        return "publish" if normal or rescue or v4 else "audit"
     return "audit"
 
 
@@ -49,7 +59,8 @@ def main():
     output = os.getenv("GITHUB_OUTPUT")
     if not output:
         raise RuntimeError("GitHub gate output path missing")
-    rescue = is_ig_rescue_push(event, os.getenv("GITHUB_REF", ""), subject, added)
+    rescue = (is_ig_rescue_push(event, os.getenv("GITHUB_REF", ""), subject, added)
+              or is_v4_recovery_push(event, os.getenv("GITHUB_REF", ""), subject, added))
     with Path(output).open("a", encoding="utf-8") as stream:
         stream.write(f"mode={mode}\npublish_allowed={'true' if mode == 'publish' else 'false'}\n")
         stream.write(f"recovery_only={'true' if rescue else 'false'}\n")
