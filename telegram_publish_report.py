@@ -141,6 +141,12 @@ def main():
         return 0
 
     messages = [post_message(row, run_id) for row in posts]
+    # An already-known held intent is not another failed API request. Keep
+    # its daily audit trail, but reserve urgent phone alerts for NEW failures.
+    known_holds_only = (bool(events) and category != "alert"
+        and all(row.get("stage") == "previous_intent_hold"
+                and row.get("reason") == "unreconciled_previous_intent"
+                for row in events))
     if category == "alert" or events:
         # One actionable warning per run; every sanitized event stays intact
         # in the error-journal and 90-day artifact, even if the alert is short.
@@ -156,9 +162,11 @@ def main():
             details.append(part)
         if len(events) > 8:
             details.append(f"• Diğer {len(events) - 8} olayın tamamı GitHub error journal'da.")
-        title = "🚨 Meta yayın uyarısı"
+        title = "ℹ️ Mevcut Instagram engelleri" if known_holds_only else "🚨 Meta yayın uyarısı"
         warning = (message if category == "alert" else
-                   f"🚨 Yayın iş akışında engel veya hata kaydedildi.\nGitHub çalışma: {run_id}")
+                   (f"ℹ️ Daha önce bildirilen engeller devam ediyor; yeni Meta POST hatası yok.\nGitHub çalışma: {run_id}"
+                    if known_holds_only else
+                    f"🚨 Yayın iş akışında engel veya hata kaydedildi.\nGitHub çalışma: {run_id}"))
         warning += ("\n🧩 Kaydedilen hata/engel: " + str(len(events)) +
                     "\n" + "\n".join(details)) if events else ""
         messages.append((title, warning))
@@ -201,8 +209,10 @@ def main():
         if ntfy_on:
             try:
                 result = send_ntfy(
-                    title, body, priority=4 if title.startswith("🚨") else 3,
-                    tags=["warning"] if title.startswith("🚨") else ["white_check_mark"],
+                    title, body,
+                    priority=4 if title.startswith("🚨") else 2 if title.startswith("ℹ️") else 3,
+                    tags=["warning"] if title.startswith("🚨") else
+                         ["information_source"] if title.startswith("ℹ️") else ["white_check_mark"],
                     click=run_url, timeout=20, require_ack=True,
                 )
                 if result["server_ack"] is not True:
