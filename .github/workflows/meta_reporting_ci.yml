@@ -6,6 +6,8 @@ on:
       - 'stats_reporter.py'
       - 'public_link_runtime.py'
       - 'test_public_link_runtime.py'
+      - 'instagram_media_compat.py'
+      - 'test_instagram_media_compat.py'
       - 'analytics_github_history.py'
       - 'test_meta_reporting_independence.py'
       - '.github/workflows/daily_stats.yml'
