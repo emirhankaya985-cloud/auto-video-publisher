@@ -65,6 +65,24 @@ runtime.record_error = Mock()
 
 
 class LinkRuntimeSafety(unittest.TestCase):
+    def test_unresolved_publish_hold_alerts_once_each_istanbul_day(self):
+        tr = ZoneInfo("Europe/Istanbul")
+        utc = ZoneInfo("UTC")
+        now = datetime(2026, 10, 26, 9, 7, tzinfo=tr)
+        self.assertTrue(runtime.previous_intent_alert_due({}, now))
+        self.assertTrue(runtime.previous_intent_alert_due(
+            {"hold_alerted_at": "2026-10-25T22:30:00+03:00"}, now))
+        self.assertFalse(runtime.previous_intent_alert_due(
+            {"hold_alerted_at": "2026-10-26T00:10:00+03:00"}, now))
+        self.assertFalse(runtime.previous_intent_alert_due(
+            {"hold_alerted_at": "2026-10-25T22:10:00+00:00"}, now))
+        self.assertTrue(runtime.previous_intent_alert_due(
+            {"hold_alerted_at": "invalid-timestamp"}, now))
+        self.assertTrue(runtime.previous_intent_alert_due(
+            {"hold_alerted_at": "2026-10-25T22:30:00"}, now))
+        self.assertFalse(runtime.previous_intent_alert_due(
+            {"hold_alerted_at": "2026-10-27T09:10:00+03:00"}, now))
+
     def test_exact_video_instagram_mention_does_not_modify_facebook_caption(self):
         from instagram_tagging import _parse_rules
         rules = _parse_rules({"schema": 1, "rules": [
