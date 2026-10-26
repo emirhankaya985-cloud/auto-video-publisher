@@ -50,15 +50,15 @@ class FullCompactUnpublishedTests(unittest.TestCase):
                 self.assertTrue(kwargs["return_method"])
                 target.write_bytes(b"fake-video")
                 return (target, "transcode")
+            upload = Mock(return_value={"published": False, "status": "FINISHED",
+                                        "container_id": "123456"})
             with patch("instagram_media_compat.prepare_instagram_upload",
                        side_effect=encode), patch(
                 "instagram_media_compat.probe",
                 return_value={"format": {"duration": "180.1"}}
-            ), patch("cloud_omnichannel_publisher.upload_instagram_reel",
-                     return_value={"published": False, "status": "FINISHED",
-                                   "container_id": "123456"}) as upload:
+            ):
                 out = diag.full_compact_trial(
-                    {"page_token": "MOCK"}, source, "exact.mp4", tmp)
+                    {"page_token": "MOCK"}, source, "exact.mp4", tmp, upload=upload)
             self.assertEqual(out["status"], "FINISHED_NOT_PUBLISHED")
             self.assertIsNone(out["post_id"])
             upload.assert_called_once()
@@ -72,9 +72,11 @@ class FullCompactUnpublishedTests(unittest.TestCase):
                        return_value=(path, "transcode")), patch(
                 "instagram_media_compat.probe",
                 return_value={"format": {"duration": "15"}}
-            ), patch("cloud_omnichannel_publisher.upload_instagram_reel") as upload:
+            ):
+                upload = Mock()
                 with self.assertRaisesRegex(RuntimeError, "180-second"):
-                    diag.full_compact_trial({}, Path(tmp) / "source.mp4", "clip.mp4", tmp)
+                    diag.full_compact_trial({}, Path(tmp) / "source.mp4", "clip.mp4", tmp,
+                                           upload=upload)
                 upload.assert_not_called()
 
     def test_main_uses_strict_gate_and_cannot_claim_publication(self):
