@@ -12,3 +12,7 @@ Follow-up read-only status sample after initial IN_PROGRESS observations; no API
 Another strictly read-only GET after the confirmed Daily Laugh #40228042183 publication and normal #40228310735 schedule. Report exact status only; do not mutate state or create a new container.
 
 Follow-up GET sample archived through central evidence issue #11. This does not grant POST permissions.
+
+## 26 October 2026 read-only retry
+
+Re-check the two *existing* containers at the user's request. This exact marker triggers only status GETs, with zero media uploads, zero media_publish calls, and zero ledger mutations. A `FINISHED` observation is not by itself proof of a live Reel.
