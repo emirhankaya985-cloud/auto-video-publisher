@@ -407,6 +407,24 @@ def route_clock(route, now):
     return now.astimezone(ZoneInfo("America/New_York")) if route == "daily_laugh" else now
 
 
+def previous_intent_alert_due(entry, now):
+    """One warning per unresolved entry per Istanbul calendar day.
+
+    An invalid or missing saved timestamp triggers one warning, but never
+    changes the publishing intent or authorizes a Meta POST.
+    """
+    previous = entry.get("hold_alerted_at")
+    if not isinstance(previous, str) or not previous.strip():
+        return True
+    try:
+        seen = datetime.fromisoformat(previous)
+    except ValueError:
+        return True
+    if seen.tzinfo is None:
+        return True
+    return seen.astimezone(TR).date() < now.astimezone(TR).date()
+
+
 def publication_day(route, row):
     """Use the account scheduling timezone for confirmed Meta history entries."""
     return route_clock(route, timestamp(row)).date().isoformat()
@@ -683,9 +701,9 @@ def plan(audit=False):
                 if existing and existing.get("status") != "ready":
                     report.append(f"HELD: {item['name']} {p} has an uncertain previous intent.")
                     # A green GitHub run is NOT proof these queues are healthy.
-                    # Alert once, then keep the alert flag in persisted state
-                    # so half-hourly polls cannot spam the phone.
-                    if not audit and not existing.get("hold_alerted_at"):
+                    # Once per Istanbul day while still blocked, emit an
+                    # actionable alert without retrying the Meta POST.
+                    if not audit and previous_intent_alert_due(existing, now):
                         record_error("previous_intent_hold", "unreconciled_previous_intent",
                                      route=route, platform=p, video=item["name"],
                                      status="uncertain")
