@@ -478,6 +478,9 @@ class LinkRuntimeSafety(unittest.TestCase):
         old["failure"]["stage"] = "Instagram ikili video aktarımı"
         self.assertTrue(runtime.facebook_can_continue_past_ig_rejection(
             "film", "instagram", old))
+        old["prepublish_retry_count"] = 2
+        self.assertTrue(runtime.facebook_can_continue_past_ig_rejection(
+            "toonzone", "instagram", old))
         self.assertFalse(runtime.facebook_can_continue_past_ig_rejection(
             "gonle", "instagram", old))
         self.assertFalse(runtime.facebook_can_continue_past_ig_rejection(
