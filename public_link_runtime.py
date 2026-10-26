@@ -453,6 +453,23 @@ def audited_ig_v3_eligible(route, platform, name, entry):
             and failure.get("graph_code") in (None, 100))
 
 
+def audited_ig_v4_eligible(route, platform, name, entry):
+    """Only two exact prior failed IG binaries after verified 180s upload-only."""
+    if route not in _AUDITED_IG_V3_FILES or platform != "instagram":
+        return False
+    if name != _AUDITED_IG_V3_FILES[route] or not isinstance(entry, dict):
+        return False
+    if (entry.get("status") != "uncertain" or
+            entry.get("prepublish_retry_count") != 2 or
+            str(entry.get("run_id", "")) != "40281812561"):
+        return False
+    fail = entry.get("failure")
+    return (isinstance(fail, dict)
+            and fail.get("stage") == "Instagram ikili video aktarımı"
+            and fail.get("http_status") == 400
+            and fail.get("graph_code") in (None, 100))
+
+
 def facebook_can_continue_past_ig_rejection(route, platform, entry):
     """Only an exhausted, proven pre-media_publish IG 400 can hold IG alone.
 
@@ -461,7 +478,7 @@ def facebook_can_continue_past_ig_rejection(route, platform, entry):
     """
     if route not in {"film", "toonzone"} or platform != "instagram":
         return False
-    if entry.get("status") != "uncertain" or entry.get("prepublish_retry_count") not in (1, 2):
+    if entry.get("status") != "uncertain" or entry.get("prepublish_retry_count") not in (1, 2, 3):
         return False
     prior = entry.get("failure")
     if not isinstance(prior, dict):
@@ -778,6 +795,13 @@ def plan(audit=False):
                         f"RECOVERY V3: {item['name']} instagram audited "
                         "pre-media_publish HTTP 400; one low-bitrate attempt."
                     )
+                if (not audit and existing.get("caption_hash") == cap_hash
+                        and audited_ig_v4_eligible(route, p, item["name"], existing)):
+                    existing.update(status="ready", prepublish_retry_count=3)
+                    report.append(
+                        f"RECOVERY V4: {item['name']} instagram 180s compact "
+                        "profile validated FINISHED in no-publish test."
+                    )
                 if existing and existing.get("status") != "ready":
                     report.append(f"HELD: {item['name']} {p} has an uncertain previous intent.")
                     # A green GitHub run is NOT proof these queues are healthy.
@@ -970,6 +994,9 @@ def publish():
                     ].get("prepublish_retry_count", 0)
                     alternate_compact_profile = (
                         retry_count > 0 and item["route"] in {"film", "toonzone"}
+                        and not (retry_count == 3 and
+                                 item["route"] in _AUDITED_IG_V3_FILES and
+                                 item["name"] == _AUDITED_IG_V3_FILES[item["route"]])
                     )
                     prepared_ig = prepare_instagram_upload(
                         video, temp / "instagram.mp4",
