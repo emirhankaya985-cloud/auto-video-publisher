@@ -572,7 +572,17 @@ def plan(audit=False):
         matched, missing = toonzone_cover_coverage(catalogs["toonzone"], catalogs["covers"])
         report.append(f"ToonZone exact part covers: matched={matched}; missing={missing}")
         if missing:
-            report.append("WARNING: ToonZone videos without exact PNG artwork will be held, not posted with an incorrect cover.")
+            if os.getenv("TOONZONE_AUTO_COVER_ENABLED", "true").lower() == "true":
+                report.append(
+                    "INFO: ToonZone Drive has missing exact PNG covers; per-part source-video "
+                    "cover fallback is enabled. Each cover must be generated and validated "
+                    "before any Meta upload; a failed generation holds that video."
+                )
+            else:
+                report.append(
+                    "WARNING: ToonZone videos without exact PNG artwork will be held; "
+                    "per-part cover fallback is disabled."
+                )
     plans = []
     planned_counts = {}
     batch_limit = 8 if os.getenv("CATCHUP_BATCH_DATE") == day else 1
