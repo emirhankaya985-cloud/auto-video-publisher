@@ -461,7 +461,7 @@ def facebook_can_continue_past_ig_rejection(route, platform, entry):
     """
     if route not in {"film", "toonzone"} or platform != "instagram":
         return False
-    if entry.get("status") != "uncertain" or entry.get("prepublish_retry_count") != 1:
+    if entry.get("status") != "uncertain" or entry.get("prepublish_retry_count") not in (1, 2):
         return False
     prior = entry.get("failure")
     if not isinstance(prior, dict):
