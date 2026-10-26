@@ -225,7 +225,7 @@ def _transcode_vertical(source, output):
         # Conservative H.264/AAC profile for Meta's binary Reels processor.
         # Explicit bitrate/profile avoids CRF peaks that can be rejected even
         # when the container and dimensions look valid to ffprobe.
-        "-r", "30", "-c:v", "libx264", "-profile:v", "high", "-level:v", "4.1",
+        "-r", "30", "-fps_mode", "cfr", "-c:v", "libx264", "-profile:v", "high", "-level:v", "4.1",
         # Keep long Film parts comfortably below Meta's processing ceiling;
         # the previous 8M/12M profile produced a 184 MB upload that Meta
         # rejected even after codec/container normalization.
@@ -539,7 +539,10 @@ def prepare_instagram_upload(
     if not converted_ok:
         converted_path.unlink(missing_ok=True)
         raise RuntimeError("Dönüştürülen Instagram videosu doğrulamadan geçemedi; yükleme durduruldu.")
-    if compact_profile or recovery_v3:
+    # Full decoding catches malformed packets/audio timestamps that ffprobe
+    # metadata checks alone miss. Forced short-Reels uploads fail *before*
+    # any Meta POST rather than burning a real binary upload on bad media.
+    if compact_profile or recovery_v3 or force_transcode:
         check_full_decode(converted_path)
     converted_hash = _sha256(converted_path) if converted_path.exists() else "unavailable"
     print(
