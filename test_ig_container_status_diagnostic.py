@@ -29,6 +29,14 @@ class ReadOnlyIGTests(unittest.TestCase):
         self.assertEqual(result["graph_code"],100)
         self.assertNotIn("TOKEN-PASSWORD",str(result))
         self.assertNotIn("SENSITIVE",str(result))
+    def test_daily_check_keeps_strict_read_only_workflow(self):
+        from pathlib import Path
+        workflow = Path(".github/workflows/ig_container_status_diagnostic.yml").read_text()
+        self.assertIn("cron: '18 6 * * *'", workflow)
+        self.assertIn("python ig_container_status_diagnostic.py", workflow)
+        self.assertIn("if: github.event_name != 'pull_request'", workflow)
+        self.assertNotIn("python public_link_runtime.py publish", workflow)
+
     def test_source_has_no_write_functions(self):
         from pathlib import Path
         src = Path(diag.__file__).read_text()
