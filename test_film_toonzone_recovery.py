@@ -122,6 +122,39 @@ class FilmToonZoneRecoveryTests(unittest.TestCase):
         self.assertFalse(runtime.audited_ig_v3_eligible(
             "film", "instagram", "Yoksul_1986_Part_17.mp4", wrong))
 
+    def test_confirmed_full_180s_compact_v4_release_is_exact_ig_only(self):
+        for route, filename in (
+            ("film", "Yoksul_1986_Part_16.mp4"),
+            ("toonzone", "S01E03_Caffeinated_Concert_Tickets_Part3.mp4"),
+        ):
+            with self.subTest(route=route):
+                planned, state, text = self._run(
+                    route, filename, retry_count=2, run_id="40281812561")
+                self.assertEqual(len(planned), 1)
+                self.assertEqual(planned[0]["platforms"], ["instagram"])
+                self.assertEqual(state[f"{route}:instagram:clip"]["status"], "intent")
+                self.assertEqual(state[f"{route}:instagram:clip"]["prepublish_retry_count"], 3)
+                self.assertEqual(state[f"{route}:facebook:clip"]["status"], "done")
+                self.assertIn("RECOVERY V4", text)
+
+    def test_fourth_failure_does_not_auto_repost_compact_v4(self):
+        for route, filename in (
+            ("film", "Yoksul_1986_Part_16.mp4"),
+            ("toonzone", "S01E03_Caffeinated_Concert_Tickets_Part3.mp4"),
+        ):
+            planned, state, text = self._run(
+                route, filename, retry_count=3, run_id="40281812561")
+            self.assertEqual(planned, [])
+            self.assertEqual(state[f"{route}:instagram:clip"]["status"], "uncertain")
+        prior = {"status": "uncertain", "prepublish_retry_count": 2,
+                 "run_id": "40281812561",
+                 "failure": {"stage": "Instagram media_publish", "http_status": 400}}
+        self.assertFalse(runtime.audited_ig_v4_eligible(
+            "film", "instagram", "Yoksul_1986_Part_16.mp4", prior))
+        prior["failure"]["stage"] = "Instagram ikili video aktarımı"
+        self.assertFalse(runtime.audited_ig_v4_eligible(
+            "film", "instagram", "Yoksul_1986_Part_17.mp4", prior))
+
     def test_second_failed_attempt_never_restarts_film(self):
         plans, state, report = self._run("film", "Yoksul_1986_Part_16.mp4", retry_count=1)
         self.assertEqual(plans, [])
