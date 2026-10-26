@@ -221,6 +221,35 @@ class InstagramMediaCompatibilityTests(unittest.TestCase):
                 self.assertIn("-profile:a", args)
                 self.assertEqual(args[args.index("-profile:a") + 1], "aac_low")
 
+    def test_last_chance_profile_is_distinct_720p_and_96k_aac(self):
+        from instagram_media_compat import _transcode_recovery_v3
+        with patch("instagram_media_compat.subprocess.run") as run:
+            _transcode_recovery_v3(Path("source.mp4"), Path("output.mp4"))
+        args = run.call_args.args[0]
+        self.assertTrue(any("scale=720:1280" in x for x in args))
+        self.assertEqual(args[args.index("-b:a") + 1], "96k")
+        self.assertEqual(args[args.index("-b:v") + 1], "1800k")
+        self.assertEqual(args[args.index("-ar") + 1], "48000")
+        self.assertIn("+faststart", args)
+        self.assertIn("aac_low", args)
+
+    def test_v3_requires_forced_transcode_and_full_decode(self):
+        probe = supported_probe()
+        with patch("instagram_media_compat.probe", side_effect=[probe, probe]), patch(
+            "instagram_media_compat.mp4_atom_structure", return_value=ATOM_OK
+        ), patch("instagram_media_compat.os.path.getsize", return_value=1024), patch(
+            "instagram_media_compat._transcode_recovery_v3"
+        ) as encoder, patch("instagram_media_compat.check_full_decode") as decode:
+            result = prepare_instagram_upload(
+                "source.mp4", "output.mp4", force_transcode=True,
+                recovery_v3=True
+            )
+            self.assertEqual(result, Path("output.mp4"))
+            encoder.assert_called_once()
+            decode.assert_called_once()
+        with self.assertRaises(ValueError):
+            prepare_instagram_upload("source.mp4", "output.mp4", recovery_v3=True)
+
     def test_full_diagnostic_remuxes_without_reencoding_and_validates_faststart(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "full-remux.mp4"
