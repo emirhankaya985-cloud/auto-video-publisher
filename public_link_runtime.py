@@ -749,8 +749,9 @@ def plan(audit=False):
                             f"RECOVERY: {item['name']} instagram previously rejected "
                             "before media_publish; safe alternate encoding authorized once."
                         )
-                if (not audit and audited_ig_v3_eligible(
-                        route, p, item["name"], existing)):
+                if (not audit and existing.get("caption_hash") == cap_hash
+                        and audited_ig_v3_eligible(
+                            route, p, item["name"], existing)):
                     # Remote history was read successfully and no unique or
                     # ambiguous caption match was found above. Old 400 belongs
                     # to the binary upload stage BEFORE media_publish. Preserve
