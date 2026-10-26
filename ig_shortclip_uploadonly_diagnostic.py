@@ -62,11 +62,15 @@ def upload_only_trial(page, source, original_name, workdir, *, diagnostic_clip=N
 def execute(*, inventory=None, download=None, loader=None,
             trial=None, paused=None):
     require_explicit_one_shot()
-    from public_link_runtime import FOLDERS
+    # An injected test inventory must never import public_link_runtime:
+    # it depends on gdown, available on the production publisher runner but
+    # deliberately absent from the zero-credential CI regression environment.
     if inventory is None or download is None:
-        from public_link_runtime import inventory as real_inventory, download as real_download
+        from public_link_runtime import FOLDERS, inventory as real_inventory, download as real_download
         inventory = inventory or real_inventory
         download = download or real_download
+    else:
+        FOLDERS = {route: route for route, _, _, _ in SOURCES}
     if loader is None:
         from meta_auth_loader import load_meta_auth
         loader = load_meta_auth
