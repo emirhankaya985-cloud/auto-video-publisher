@@ -205,6 +205,15 @@ def compatibility_issues(media, size_bytes, moov_front=True, has_edit_list=False
             issues.append("ses örnekleme hızı geçersiz")
         if int(audio.get("channels") or 0) not in (1, 2):
             issues.append("ses kanal sayısı mono/stereo değil")
+        # ffmpeg's nominal -b:a 128k may probe above 128,000 bit/s.
+        # Meta's published Reels guidance caps audio bitrate at 128 kbps.
+        # Never send a *known* over-limit AAC track to the provider.
+        try:
+            audio_bps = int(audio.get("bit_rate") or 0)
+        except (TypeError, ValueError):
+            audio_bps = 0
+        if audio_bps > 128_000:
+            issues.append("ses bitrate 128 kbps sınırını aşıyor")
     return issues
 
 
@@ -223,7 +232,7 @@ def _transcode_vertical(source, output):
         "-preset", "veryfast", "-b:v", "4M", "-maxrate", "6M", "-bufsize", "12M",
         "-pix_fmt", "yuv420p", "-g", "60", "-keyint_min", "60", "-sc_threshold", "0",
         "-x264-params", "keyint=60:min-keyint=60:scenecut=0:open_gop=0",
-        "-c:a", "aac", "-profile:a", "aac_low", "-b:a", "128k", "-ar", "48000", "-ac", "2",
+        "-c:a", "aac", "-profile:a", "aac_low", "-b:a", "112k", "-ar", "48000", "-ac", "2",
         "-movflags", "+faststart", "-use_editlist", "0", "-avoid_negative_ts", "make_zero",
         "-flags", "+cgop", "-tag:v", "avc1",
         "-map_metadata", "-1", str(output),
@@ -246,7 +255,7 @@ def _transcode_film_compact(source, output):
         "-c:v", "libx264", "-profile:v", "main", "-level:v", "3.0",
         "-preset", "veryfast", "-b:v", "500k", "-maxrate", "800k",
         "-bufsize", "1600k", "-pix_fmt", "yuv420p", "-g", "50",
-        "-c:a", "aac", "-profile:a", "aac_low", "-b:a", "128k",
+        "-c:a", "aac", "-profile:a", "aac_low", "-b:a", "112k",
         "-ar", "44100", "-ac", "2", "-movflags", "+faststart",
         "-use_editlist", "0", "-avoid_negative_ts", "make_zero",
         "-map_metadata", "-1", str(output),
@@ -277,7 +286,7 @@ def create_diagnostic_clip(source, output, duration_seconds=15):
         "-preset", "veryfast", "-b:v", "2500k", "-maxrate", "3500k", "-bufsize", "5M",
         "-pix_fmt", "yuv420p", "-g", "60", "-keyint_min", "60",
         "-x264-params", "keyint=60:min-keyint=60:scenecut=0:open_gop=0",
-        "-c:a", "aac", "-profile:a", "aac_low", "-b:a", "128k", "-ar", "44100", "-ac", "2",
+        "-c:a", "aac", "-profile:a", "aac_low", "-b:a", "112k", "-ar", "44100", "-ac", "2",
         "-movflags", "+faststart", "-use_editlist", "0", "-avoid_negative_ts", "make_zero",
         "-map_metadata", "-1", str(output),
     ]
@@ -343,7 +352,7 @@ def _transcode_film_timeline(source, output):
         "-fps_mode", "passthrough", "-c:v", "libx264", "-preset", "veryfast",
         "-crf", "23", "-pix_fmt", "yuv420p", "-g", str(gop), "-keyint_min", str(gop),
         "-sc_threshold", "0", "-x264-params", f"keyint={gop}:min-keyint={gop}:scenecut=0:open_gop=0",
-        "-c:a", "aac", "-profile:a", "aac_low", "-b:a", "128k", "-ar", "44100", "-ac", "2",
+        "-c:a", "aac", "-profile:a", "aac_low", "-b:a", "112k", "-ar", "44100", "-ac", "2",
         "-movflags", "+faststart", "-use_editlist", "0", "-avoid_negative_ts", "make_zero",
         "-map_metadata", "-1", str(output),
     ]
