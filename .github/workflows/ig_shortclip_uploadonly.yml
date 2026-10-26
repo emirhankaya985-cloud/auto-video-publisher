@@ -14,8 +14,12 @@ on:
 permissions:
   contents: read
 
+# This job creates UNPUBLISHED diagnostic containers only. Sharing the
+# production publisher's group starved/cancelled the one-time diagnostic
+# as recurring publisher schedules kept taking the only pending slot.
+# Keep serial execution among diagnostics but do NOT enter the publisher queue.
 concurrency:
-  group: public-drive-recovery
+  group: ig-shortclip-uploadonly-no-publish
   cancel-in-progress: false
 
 jobs:
