@@ -16,3 +16,7 @@ Follow-up GET sample archived through central evidence issue #11. This does not 
 ## 26 October 2026 read-only retry
 
 Re-check the two *existing* containers at the user's request. This exact marker triggers only status GETs, with zero media uploads, zero media_publish calls, and zero ledger mutations. A `FINISHED` observation is not by itself proof of a live Reel.
+
+## 26 October pre-recovery GET
+
+Recheck the existing exact IG container IDs before the one-time 720p/96kbps rescue. This is read-only, cannot publish, and will not alter old intents. Treat IN_PROGRESS as nonfinal; never claim it is a confirmed Reel.
