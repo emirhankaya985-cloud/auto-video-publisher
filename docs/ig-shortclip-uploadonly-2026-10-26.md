@@ -26,3 +26,7 @@ PR #13, but no new Reel or permission to replay was claimed.
 ## 26 October targeted follow-up, no media publication
 
 Live full-length 720p/96kbps recoveries on run 40281812561 both failed before media_publish at rupload with HTTP 400 ProcessingFailedError. Trigger the existing 15-second diagnostic exactly for these sources, only with publish=False, do not change stored production intents. Record result in evidence issue #11. Never blindly retry the 180-second Reels.
+
+## After PR #16: independent no-publish probe
+
+A previous 15s sample test was cancelled while queued behind the scheduled publisher in the shared concurrency group. This file edit is the single new trigger for the corrected **diagnostic-only** workflow. Two **unpublished** 15s containers may be created only for the existing pinned Film/ToonZone sources with rights/account gate. No `media_publish`, no full-length 180s retry, no state resets, no Facebook reposts. Once results exist, interpret them separately from the old two `uncertain` intents.
