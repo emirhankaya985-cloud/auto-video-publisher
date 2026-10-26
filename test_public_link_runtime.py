@@ -458,11 +458,12 @@ class LinkRuntimeSafety(unittest.TestCase):
                         runtime, "toonzone_cover_coverage", return_value=(0, 2)):
                     runtime.plan()
                 planned = json.loads((root / "plan.json").read_text())
-                self.assertEqual(len(planned), 1)
-                self.assertEqual(planned[0]["name"], file2)
-                self.assertEqual(planned[0]["platforms"], ["facebook"])
+                self.assertEqual(len(planned), 2)
+                self.assertEqual([(p["name"], p["platforms"]) for p in planned],
+                                 [(file1, ["instagram"]), (file2, ["facebook"])])
                 saved = json.loads((root / "state.json").read_text())
-                self.assertEqual(saved["entries"][f"{route}:instagram:old"]["status"], "uncertain")
+                self.assertEqual(saved["entries"][f"{route}:instagram:old"]["status"], "intent")
+                self.assertEqual(saved["entries"][f"{route}:instagram:old"]["prepublish_retry_count"], 2)
                 self.assertEqual(saved["entries"][f"{route}:facebook:old"]["post_id"], "fb-original")
                 self.assertNotIn(f"{route}:instagram:next", saved["entries"])
 
