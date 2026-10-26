@@ -1,0 +1,59 @@
+name: Film ToonZone short clip upload-only diagnostic (NO publish)
+
+on:
+  pull_request:
+    paths:
+      - 'ig_shortclip_uploadonly_diagnostic.py'
+      - 'test_ig_shortclip_uploadonly_diagnostic.py'
+      - '.github/workflows/ig_shortclip_uploadonly.yml'
+  # Only the exact main-branch marker merge may run two unpublished tests.
+  push:
+    branches: [main]
+    paths: ['docs/ig-shortclip-uploadonly-2026-10-26.md']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: public-drive-recovery
+  cancel-in-progress: false
+
+jobs:
+  shortclip-ig-unpublished:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install locked dependencies
+        run: |
+          pip install --require-hashes -r requirements.txt
+          pip install gdown==6.4.2
+          command -v ffmpeg && command -v ffprobe || (sudo apt-get update -qq && sudo apt-get install -y ffmpeg)
+      - name: Verify unpublished exact-source safety (no external writes)
+        run: python -m unittest -v test_ig_shortclip_uploadonly_diagnostic.py
+      - name: Process only two 15-second samples (create/upload but never publish)
+        if: github.event_name == 'push'
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_REF: ${{ github.ref }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          IG_SHORTCLIP_UPLOADONLY_APPROVED: 'true'
+          META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+          META_AUTH_JSON: ${{ secrets.META_AUTH_JSON }}
+          ENABLE_FILM_ROUTES: ${{ vars.ENABLE_FILM_ROUTES }}
+          FILM_RIGHTS_APPROVED: ${{ vars.FILM_RIGHTS_APPROVED }}
+          ENABLE_TOONZONE_ROUTES: ${{ vars.ENABLE_TOONZONE_ROUTES }}
+          ENABLE_NEW_META_ROUTES: ${{ vars.ENABLE_NEW_META_ROUTES }}
+          META_NEW_ROUTES_RIGHTS_APPROVED: ${{ vars.META_NEW_ROUTES_RIGHTS_APPROVED }}
+        run: python ig_shortclip_uploadonly_diagnostic.py
+      - name: Preserve credential-free result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: film-toonzone-15s-uploadonly-no-publish
+          path: ig-shortclip-uploadonly-result.json
+          retention-days: 30
+          if-no-files-found: ignore
