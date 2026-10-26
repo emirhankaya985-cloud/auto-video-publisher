@@ -60,8 +60,9 @@ def upload_only_trial(page, source, original_name, workdir, *, diagnostic_clip=N
 
 
 def execute(*, inventory=None, download=None, loader=None,
-            trial=None, paused=None):
-    require_explicit_one_shot()
+            trial=None, paused=None, gate=None):
+    # Each independent unpublished diagnostic must enforce its own release gate.
+    (gate or require_explicit_one_shot)()
     # An injected test inventory must never import public_link_runtime:
     # it depends on gdown, available on the production publisher runner but
     # deliberately absent from the zero-credential CI regression environment.
