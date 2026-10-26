@@ -172,6 +172,63 @@ class TelegramPublishReportTests(unittest.TestCase):
             telegram.assert_not_called()
             ntfy.assert_called_once()
 
+    def test_known_ig_holds_are_informational_not_fake_new_urgent_errors(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_path = Path(tmp) / "state.json"
+            state_path.write_text(json.dumps({"entries": {"old": {
+                "run_id": "111", "route": "film", "platform": "instagram",
+                "status": "uncertain", "file": "Part16.mp4"
+            }}}), encoding="utf-8")
+            events = [{"run_id": "333", "stage": "previous_intent_hold",
+                       "reason": "unreconciled_previous_intent", "route": route,
+                       "platform": "instagram", "video": file}
+                      for route, file in [("film", "Part16.mp4"),
+                                          ("toonzone", "Part3.mp4")]]
+            with patch.object(report, "STATE_PATH", state_path), patch.object(
+                report, "read_errors", return_value=events
+            ), patch.object(report, "telegram_configured", return_value=True), patch.object(
+                report, "send_telegram", return_value={"server_ack": True}
+            ) as telegram, patch.object(
+                report, "send_ntfy", return_value={"server_ack": True}
+            ) as ntfy, patch.dict(os.environ, {
+                "GITHUB_RUN_ID": "333", "VERIFY_STEP_OUTCOME": "success",
+                "PLAN_STEP_OUTCOME": "success", "PUBLISH_STEP_OUTCOME": "success",
+                "NTFY_TOPIC": "test-ntfy", "REQUIRE_DUAL_NOTIFICATIONS": "true",
+            }):
+                self.assertEqual(report.main(), 0)
+            telegram.assert_called_once()
+            self.assertIn("Mevcut Instagram engelleri", telegram.call_args.args[0])
+            self.assertIn("yeni Meta POST hatası yok", telegram.call_args.args[1])
+            self.assertEqual(ntfy.call_args.kwargs["priority"], 2)
+            self.assertEqual(ntfy.call_args.kwargs["tags"], ["information_source"])
+
+    def test_new_failed_ig_post_remains_urgent_even_if_old_hold_exists(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_path = Path(tmp) / "state.json"
+            state_path.write_text(json.dumps({"entries": {
+                "ig": {"run_id": "333", "status": "uncertain",
+                       "route": "film", "platform": "instagram"}
+            }}), encoding="utf-8")
+            events = [{"run_id": "333", "stage": "instagram_publish",
+                       "reason": "invalid_media_or_graph_request", "route": "film",
+                       "platform": "instagram", "video": "Part16.mp4"}]
+            with patch.object(report, "STATE_PATH", state_path), patch.object(
+                report, "read_errors", return_value=events
+            ), patch.object(report, "telegram_configured", return_value=True), patch.object(
+                report, "send_telegram", return_value={"server_ack": True}
+            ) as telegram, patch.object(
+                report, "send_ntfy", return_value={"server_ack": True}
+            ) as ntfy, patch.dict(os.environ, {
+                "GITHUB_RUN_ID": "333", "VERIFY_STEP_OUTCOME": "success",
+                "PLAN_STEP_OUTCOME": "success", "PUBLISH_STEP_OUTCOME": "failure",
+                "NTFY_TOPIC": "test-ntfy", "REQUIRE_DUAL_NOTIFICATIONS": "true",
+            }):
+                self.assertEqual(report.main(), 0)
+            self.assertEqual(telegram.call_count, 1)
+            self.assertTrue(telegram.call_args.args[0].startswith("🚨"))
+            self.assertEqual(ntfy.call_args.kwargs["priority"], 4)
+            self.assertIn("warning", ntfy.call_args.kwargs["tags"])
+
     def test_per_post_notification_requires_actual_post_id_and_run_id(self):
         state = {"entries": {
             "a": {"run_id": "333", "route": "film", "platform": "instagram", "status": "done"},
