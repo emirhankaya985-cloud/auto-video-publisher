@@ -7,6 +7,7 @@ on:
     paths:
       - 'docs/publisher-safe-audit-2026-10-25.md'
       - 'docs/publisher-one-shot-v2-2026-10-25.md'
+      - 'docs/ig-v3-rescue-once-2026-10-26.md'
   schedule:
     # Normal checks every half hour; GitHub schedules may start late.
     - cron: '7,37 * * * *'
@@ -80,6 +81,7 @@ jobs:
         id: plan
         env:
           MODE: ${{ steps.release_gate.outputs.mode }}
+          IG_AUDITED_RESCUE_ONLY: ${{ steps.release_gate.outputs.recovery_only }}
         run: |
           if [ "$MODE" = audit ]; then
             python public_link_runtime.py audit
