@@ -55,6 +55,10 @@ def load_runtime():
     module = importlib.util.module_from_spec(spec)
     with patch.dict(sys.modules, stubs):
         spec.loader.exec_module(module)
+    # Offline tests deliberately create mock HTTP 400 and HELD errors; avoid
+    # printing those fake incidents in the real publishing workflow logs.
+    # unittest assertions/errors still go to stderr and remain visible.
+    module.print = Mock()
     return module
 
 
