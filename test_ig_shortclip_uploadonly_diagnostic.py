@@ -22,6 +22,17 @@ def accounts():
 
 
 class IGDiagnosticSafetyTests(unittest.TestCase):
+    def test_unpublished_diagnostic_cannot_be_starved_by_publisher_queue(self):
+        from pathlib import Path
+        yaml_text = Path(".github/workflows/ig_shortclip_uploadonly.yml").read_text()
+        self.assertIn("group: ig-shortclip-uploadonly-no-publish", yaml_text)
+        self.assertNotIn("group: public-drive-recovery", yaml_text)
+        self.assertIn("cancel-in-progress: false", yaml_text)
+        self.assertIn("if: github.event_name == 'push'", yaml_text)
+        source = Path(diag.__file__).read_text()
+        self.assertIn("publish=False", source)
+        self.assertNotIn("media_publish(", source)
+
     def test_gate_rejects_unapproved_event_and_repo(self):
         for override in ({"GITHUB_EVENT_NAME": "pull_request"},
                          {"GITHUB_REF": "refs/heads/random"},
