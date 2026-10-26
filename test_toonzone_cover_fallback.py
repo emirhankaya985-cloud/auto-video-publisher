@@ -98,6 +98,8 @@ class ToonZoneCoverFallbackTests(unittest.TestCase):
             self.assertTrue(plans[0]["generate_toonzone_cover"])
             self.assertNotIn("cover_id", plans[0])
             self.assertIn("COVER FALLBACK", report)
+            self.assertIn("per-part source-video cover fallback is enabled", report)
+            self.assertNotIn("will be held; per-part cover fallback is disabled", report)
 
     def test_existing_part_png_remains_authoritative(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -112,6 +114,8 @@ class ToonZoneCoverFallbackTests(unittest.TestCase):
             plans, report = self._plan(Path(tmp), {}, {"TOONZONE_AUTO_COVER_ENABLED": "false"})
             self.assertEqual(plans, [])
             self.assertIn("fallback disabled", report)
+            self.assertIn("will be held; per-part cover fallback is disabled", report)
+            self.assertNotIn("per-part source-video cover fallback is enabled", report)
 
     def test_failed_generation_never_reaches_meta_upload(self):
         with tempfile.TemporaryDirectory() as tmp:
