@@ -267,6 +267,37 @@ def _transcode_film_compact(source, output):
         raise RuntimeError("Film Instagram compact dönüşümü başarısız oldu.") from None
 
 
+def _transcode_recovery_v3(source, output):
+    """Strict 720p/96k AAC encode for the two audited 2026-10-25 IG failures.
+
+    The rejected prior 1080p streams had AAC bitrate above Meta's 128k
+    published requirement. This is a different low-bandwidth bitstream.
+    No Meta API call is made by this converter.
+    """
+    command = [
+        "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
+        "-i", str(source), "-map", "0:v:0", "-map", "0:a:0?",
+        "-vf", "scale=720:1280:force_original_aspect_ratio=decrease,"
+               "pad=720:1280:(ow-iw)/2:(oh-ih)/2:black,setsar=1",
+        "-r", "30", "-fps_mode", "cfr",
+        "-c:v", "libx264", "-profile:v", "main", "-level:v", "4.0",
+        "-preset", "veryfast", "-b:v", "1800k", "-maxrate", "2500k",
+        "-bufsize", "5000k", "-pix_fmt", "yuv420p",
+        "-g", "60", "-keyint_min", "60", "-sc_threshold", "0",
+        "-x264-params", "keyint=60:min-keyint=60:scenecut=0:open_gop=0",
+        "-c:a", "aac", "-profile:a", "aac_low", "-b:a", "96k",
+        "-ar", "48000", "-ac", "2",
+        "-movflags", "+faststart", "-use_editlist", "0",
+        "-avoid_negative_ts", "make_zero", "-tag:v", "avc1",
+        "-map_metadata", "-1", str(output),
+    ]
+    try:
+        subprocess.run(command, check=True, capture_output=True, text=True, timeout=900)
+    except (OSError, subprocess.SubprocessError):
+        Path(output).unlink(missing_ok=True)
+        raise RuntimeError("IG kontrollü 720p kurtarma dönüşümü başarısız.") from None
+
+
 def create_diagnostic_clip(source, output, duration_seconds=15):
     """Create a short, standards-compliant temporary clip for upload-only diagnosis."""
     try:
@@ -413,6 +444,7 @@ def _validate_remux_timing(source_media, output_media):
 def prepare_instagram_upload(
     source, converted_path, prefer_remux=False, film_compact=False,
     toonzone_compact=False, return_method=False, force_transcode=False,
+    recovery_v3=False,
 ):
     """Return the original if compliant; otherwise convert and verify before upload."""
     source = Path(source)
@@ -429,6 +461,11 @@ def prepare_instagram_upload(
         original_probe = {}
         original_ok = False
         original_issues = ["FFprobe kaynağı okuyamadı"]
+    if recovery_v3 and (not force_transcode or compact_profile):
+        raise ValueError("IG v3 recovery requires forced and noncompact encoding")
+    if recovery_v3:
+        original_issues.append("IG recovery v3: 720p/96k AAC re-encode")
+        original_ok = False
     if force_transcode:
         # One-time verified pre-publish HTTP 400: the previous compact
         # bitstream was rejected. This must encode a DIFFERENT bitstream,
@@ -485,7 +522,9 @@ def prepare_instagram_upload(
                 f"{_media_summary(normalized_probe)}).", flush=True,
             )
             return (normalized, "transcode") if return_method else normalized
-    if compact_profile:
+    if recovery_v3:
+        _transcode_recovery_v3(source, converted_path)
+    elif compact_profile:
         _transcode_film_compact(source, converted_path)
     else:
         _transcode_vertical(source, converted_path)
@@ -500,7 +539,7 @@ def prepare_instagram_upload(
     if not converted_ok:
         converted_path.unlink(missing_ok=True)
         raise RuntimeError("Dönüştürülen Instagram videosu doğrulamadan geçemedi; yükleme durduruldu.")
-    if compact_profile:
+    if compact_profile or recovery_v3:
         check_full_decode(converted_path)
     converted_hash = _sha256(converted_path) if converted_path.exists() else "unavailable"
     print(
