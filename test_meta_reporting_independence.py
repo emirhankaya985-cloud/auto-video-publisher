@@ -127,5 +127,29 @@ class ReportingIndependenceTests(unittest.TestCase):
             self.assertNotIn("top-secret-token", str(error.exception))
 
 
+    def test_full_report_is_visible_in_actions_summary_without_api_calls(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "summary.md"
+            with patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(path)}):
+                self.assertTrue(stats_reporter.write_step_summary("📈 Bugün: N/A\n👀 Genel: 123"))
+            summary = path.read_text(encoding="utf-8")
+            self.assertIn("Gün Sonu Sosyal Medya İzlenmeleri", summary)
+            self.assertIn("📈 Bugün: N/A", summary)
+            self.assertIn("👀 Genel: 123", summary)
+
+    def test_summary_is_optional_and_does_not_send_api_requests(self):
+        with patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": ""}):
+            self.assertFalse(stats_reporter.write_step_summary("report"))
+
+    def test_disabled_legacy_publishers_and_sheets_have_no_auto_schedule(self):
+        for filename in ("omnichannel_schedule.yml",
+                         "cloud_schedule_backup.yml", "analytics_sheets_sync.yml"):
+            workflow = Path(".github/workflows", filename).read_text(encoding="utf-8")
+            self.assertIn("  workflow_dispatch:", workflow)
+            self.assertNotIn("\n  schedule:", workflow)
+        main = Path(".github/workflows/omnichannel_schedule.yml").read_text(encoding="utf-8")
+        self.assertIn("vars.AUTOMATION_ENABLED == 'true'", main)
+
+
 if __name__ == "__main__":
     unittest.main()
