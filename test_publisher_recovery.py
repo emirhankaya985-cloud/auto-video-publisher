@@ -62,16 +62,26 @@ class RecoveryPolicyTests(unittest.TestCase):
                 self.assertFalse(result["safe_to_repost"])
                 self.assertEqual(result["post_write_action"], "reconcile_with_remote_history_before_any_retry")
 
-    def test_only_known_pre_publish_ig400_gets_one_alternate_encoding(self):
+    def test_proven_pre_publish_ig400_gets_bounded_distinct_profiles(self):
         error = SimpleNamespace(stage="Instagram ikili video aktarımı",
                                 http_status=400, code=100)
-        self.assertTrue(known_pre_publish_media_rejection(error, "daily_laugh", 0))
-        self.assertTrue(known_pre_publish_media_rejection(error, "penguen", 0))
-        self.assertTrue(known_pre_publish_media_rejection(error, "film", 0))
-        self.assertTrue(known_pre_publish_media_rejection(error, "toonzone", 0))
-        self.assertFalse(known_pre_publish_media_rejection(error, "film", 1))
-        self.assertFalse(known_pre_publish_media_rejection(error, "toonzone", 1))
-        self.assertFalse(known_pre_publish_media_rejection(error, "daily_laugh", 1))
+        for route in ("tarladaki", "penguen", "daily_laugh", "gonle"):
+            with self.subTest(route=route):
+                self.assertTrue(known_pre_publish_media_rejection(error, route, 0))
+                self.assertTrue(known_pre_publish_media_rejection(error, route, 1))
+                self.assertFalse(known_pre_publish_media_rejection(error, route, 2))
+        for route in ("film", "toonzone"):
+            self.assertTrue(known_pre_publish_media_rejection(error, route, 0))
+            self.assertFalse(known_pre_publish_media_rejection(error, route, 1))
+        for counter in (-1, True, "0", None):
+            self.assertFalse(known_pre_publish_media_rejection(error, "penguen", counter))
+
+    def test_explicit_pre_publish_transient_meta_subcodes_are_eligible(self):
+        transient = SimpleNamespace(stage="Instagram ikili video aktarımı",
+                                    http_status=400, code=-1, subcode=2207053)
+        self.assertTrue(known_pre_publish_media_rejection(transient, "gonle", 0))
+        transient.subcode = 2207051  # platform restriction, not repairable media
+        self.assertFalse(known_pre_publish_media_rejection(transient, "gonle", 0))
 
     def test_ig_media_publish_or_unknown_transport_is_never_auto_retried(self):
         for stage in ("Instagram media_publish", "Instagram gönderi permalink doğrulama", "unknown"):
