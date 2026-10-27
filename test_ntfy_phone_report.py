@@ -55,6 +55,18 @@ class PhoneReportTests(unittest.TestCase):
         original = "🌙 Rapor\n👀 Genel: 2.569"
         self.assertEqual(compact_phone_report(original, ACCOUNTS), original)
 
+    def test_delayed_measurement_explanation_survives_phone_compaction(self):
+        timing = ("🕒 Ölçüm: 27.10.2026 00:18 TRT\n"
+                  "⏰ Gecikmeli ölçüm: 27.10.2026 00:18 TRT.\n"
+                  "⚠️ Gece yarısından sonra toplandı: günlük izlenme farkı N/A; "
+                  "genel görüntülenme ölçüm anındaki değeridir.")
+        original = self.make_long_report().replace("\n", "\n" + timing + "\n", 1)
+        output = compact_phone_report(original, ACCOUNTS)
+        self.assertIn(timing, output)
+        self.assertLessEqual(len(output.encode("utf-8")), PHONE_BODY_LIMIT)
+        for name in ACCOUNTS:
+            self.assertIn(name.upper(), output)
+
     def test_missing_daily_account_line_never_produces_misleading_summary(self):
         report = self.make_long_report().replace("📈 Bugün: Kısmi: +11", "Günlük veri yok")
         with self.assertRaisesRegex(ValueError, "daily account figure"):

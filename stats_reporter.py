@@ -3,6 +3,7 @@ import os
 import re
 import shutil
 import tempfile
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -23,6 +24,7 @@ from analytics_github_history import restore_history
 from ntfy_notifications import send_ntfy
 from telegram_notifications import send_telegram, telegram_configured
 from ntfy_phone_report import compact_phone_report
+from publisher_recovery import read_with_retry
 
 
 TZ = ZoneInfo("Europe/Istanbul")
@@ -95,10 +97,10 @@ def safe_error(exc):
 
 
 def graph_get(path, token, **params):
-    response = requests.get(
+    response = read_with_retry(requests.get,
         f"https://graph.facebook.com/{GRAPH_API_VERSION}/{path}",
         params={**params, "access_token": token},
-        timeout=30, allow_redirects=False,
+        timeout=30, allow_redirects=False, graph_read=True, sleep=time.sleep,
     )
     try:
         payload = response.json()
@@ -118,10 +120,10 @@ def graph_pages(path, token, **params):
     """Read all cursor pages; invalid 200 results must not count as zero views."""
     from urllib.parse import urlsplit
 
-    response = requests.get(
+    response = read_with_retry(requests.get,
         f"https://graph.facebook.com/{GRAPH_API_VERSION}/{path}",
         params={**params, "access_token": token}, timeout=30,
-        allow_redirects=False,
+        allow_redirects=False, graph_read=True, sleep=time.sleep,
     )
     seen_urls = set()
     for _ in range(100):
@@ -153,7 +155,8 @@ def graph_pages(path, token, **params):
                 or parts.username or parts.password or next_url in seen_urls):
             raise RuntimeError("Meta API sayfalama bağlantısı reddedildi")
         seen_urls.add(next_url)
-        response = requests.get(next_url, timeout=30, allow_redirects=False)
+        response = read_with_retry(requests.get, next_url, timeout=30,
+                                   allow_redirects=False, graph_read=True, sleep=time.sleep)
     raise RuntimeError("Meta API sayfalama sınırı aşıldı")
 
 
@@ -439,7 +442,9 @@ def _platform_totals(snapshot, previous, account, platform, today):
     return total, delta
 
 
-def _daily_delta_text(total, delta, prior):
+def _daily_delta_text(total, delta, prior, *, delayed=False):
+    if delayed and total is not None:
+        return "N/A (gecikmeli ölçüm)"
     if delta is not None:
         return f"+{tr_number(delta)}"
     if total is None or (prior and prior.get("status") != "ok"):
@@ -636,6 +641,8 @@ def build_report(now=None):
             total_prefix = "" if total_complete else "Kısmi: "
             if known_daily:
                 rows.append(f"📈 Bugün: {daily_prefix}+{tr_number(sum(known_daily))}")
+            elif delayed and known_total:
+                rows.append("📈 Bugün: N/A (gecikmeli ölçüm)")
             elif total_complete and platforms:
                 rows.append("📈 Bugün: N/A (ilk ölçüm / karşılaştırılamıyor)")
             else:
@@ -644,7 +651,7 @@ def build_report(now=None):
             for platform, (total, delta) in platforms.items():
                 total_text = tr_number(total) if total is not None else "⚠️ Veri alınamadı"
                 prior = previous.get((account, platform, "account", account, "snapshot_status"))
-                delta_text = _daily_delta_text(total, delta, prior)
+                delta_text = _daily_delta_text(total, delta, prior, delayed=delayed)
                 publication_status = "Yayın: ⚠️ sayaç alınamadı"
                 if progress:
                     route_key = {"Facebook": "fb", "Instagram": "ig", "Facebook 1": "fb_film_1",
@@ -669,12 +676,21 @@ def build_report(now=None):
                 rows.append(f"  {publication_status}")
             rows.append("")
         progress_known = all(item[3] is not None for item in report_accounts.values())
+        if delayed and all_lifetime:
+            daily_total_line = "📈 BUGÜNKÜ TOPLAM: N/A (gecikmeli ölçüm)"
+        elif all_daily:
+            partial = len(all_daily) < sum(len(x[2]) for x in report_accounts.values())
+            daily_total_line = f"📈 BUGÜNKÜ TOPLAM: {'Kısmi: ' if partial else ''}+{tr_number(sum(all_daily))}"
+        elif len(all_lifetime) == sum(len(x[2]) for x in report_accounts.values()):
+            daily_total_line = "📈 BUGÜNKÜ TOPLAM: N/A (ilk ölçüm / karşılaştırılamıyor)"
+        else:
+            daily_total_line = "📈 BUGÜNKÜ TOPLAM: ⚠️ Veri alınamadı"
         rows.extend([
             "━━━━━━━━━━━━━━━━━━", "🏆 TÜM HESAPLARIN TOPLAMI",
             f"🎯 Video hedefi: {target_total}" if target_total else "🎯 Video hedefi: ⚠️ Veri alınamadı",
             f"✅ Tamamlanan: {completed_total}" if progress_known else "✅ Tamamlanan: N/A (yayın arşivi erişilemiyor)",
             f"❌ Eksik: {max(target_total - completed_total, 0)}" if progress_known else "❌ Eksik: N/A (yayın arşivi erişilemiyor)",
-            f"📈 BUGÜNKÜ TOPLAM: {'Kısmi: ' if len(all_daily) < sum(len(x[2]) for x in report_accounts.values()) else ''}+{tr_number(sum(all_daily))}" if all_daily else ("📈 BUGÜNKÜ TOPLAM: N/A (ilk ölçüm / karşılaştırılamıyor)" if len(all_lifetime) == sum(len(x[2]) for x in report_accounts.values()) else "📈 BUGÜNKÜ TOPLAM: ⚠️ Veri alınamadı"),
+            daily_total_line,
             f"👀 GENEL TOPLAM: {'Kısmi: ' if len(all_lifetime) < sum(len(x[2]) for x in report_accounts.values()) else ''}{tr_number(sum(all_lifetime))}" if all_lifetime else "👀 GENEL TOPLAM: ⚠️ Veri alınamadı",
             f"🚨 Yayın hatası: {failed_total}" if progress_known else "🚨 Yayın hatası: N/A",
             f"✅ Başarılı platform gönderileri: {posts_total}" if progress_known else "✅ Başarılı platform gönderileri: N/A",

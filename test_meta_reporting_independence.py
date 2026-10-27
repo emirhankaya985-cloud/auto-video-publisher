@@ -15,6 +15,24 @@ import stats_reporter
 
 
 class ReportingIndependenceTests(unittest.TestCase):
+    def test_stats_read_retries_transient_http_without_any_writes(self):
+        limited = Mock(status_code=400)
+        limited.json.return_value = {"error": {"code": 4}}
+        success = Mock(status_code=200, ok=True)
+        success.json.return_value = {"data": [{"id": "123"}]}
+        with patch("stats_reporter.requests.get", side_effect=[limited, success]) as get, \
+                patch("stats_reporter.time.sleep"), patch("stats_reporter.requests.post") as post:
+            result = list(stats_reporter.graph_pages("123/videos", "private-token"))
+        self.assertEqual(result, [{"id": "123"}])
+        self.assertEqual(get.call_count, 2)
+        post.assert_not_called()
+
+    def test_delayed_daily_value_is_not_presented_as_a_permission_or_first_snapshot_error(self):
+        self.assertEqual(stats_reporter._daily_delta_text(100, None, {"status": "ok"}, delayed=True),
+                         "N/A (gecikmeli ölçüm)")
+        self.assertEqual(stats_reporter._daily_delta_text(None, None, None, delayed=True),
+                         "⚠️ Veri alınamadı")
+
     def test_meta_only_uses_no_drive_or_youtube_credentials(self):
         with tempfile.TemporaryDirectory() as tmp:
             destination = Path(tmp) / "history.jsonl"

@@ -244,3 +244,11 @@ eski belirsiz intent hatırlatması çoğaltılmaz. Kapak FFmpeg beklemesi sın�
 atlama eklenmedi. 564 unittest ve 57 ek kontrol yerelde geçti; 15 Node testi
 başarılı. Yeni commit için GitHub CI ve sonraki gerçek schedule kabulü ayrı
 izlenir; bu inceleme test amaçlı gerçek yayın tetiklemedi.
+
+## 27 Ekim 2026 — Hesap bazlı günlük izlenme N/A kök nedeni
+
+- Gerçek kanıt: [26 Ekim günlük rapor #40403278376](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/40403278376) 27 Ekim **00:18 TRT**'de başladı, 00:25 civarında tamamlandı. Altı hesap ailesinde Facebook/Instagram erişilebilir video toplamları alınmıştı; günlük artışların tümü gece yarısı sonrasındaki ölçüm nedeniyle bilinçli olarak N/A idi. Bu run'da N/A'nın nedeni API erişim reddi değildi.
+- Eski `cc7f2e7` run'ı daha sonraki 23:15 TRT cron düzeltmesini içermiyordu. Güncel `daily_stats.yml` `15 20 * * *` (23:15 TRT) çalışır; GitHub gecikmesi yine mümkündür. Bu saatin bir sonraki canlı raporunun sonucu ayrıca kontrol edilmelidir.
+- Telefon özetinde ölçüm zamanı ve gecikmeli gün açıklaması artık korunur. Hesap/platform/genel günlük satırlar gecikmeyi `N/A (gecikmeli ölçüm)` olarak ayırır; gerçek API başarısızlığı `Veri alınamadı`, ilk baseline yokluğu ayrı kalır. Genel izlenmeler gecikmede de korunur; geçmişe sahte günlük sayı yazılmaz.
+- Analitik GET okumalarına sınırlı 429/5xx/Graph kota retry eklendi; yetki hatası veya bozuk veri başarıya dönüştürülmez. Bildirim POST'u veya video yayını bu kontrol için tetiklenmedi.
+- Günlük fark, erişilebilir videoların önceki başarılı gün sonu snapshot'ına göre sayaç farkıdır; tam takvim günü için doğrudan platform Insights metriği veya benzersiz izleyici ölçümü iddiası değildir. Genel toplam da erişilebilir video sayaçlarıdır.
