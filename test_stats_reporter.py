@@ -410,7 +410,9 @@ def test_late_scheduled_report_retains_previous_date_but_refuses_daily_gains():
     assert "⏰ Gecikmeli ölçüm: 21.10.2026 00:12 TRT." in result
     assert "günlük izlenme farkı N/A" in result
     assert "📈 Bugün: N/A (ilk ölçüm / karşılaştırılamıyor)" not in result or "📈 Bugün: ⚠️ Veri alınamadı" in result
-    assert "Facebook: N/A (karşılaştırılamıyor) | Genel 125" in result
+    assert "Facebook: N/A (gecikmeli ölçüm) | Genel 125" in result
+    assert "📈 Bugün: N/A (gecikmeli ölçüm)" in result
+    assert "📈 BUGÜNKÜ TOPLAM: N/A (gecikmeli ölçüm)" in result
     assert read.call_args.args[1] == "2026-10-19"
     assert collect.call_args.kwargs["report_day"].isoformat() == "2026-10-20"
     assert all(call.args[2] == "2026-10-20" for call in progress.call_args_list)
