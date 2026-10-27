@@ -4,11 +4,7 @@ permissions:
   contents: read
 
 on:
-  # Ana GitHub zamanlayıcısından farklı dakikalarda kontrol eder.
-  # Aynı yayın iki kez çalışsa bile Drive slot kilidi ikinci paylaşımı engeller.
-  schedule:
-    - cron: '12,27,42,57 5-18 * * *'
-    - cron: '35,45,55 0,1,2,3,19,20,21,22,23 * * *'
+  # Legacy backup is manual-only while the legacy publisher is paused.
   workflow_dispatch:
 
 jobs:
