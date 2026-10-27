@@ -66,22 +66,39 @@ def confirmed_media_error_is_pre_publish(exc):
     """
     return False
 
-def known_pre_publish_media_rejection(exc, route, previous_retries=0):
-    """Authorize one stricter *new preparation*, not a blind Meta repost.
+_TWO_ALTERNATE_PROFILE_ROUTES = frozenset({
+    "tarladaki", "penguen", "daily_laugh", "gonle",
+})
+_ONE_ALTERNATE_PROFILE_ROUTES = frozenset({"film", "toonzone"})
+_PRE_PUBLISH_STAGES = frozenset({
+    "Instagram ikili video aktarımı", "Instagram video işleme durumu",
+})
 
-    Binary-upload and processing errors in upload_instagram_reel() are raised
-    before it ever executes media_publish. The Film/ToonZone compact uploads
-    also qualify for ONE alternative standards-compliant encoding. A second
-    failure, a publish-stage timeout, or missing stage evidence never qualifies. A failed media_publish or
-    timeout may have published, so they NEVER qualify.
+
+def known_pre_publish_media_rejection(exc, route, previous_retries=0):
+    """Allow a bounded NEXT encoding profile after a proven no-publish IG 400.
+
+    A short Reel can try the initial profile followed by two distinct
+    validated local transcodes, on separate scheduled runs. Ordered Film and
+    ToonZone have only their old one-profile auto gate; historical one-off
+    rescue approvals remain separate and unchanged.
+
+    This NEVER retries a timed-out POST, container creation, media_publish,
+    a 401/403/limit error, or a return without a definite HTTP response.
+    Every scheduled attempt first reconciles the platform's recent history.
     """
-    return bool(
-        route in {"tarladaki", "penguen", "daily_laugh", "film", "toonzone"}
-        and previous_retries == 0
-        and getattr(exc, "stage", None) in {
-            "Instagram ikili video aktarımı",
-            "Instagram video işleme durumu",
-        }
-        and getattr(exc, "http_status", None) == 400
-        and getattr(exc, "code", None) in (None, 100)
-    )
+    if type(previous_retries) is not int or previous_retries < 0:
+        return False
+    if route in _TWO_ALTERNATE_PROFILE_ROUTES:
+        allowed = previous_retries < 2
+    elif route in _ONE_ALTERNATE_PROFILE_ROUTES:
+        allowed = previous_retries == 0
+    else:
+        return False
+    if not allowed or getattr(exc, "stage", None) not in _PRE_PUBLISH_STAGES:
+        return False
+    if getattr(exc, "http_status", None) != 400:
+        return False
+    code = getattr(exc, "code", None)
+    subcode = getattr(exc, "subcode", None)
+    return code in (None, 100) or (code == -1 and subcode in (2207001, 2207053))
