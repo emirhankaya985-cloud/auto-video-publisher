@@ -1,8 +1,10 @@
 """Read-only Meta discovery; credentials remain in process memory."""
 import json
 import os
+import time
 from pathlib import Path
 import requests
+from publisher_recovery import read_with_retry
 
 ALLOWED_NAMES = {n.casefold() for n in ('Tarladaki Fasulye', 'Beyinsiz Penguen',
     'Gönle Düşen', 'Daily Laugh Lab', 'Film Mağarası', 'Filmmagrasi', 'ToonZone')}
@@ -19,8 +21,11 @@ def discover_pages(token, *, get=None):
     params = {'fields': 'id,name,access_token,instagram_business_account{id,username}', 'limit': 100}
     for _ in range(30):
         try:
-            response = get(url, headers={'Authorization': f'Bearer {token.strip()}'},
-                           params=dict(params), timeout=20, allow_redirects=False)
+            response = read_with_retry(
+                get, url, headers={'Authorization': f'Bearer {token.strip()}'},
+                params=dict(params), timeout=20, allow_redirects=False,
+                graph_read=True, sleep=time.sleep,
+            )
             body = response.json()
         except Exception:
             raise RuntimeError('Meta hesap sorgusu tamamlanamadı') from None

@@ -18,6 +18,7 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
 from ntfy_notifications import send_ntfy
 from instagram_tagging import reels_user_tags_payload
+from publisher_recovery import read_with_retry
 
 SCOPES_YOUTUBE = ["https://www.googleapis.com/auth/youtube.upload"]
 SCOPES_YOUTUBE_CHANNEL_READ = [
@@ -163,7 +164,7 @@ def _graph_json(response, stage="Graph API"):
         payload = {}
     if not isinstance(payload, dict):
         payload = {}
-    if not response.ok or payload.get("error"):
+    if not response.ok or payload.get("error") or payload.get("success") is False:
         error, debug, message = _decode_upload_error(payload)
         fallback = _sanitize_meta_text(getattr(response, "text", ""))[:300]
         if not payload.get("error") and fallback:
@@ -529,7 +530,8 @@ def create_instagram_cover_video(video_path: Path, cover_path: Path, output_path
         "-pix_fmt", "yuv420p", "-movflags", "+faststart",
         "-c:a", "copy", "-shortest", str(output_path)
     ]
-    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True,
+                   timeout=900)
     return output_path
 
 
@@ -700,7 +702,7 @@ def upload_instagram_reel(
     for poll_count in range(1, 31):
         time.sleep(5)
         status_payload = _graph_json(
-            requests.get(
+            read_with_retry(requests.get,
                 status_url,
                 params={
                     # A resumable IG container exposes status only here.
@@ -709,7 +711,7 @@ def upload_instagram_reel(
                     "fields": "status_code,status",
                     "access_token": page_token,
                 },
-                timeout=30,
+                timeout=30, graph_read=True, sleep=time.sleep,
             ),
             "Instagram video işleme durumu",
         )
@@ -761,10 +763,10 @@ def upload_instagram_reel(
     print(f"Instagram media_publish kabul edildi: container={container_id}; media_id={media_id}.", flush=True)
     try:
         media = _graph_json(
-            requests.get(
+            read_with_retry(requests.get,
                 f"https://graph.facebook.com/{GRAPH_API_VERSION}/{media_id}",
                 params={"fields": "id,permalink", "access_token": page_token},
-                timeout=30,
+                timeout=30, graph_read=True, sleep=time.sleep,
             ),
             "Instagram gönderi permalink doğrulama",
         )

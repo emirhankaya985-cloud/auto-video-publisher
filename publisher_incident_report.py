@@ -65,6 +65,7 @@ def build_incident_report(state, run_id, *, plan_text="", errors=None, step_outc
         "toonzone_exact_cover_missing": "HELD: exact ToonZone cover missing.",
         "disabled_route": "HELD: existing route/rights switch is disabled.",
         "meta_history_blocked": "HELD: Meta geçmişi",
+        "no_eligible_content": "No eligible unpublished item below the daily target.",
     }
     blockers = {name: sum(line.startswith(marker) for line in plan_text.splitlines())
                 for name, marker in markers.items()}

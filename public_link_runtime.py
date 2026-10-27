@@ -181,20 +181,27 @@ def graph_rows(page, platform):
     fields = "id,description,created_time" if platform == "facebook" else "id,caption,timestamp,permalink,media_type"
     edge = "videos" if platform == "facebook" else "media"
     params = {"fields": fields, "limit": 100}
-    rows, seen = [], set()
+    rows, seen, media_ids = [], set(), set()
     for _ in range(40):
-        response = read_with_retry(
-            requests.get, f"https://graph.facebook.com/{GRAPH_API_VERSION}/{object_id}/{edge}",
-            headers={"Authorization": f"Bearer {page['page_token']}"},
-            params=params, timeout=30,
-        )
+        try:
+            response = read_with_retry(
+                requests.get, f"https://graph.facebook.com/{GRAPH_API_VERSION}/{object_id}/{edge}",
+                headers={"Authorization": f"Bearer {page['page_token']}"},
+                params=dict(params), timeout=30, graph_read=True,
+            )
+        except OSError:
+            raise RuntimeError("Meta geçmiş bağlantısı tamamlanamadı; bu hesap bekletildi") from None
         try:
             payload = response.json()
         except ValueError:
             raise RuntimeError("Meta geçmiş yanıtı geçersiz") from None
-        if response.status_code != 200 or not isinstance(payload.get("data"), list):
-            error = payload.get("error") or {}
-            raise RuntimeError(f"Meta geçmişi okunamadı: HTTP {response.status_code}, kod {error.get('code', 'unknown')}")
+        if not isinstance(payload, dict):
+            raise RuntimeError("Meta geçmiş yanıtı geçersiz; yayın durduruldu")
+        if response.status_code != 200 or "error" in payload or not isinstance(payload.get("data"), list):
+            error = payload.get("error")
+            code = error.get("code") if isinstance(error, dict) else None
+            safe_code = code if type(code) is int else "unknown"
+            raise RuntimeError(f"Meta geçmişi okunamadı: HTTP {response.status_code}, kod {safe_code}")
         for media in payload["data"]:
             if not isinstance(media, dict):
                 raise RuntimeError("Meta geçmişinde geçersiz medya kaydı")
@@ -206,12 +213,24 @@ def graph_rows(page, platform):
                 # Instagram photos must never satisfy a missing Reels slot.
                 if media_type != "VIDEO":
                     continue
+            media_id = str(media.get("id") or "")
+            if not media_id.isdecimal():
+                raise RuntimeError("Meta geçmişinde doğrulanabilir gönderi kimliği yok")
+            # A moving paginated history can repeat the same video across pages.
+            # Count the platform ID once, or a route can falsely reach its quota.
+            if media_id in media_ids:
+                continue
+            timestamp(media)
+            media_ids.add(media_id)
             rows.append(media)
         paging = payload.get("paging") or {}
+        if not isinstance(paging, dict):
+            raise RuntimeError("Meta geçmiş sayfalaması geçersiz; yayın durduruldu")
         if not paging.get("next"):
             return rows
-        after = (paging.get("cursors") or {}).get("after")
-        if not after or after in seen:
+        cursors = paging.get("cursors") or {}
+        after = cursors.get("after") if isinstance(cursors, dict) else None
+        if not isinstance(after, str) or not after or after in seen:
             raise RuntimeError("Meta geçmişi eksik; yayın durduruldu")
         seen.add(after)
         params["after"] = after
@@ -485,13 +504,22 @@ def facebook_can_continue_past_ig_rejection(route, platform, entry):
         return False
     marker = SimpleNamespace(stage=prior.get("stage"),
                              http_status=prior.get("http_status"),
-                             code=prior.get("graph_code"))
+                             code=prior.get("graph_code"),
+                             subcode=prior.get("graph_subcode"))
     return known_pre_publish_media_rejection(marker, route, previous_retries=0)
 
 
 def publication_day(route, row):
     """Use the account scheduling timezone for confirmed Meta history entries."""
     return route_clock(route, timestamp(row)).date().isoformat()
+
+
+def ledger_daily_count(state, route, platform, day):
+    """One confirmed platform post is one quota unit, even with ledger aliases."""
+    return len({str(e["post_id"]) for e in state["entries"].values()
+                if e.get("route") == route and e.get("platform") == platform
+                and e.get("status") == "done" and e.get("day") == day
+                and str(e.get("post_id") or "").strip()})
 
 
 def target_count(route, now):
@@ -615,6 +643,10 @@ def plan(audit=False):
                 if cache_key not in history_cache:
                     history_cache[cache_key] = graph_rows(page, p)
                 histories[p] = history_cache[cache_key]
+                # Keep validation inside this account's failure boundary even
+                # when a different history adapter is injected by a caller.
+                for row in histories[p]:
+                    timestamp(row)
         except RuntimeError as exc:
             report.append("HELD: " + str(exc))
             record_error("meta_history", "meta_history_unavailable",
@@ -648,8 +680,7 @@ def plan(audit=False):
                 )
         counts = {p: max(
             sum(route_clock(route, timestamp(row)).date() == clock.date() for row in histories[p]),
-            sum(e["route"] == route and e["platform"] == p and e["status"] == "done"
-                and e.get("day") == clock.date().isoformat() for e in state["entries"].values())
+            ledger_daily_count(state, route, p, clock.date().isoformat())
         ) for p in platforms}
         if rescue_only:
             # An exact orphaned prepublish attempt is independent of the daily
@@ -785,6 +816,7 @@ def plan(audit=False):
                         stage=prior_failure.get("stage"),
                         http_status=prior_failure.get("http_status"),
                         code=prior_failure.get("graph_code"),
+                        subcode=prior_failure.get("graph_subcode"),
                     )
                     previous_attempts = existing.get("prepublish_retry_count", 0)
                     if known_pre_publish_media_rejection(prior, route, previous_attempts):
@@ -836,11 +868,7 @@ def plan(audit=False):
                     continue
                 target = target_count(route, now)
                 today_count = sum(route_clock(route, timestamp(row)).date() == clock.date() for row in histories[p])
-                confirmed_in_ledger = sum(
-                    e["route"] == route and e["platform"] == p and e["status"] == "done"
-                    and e.get("day") == clock.date().isoformat()
-                    for e in state["entries"].values()
-                )
+                confirmed_in_ledger = ledger_daily_count(state, route, p, clock.date().isoformat())
                 today_count = 0 if rescue_only else max(today_count, confirmed_in_ledger)
                 # A tick catches up one item per account; no all-night busy polling.
                 if today_count + planned_counts.get((route, p), 0) >= target:
@@ -915,6 +943,19 @@ def plan(audit=False):
                     break
         if selected is None:
             report.append("No eligible unpublished item below the daily target.")
+            # An empty/blocked queue below a due target is an operational
+            # deficit, not a successful no-op. Warn once per route/local day;
+            # ordinary NOT DUE and already-complete ticks never reach here.
+            alert_days = state.setdefault("queue_alert_days", {})
+            local_day = clock.date().isoformat()
+            unresolved = any(e.get("route") == route and e.get("status") in {"intent", "uncertain"}
+                             for e in state["entries"].values())
+            # Existing unresolved intents have their own daily notification;
+            # do not turn that known hold into a second urgent queue alert.
+            if not audit and not unresolved and alert_days.get(route) != local_day:
+                record_error("planning_queue", "no_eligible_content", route=route,
+                             safe_to_retry=True)
+                alert_days[route] = local_day
     save(STATE, state)
     save(PLAN, plans)
     summary = "\n".join(report) + "\n"
