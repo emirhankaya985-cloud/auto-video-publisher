@@ -5,9 +5,10 @@ permissions:
   actions: read
 
 on:
-  # GitHub cron UTC kullanır: 20:59 UTC = 23:59 TRT.
+  # GitHub cron UTC kullanır: 20:15 UTC = 23:15 TRT.
+  # Erken gun sonu olcumu, cron gecikmesinin gece yarisina sarkma riskini azaltir.
   schedule:
-    - cron: '59 20 * * *'
+    - cron: '15 20 * * *'
   workflow_dispatch:
   # One-time live verification only when the unique audit marker lands on main.
   push:
