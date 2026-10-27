@@ -53,6 +53,14 @@ jobs:
           path: link-runtime/daily_video_views.jsonl
           if-no-files-found: warn
           retention-days: 90
+      - name: Preserve account comparison evidence (no credentials)
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: account-views-comparison
+          path: link-runtime/account_views_comparison.json
+          if-no-files-found: warn
+          retention-days: 90
       - name: Failure notice (does not replace the failed daily report)
         if: ${{ failure() }}
         continue-on-error: true

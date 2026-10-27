@@ -25,6 +25,7 @@ from ntfy_notifications import send_ntfy
 from telegram_notifications import send_telegram, telegram_configured
 from ntfy_phone_report import compact_phone_report
 from publisher_recovery import read_with_retry
+from views_comparison import ViewReport, build_comparison, load_history, telegram_tables
 
 
 TZ = ZoneInfo("Europe/Istanbul")
@@ -701,7 +702,12 @@ def build_report(now=None):
         if errors:
             rows.append("\n⚠️ EKSİK VERİ / İZİN:")
             rows.extend(f"• {error}" for error in errors)
-        return "\n".join(rows)
+        comparison = build_comparison(
+            snapshot, load_history(history_path),
+            {account: list(value[2]) for account, value in report_accounts.items()},
+            report_day, now.isoformat(timespec="seconds"), delayed=delayed,
+        )
+        return ViewReport("\n".join(rows), comparison)
 
 
 def notify(message):
@@ -715,14 +721,28 @@ def notify(message):
     except Exception as exc:
         ntfy_error = exc
     telegram_ok = False
+    detailed_error = None
     if telegram_configured():
         try:
-            receipt = send_telegram(title, body)
-            telegram_ok = receipt["server_ack"]
-            print("telegram sunucu alındısı doğrulandı; telefon teslimatı doğrulanmadı.",
-                  flush=True)
+            comparison = getattr(message, "comparison", None)
+            parts = telegram_tables(comparison) if comparison else [(title, body)]
+            acknowledged = 0
+            for part_title, part_body in parts:
+                options = {"parse_mode": "HTML"} if comparison else {}
+                receipt = send_telegram(part_title, part_body, **options)
+                if receipt["server_ack"] is not True:
+                    raise RuntimeError("Telegram report receipt missing")
+                acknowledged += 1
+                print(json.dumps({"telegram_part": acknowledged, "server_ack": True}), flush=True)
+            telegram_ok = acknowledged == len(parts)
+            print(json.dumps({"telegram_report_parts": len(parts), "server_acks": acknowledged,
+                              "phone_delivery_verified": False}), flush=True)
         except Exception as exc:
             print(f"telegram raporu gönderilemedi: {type(exc).__name__}", flush=True)
+            if getattr(message, "comparison", None):
+                detailed_error = exc
+    if detailed_error:
+        raise RuntimeError("Detailed Telegram report incomplete; accepted parts must not be blindly resent") from None
     if ntfy_error:
         if telegram_ok:
             print(f"ntfy raporu gönderilemedi: {type(ntfy_error).__name__}", flush=True)
@@ -754,6 +774,10 @@ def write_step_summary(report):
 
 if __name__ == "__main__":
     report = build_report()
+    comparison_path = Path("link-runtime/account_views_comparison.json")
+    comparison_path.parent.mkdir(parents=True, exist_ok=True)
+    comparison_path.write_text(json.dumps(report.comparison, ensure_ascii=False, indent=2), encoding="utf-8")
+    print("ACCOUNT_COMPARISON " + json.dumps(report.comparison, ensure_ascii=False), flush=True)
     print(report)
     write_step_summary(report)
     notify(report)

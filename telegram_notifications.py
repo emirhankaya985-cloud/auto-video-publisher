@@ -4,6 +4,7 @@ A successful API receipt does not prove the phone displayed a push notification.
 """
 import os
 import re
+from html import escape
 
 import requests
 
@@ -17,8 +18,8 @@ def telegram_configured():
                 os.getenv("TELEGRAM_CHAT_ID", "").strip())
 
 
-def send_telegram(title, message, *, timeout=20, session=requests):
-    """One plain-text POST, no redirects/retries, no credential-bearing logs."""
+def send_telegram(title, message, *, timeout=20, session=requests, parse_mode=None):
+    """One bounded POST, no redirects/retries, no credential-bearing logs."""
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
     if not token:
@@ -31,18 +32,26 @@ def send_telegram(title, message, *, timeout=20, session=requests):
         raise RuntimeError("telegram credentials missing or invalid: chat id format")
     if not isinstance(title, str) or not isinstance(message, str):
         raise ValueError("telegram title and message must be strings")
-    body = (title + "\n\n" + message).strip()
+    if parse_mode not in (None, "HTML"):
+        raise ValueError("unsupported Telegram parse mode")
+    body = ((escape(title) if parse_mode else title) + "\n\n" + message).strip()
     if not body:
         raise ValueError("telegram message is empty")
     if len(body) > _MAX_TEXT_CHARS:
+        if parse_mode:
+            raise ValueError("Telegram HTML report must be split before sending")
         # The phone report is already compacted; large publisher diagnostics
         # may be truncated rather than generating a multi-part retry risk.
         body = body[:_MAX_TEXT_CHARS - 30] + "\n… (rapor kısaltıldı)"
+    if parse_mode and len(body.encode("utf-16-le")) // 2 > _MAX_TEXT_CHARS:
+        raise ValueError("Telegram HTML report exceeds character budget")
+    payload = {"chat_id": chat_id, "text": body, "disable_web_page_preview": True}
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
     try:
         response = session.post(
             f"https://api.telegram.org/bot{token}/sendMessage",
-            json={"chat_id": chat_id, "text": body,
-                  "disable_web_page_preview": True},
+            json=payload,
             timeout=timeout, allow_redirects=False,
         )
         code = response.status_code
