@@ -8,6 +8,9 @@ on:
       - 'test_public_link_runtime.py'
       - 'instagram_media_compat.py'
       - 'test_instagram_media_compat.py'
+      - 'tracked_meta_routes.py'
+      - 'test_tracked_meta_routes.py'
+      - '.github/workflows/tracked_meta_routes.yml'
       - 'analytics_github_history.py'
       - 'test_meta_reporting_independence.py'
       - '.github/workflows/daily_stats.yml'
@@ -32,6 +35,8 @@ jobs:
         run: python -m pip install --require-hashes -r requirements.txt
       - name: Install existing test-only YAML parser
         run: python -m pip install PyYAML==6.0.2
+      - name: Install production-matched read-only Drive metadata import
+        run: python -m pip install gdown==6.4.2
       - name: Compile changed modules without secrets
         run: python -m py_compile stats_reporter.py analytics_github_history.py test_meta_reporting_independence.py
       - name: Run all unittest regressions, no outbound publishing
