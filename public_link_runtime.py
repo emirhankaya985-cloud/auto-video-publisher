@@ -788,7 +788,7 @@ def plan(audit=False):
                     )
                     previous_attempts = existing.get("prepublish_retry_count", 0)
                     if known_pre_publish_media_rejection(prior, route, previous_attempts):
-                        existing.update(status="ready", prepublish_retry_count=1)
+                        existing.update(status="ready", prepublish_retry_count=previous_attempts + 1)
                         report.append(
                             f"RECOVERY: {item['name']} instagram previously rejected "
                             "before media_publish; safe alternate encoding authorized once."
@@ -1008,6 +1008,15 @@ def publish():
                                  item["route"] in _AUDITED_IG_V3_FILES and
                                  item["name"] == _AUDITED_IG_V3_FILES[item["route"]])
                     )
+                    # Bounded, different FFmpeg encodings for short Reels.
+                    # We never change Facebook state or replay media_publish.
+                    short_recovery_v3 = (
+                        retry_count == 2 and
+                        item["route"] in {"tarladaki", "penguen", "daily_laugh", "gonle"}
+                    )
+                    gonle_alt_vertical = (
+                        item["route"] == "gonle" and retry_count == 1
+                    )
                     prepared_ig = prepare_instagram_upload(
                         video, temp / "instagram.mp4",
                         # 24-25 Oct: repeated Meta HTTP 400 ProcessingFailedError
@@ -1015,9 +1024,11 @@ def publish():
                         # short humour/Daily Reels to 30fps H.264 + AAC instead.
                         prefer_remux=item["route"] not in {"tarladaki", "penguen", "daily_laugh"},
                         film_compact=(
-                            not alternate_compact_profile and
-                            (item["route"] in {"film", "film_second", "gonle"}
-                             or retry_count > 0)
+                            not alternate_compact_profile
+                            and not short_recovery_v3
+                            and not gonle_alt_vertical
+                            and (item["route"] in {"film", "film_second", "gonle"}
+                                 or retry_count > 0)
                         ),
                         toonzone_compact=(
                             item["route"] == "toonzone" and not alternate_compact_profile
@@ -1029,12 +1040,16 @@ def publish():
                         # the original is compliant. Other routes keep their
                         # established profiles and one-shot retry gates.
                         force_transcode=(
-                            alternate_compact_profile
+                            alternate_compact_profile or gonle_alt_vertical
+                            or short_recovery_v3
                             or item["route"] in {"tarladaki", "penguen", "daily_laugh"}
                         ),
-                        recovery_v3=(retry_count == 2 and
-                                     item["route"] in _AUDITED_IG_V3_FILES and
-                                     item["name"] == _AUDITED_IG_V3_FILES[item["route"]]),
+                        recovery_v3=(
+                            short_recovery_v3
+                            or (retry_count == 2 and
+                                item["route"] in _AUDITED_IG_V3_FILES and
+                                item["name"] == _AUDITED_IG_V3_FILES[item["route"]])
+                        ),
                     )
                 except Exception as exc:
                     key = f"{item['route']}:instagram:{item['id']}"
@@ -1078,10 +1093,16 @@ def publish():
                     if (platform == "instagram" and isinstance(exc, MetaAPIError)
                             and known_pre_publish_media_rejection(exc, item["route"], previous)):
                         # This native uploader has not reached media_publish.
-                        # Remote history was read during planning and will be
-                        # checked again before trying the stricter encoding.
-                        entry.update(status="ready", prepublish_retry_count=1,
-                                     failure=diagnostic)
+                        # The next scheduled job rechecks remote posts before
+                        # creating a new container with a distinct encoding.
+                        # At most two additional short-Reel profiles are tried.
+                        entry.update(
+                            status="ready",
+                            prepublish_retry_count=previous + 1,
+                            failure=dict(diagnostic,
+                                         recovery_next_profile=previous + 1,
+                                         recovery_action="normalize_then_reconcile_at_next_tick"),
+                        )
                     else:
                         entry.update(status="uncertain", failure=diagnostic)
                     safe = str(exc) if isinstance(exc, MetaAPIError) else type(exc).__name__
