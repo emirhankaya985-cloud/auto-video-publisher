@@ -229,3 +229,18 @@ Yeni gerçek olayların sebeplerini, kaynak run linkini ve fix doğrulamasını 
 - Regresyonlar: Graph throttling sonrası başarı, üç denemede tükenme, normal HTTP 400/izin hatasını tekrar etmeme, yanlış JSON şekli ve hata gövdesini gizleme. Önceki Instagram kodlama profilleri ve belirsiz POST kilitleri korunur.
 - Doğrulama: yerel 72 hedefli kurtarma/runtime testi geçti; tam paket sonucu PR açıklamasında kayıtlıdır. Yeni sürümle gerçek planlı çalışma henüz doğrulanmadı; test için yayın veya bildirim tetiklenmedi.
 - Geri alma: ilgili commit'i geri al; intent/result arşivlerini silme ve legacy `AUTOMATION_ENABLED` anahtarını açma.
+
+## 27 Ekim 2026 — Tam akış kod incelemesi ve sessiz yayın açıkları
+
+[Kapsam, bulgular, testler ve işletim sınırları](CODE_RELIABILITY_AUDIT_2026-10-27.md).
+135 Python dosyasının AST taraması ve 36 workflow'un YAML kontrolü yanında
+aktif yayın yolu elle incelendi. Hesap keşfi ve IG container durum GET'lerine
+sınırlı retry eklendi; hesap kaynaklı ağ/tarih hatası diğer hesapların planını
+kesmez. Sayfalı geçmiş ve ledger aynı post ID'sini günlük kotaya iki kez saymaz.
+Facebook açık `success:false` yanıtı başarılı gönderi olmaz. Hedefi eksik ama
+uygun videosu kalmayan rota günde bir kez hata jurnali üzerinden bildirilir;
+eski belirsiz intent hatırlatması çoğaltılmaz. Kapak FFmpeg beklemesi sınırlıdır.
+`media_publish` belirsizliğinde otomatik POST tekrarı, geçmiş silme veya sıra
+atlama eklenmedi. 564 unittest ve 57 ek kontrol yerelde geçti; 15 Node testi
+başarılı. Yeni commit için GitHub CI ve sonraki gerçek schedule kabulü ayrı
+izlenir; bu inceleme test amaçlı gerçek yayın tetiklemedi.

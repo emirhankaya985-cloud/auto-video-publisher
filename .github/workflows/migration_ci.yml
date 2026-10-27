@@ -6,6 +6,11 @@ on:
     paths:
       - 'public_link_runtime.py'
       - 'publisher_recovery.py'
+      - 'cloud_omnichannel_publisher.py'
+      - 'meta_auth_loader.py'
+      - 'publisher_error_journal.py'
+      - 'publisher_incident_report.py'
+      - 'test_publication_resilience.py'
       - 'test_public_link_runtime.py'
       - 'test_publisher_recovery.py'
       - 'migration_985_tests.py'
