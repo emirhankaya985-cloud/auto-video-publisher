@@ -186,15 +186,19 @@ def graph_rows(page, platform):
         response = read_with_retry(
             requests.get, f"https://graph.facebook.com/{GRAPH_API_VERSION}/{object_id}/{edge}",
             headers={"Authorization": f"Bearer {page['page_token']}"},
-            params=params, timeout=30,
+            params=params, timeout=30, graph_read=True,
         )
         try:
             payload = response.json()
         except ValueError:
             raise RuntimeError("Meta geçmiş yanıtı geçersiz") from None
-        if response.status_code != 200 or not isinstance(payload.get("data"), list):
-            error = payload.get("error") or {}
-            raise RuntimeError(f"Meta geçmişi okunamadı: HTTP {response.status_code}, kod {error.get('code', 'unknown')}")
+        if not isinstance(payload, dict):
+            raise RuntimeError("Meta geçmiş yanıtı geçersiz; yayın durduruldu")
+        if response.status_code != 200 or "error" in payload or not isinstance(payload.get("data"), list):
+            error = payload.get("error")
+            code = error.get("code") if isinstance(error, dict) else None
+            safe_code = code if type(code) is int else "unknown"
+            raise RuntimeError(f"Meta geçmişi okunamadı: HTTP {response.status_code}, kod {safe_code}")
         for media in payload["data"]:
             if not isinstance(media, dict):
                 raise RuntimeError("Meta geçmişinde geçersiz medya kaydı")

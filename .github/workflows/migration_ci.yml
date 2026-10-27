@@ -2,6 +2,14 @@ name: 985 Migration CI and setup status
 on:
   push:
     branches: [main]
+  pull_request:
+    paths:
+      - 'public_link_runtime.py'
+      - 'publisher_recovery.py'
+      - 'test_public_link_runtime.py'
+      - 'test_publisher_recovery.py'
+      - 'migration_985_tests.py'
+      - '.github/workflows/migration_ci.yml'
   workflow_dispatch:
 permissions:
   contents: read
@@ -23,6 +31,7 @@ jobs:
       - name: Scheduler regression tests with mocked APIs
         run: node --test test/cloudflare_scheduler.test.mjs
   setup-status:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:

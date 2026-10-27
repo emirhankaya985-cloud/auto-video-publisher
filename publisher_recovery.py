@@ -9,13 +9,30 @@ import time
 
 READ_RETRY_HTTP = frozenset({429, 500, 502, 503, 504})
 READ_RETRY_DELAYS = (1, 2)
+GRAPH_READ_RETRY_CODES = frozenset({4, 17, 32, 613})
 
 
-def read_with_retry(get, *args, sleep=time.sleep, **kwargs):
+def _graph_read_is_throttled(response):
+    # Meta can report throttling as HTTP 400. Only inspect this for explicitly
+    # opted-in Graph reads; malformed media/auth errors must not be retried.
+    if response.status_code != 400:
+        return False
+    try:
+        payload = response.json()
+    except ValueError:
+        return False
+    error = payload.get("error") if isinstance(payload, dict) else None
+    code = error.get("code") if isinstance(error, dict) else None
+    return type(code) is int and code in GRAPH_READ_RETRY_CODES
+
+
+def read_with_retry(get, *args, sleep=time.sleep, graph_read=False, **kwargs):
     """Retry a read-only HTTP GET on throttling/server errors or transport errors.
 
     Never call this with a POST/PUT or media upload function. On permanent 4xx,
-    return the response for the caller to refuse safely.
+    return the response for the caller to refuse safely. graph_read=True also
+    handles HTTP 400 carrying an explicit Graph throttling code, never arbitrary
+    Graph errors or HTTP 200 application errors.
     """
     for attempt in range(3):
         try:
@@ -26,8 +43,16 @@ def read_with_retry(get, *args, sleep=time.sleep, **kwargs):
             if attempt >= 2:
                 raise
         else:
-            if response.status_code not in READ_RETRY_HTTP or attempt >= 2:
+            retryable = response.status_code in READ_RETRY_HTTP
+            if graph_read and not retryable:
+                retryable = _graph_read_is_throttled(response)
+            if not retryable or attempt >= 2:
                 return response
+            # Release pooled sockets before the next GET. The final response
+            # stays open so its caller can still consume the body normally.
+            close = getattr(response, "close", None)
+            if callable(close):
+                close()
         sleep(READ_RETRY_DELAYS[attempt])
     raise RuntimeError("Read retry unexpectedly exhausted")
 

@@ -220,3 +220,12 @@ Yeni gerçek olayların sebeplerini, kaynak run linkini ve fix doğrulamasını 
 - Eksik video yalnız **uyarı** üretir; kör Meta POST, ledger sıfırlama, Drive'a yazma veya kapalı/yetkisiz rotayı etkinleştirme yoktur. Hak/route devre dışıysa yanlış alarm üretmez.
 - GitHub Actions'ın `success` sonucunu değil gerçek platformdaki video kimliklerini sayar. Meta GET erişimi başarısızsa `unknown` raporlar; asla sahte yeşil sonuç yazmaz. Telegram ve ntfy yalnız hedef açığı veya belirsizlik halinde sunucu onayıyla uyarılır; cihaz teslimatı ayrıca doğrulanamaz.
 - Bu monitorün yeşil CI testi gelecekteki planlı yayın saatleri geçmeden Daily Laugh/ToonZone için canlı kabul yerine geçmez.
+
+## 27 Ekim 2026 — Graph geçmiş okuma kurtarmasının güçlendirilmesi
+
+- Güncel planlı [#40520730569](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/40520730569) gerçek incident özeti: `confirmed_new_posts=3`, `error_event_count=0`, `uncertain_pending_reconciliation=0`, `previous_unreconciled_intents=0`. Bu, aşağıdaki yeni kodun canlı kabulü değildir.
+- Kod incelemesi: `read_with_retry` yalnız HTTP 429/5xx üzerinden tekrar ediyordu; yukarıdaki politikada yer alan Graph 4/17/32/613 hata kodları HTTP 400 gövdesinde geldiğinde uygulanmıyordu. Şimdi yalnız açık `graph_read=True` geçmiş GET çağrısında bu dört sayısal kod için toplam üç okuma ve 1/2 saniye bekleme uygulanır. Son yanıt başarısızsa geçmiş kapısı kapalı kalır. GitHub GET veya Meta upload/publish POST yolu bu opt-in'i kullanmaz.
+- Bozuk JSON şekli, HTTP 200 içinde `error` veya sayısal olmayan hata kodu geçmişte boş başarı sayılmaz; güvenli RuntimeError ile yayın durur. Ham hata gövdesi/token loglanmaz. Tüketilen ara retry yanıtları kapatılır; son yanıt çağırana bırakılır.
+- Regresyonlar: Graph throttling sonrası başarı, üç denemede tükenme, normal HTTP 400/izin hatasını tekrar etmeme, yanlış JSON şekli ve hata gövdesini gizleme. Önceki Instagram kodlama profilleri ve belirsiz POST kilitleri korunur.
+- Doğrulama: yerel 72 hedefli kurtarma/runtime testi geçti; tam paket sonucu PR açıklamasında kayıtlıdır. Yeni sürümle gerçek planlı çalışma henüz doğrulanmadı; test için yayın veya bildirim tetiklenmedi.
+- Geri alma: ilgili commit'i geri al; intent/result arşivlerini silme ve legacy `AUTOMATION_ENABLED` anahtarını açma.

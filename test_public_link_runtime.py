@@ -331,6 +331,27 @@ class LinkRuntimeSafety(unittest.TestCase):
         self.assertEqual([row["id"] for row in result], ["reel"])
         self.assertIn("media_type", fetch.call_args.kwargs["params"]["fields"])
 
+    def test_graph_history_throttle_recovers_before_publication_planning(self):
+        limited, ok = Mock(status_code=400), Mock(status_code=200)
+        limited.json.return_value = {"error": {"code": 4}}
+        ok.json.return_value = {"data": [{"id": "reel", "media_type": "VIDEO"}]}
+        with patch.object(runtime.requests, "get", create=True, side_effect=[limited, ok]) as get, \
+                patch.dict(runtime.read_with_retry.__kwdefaults__, {"sleep": Mock()}):
+            rows = runtime.graph_rows({"instagram_id": "123", "page_token": "test-token"}, "instagram")
+        self.assertEqual([row["id"] for row in rows], ["reel"])
+        self.assertEqual(get.call_count, 2)
+
+    def test_malformed_graph_history_never_counts_as_empty_success_or_leaks_body(self):
+        for payload in (None, [], "secret-body", {"error": "secret-error"},
+                        {"data": [], "error": {"code": "secret-code"}}):
+            with self.subTest(payload=payload):
+                response = Mock(status_code=200)
+                response.json.return_value = payload
+                with patch.object(runtime.requests, "get", create=True, return_value=response):
+                    with self.assertRaises(RuntimeError) as raised:
+                        runtime.graph_rows({"instagram_id": "123", "page_token": "test-token"}, "instagram")
+                self.assertNotIn("secret", str(raised.exception))
+
     def test_instagram_history_without_media_type_fails_closed(self):
         response = Mock(status_code=200)
         response.json.return_value = {"data": [

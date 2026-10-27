@@ -7,6 +7,48 @@ from publisher_recovery import classify_meta_failure, read_with_retry, known_pre
 
 
 class RecoveryPolicyTests(unittest.TestCase):
+    def test_graph_400_throttle_retries_only_when_explicitly_opted_in(self):
+        for code in (4, 17, 32, 613):
+            for enabled in (False, True):
+                with self.subTest(code=code, graph_read=enabled):
+                    limited = Mock(status_code=400)
+                    limited.json.return_value = {"error": {"code": code}}
+                    ok = Mock(status_code=200)
+                    get = Mock(side_effect=[limited, ok])
+                    result = read_with_retry(get, "url", sleep=Mock(), graph_read=enabled)
+                    self.assertIs(result, ok if enabled else limited)
+                    self.assertEqual(get.call_count, 2 if enabled else 1)
+                    self.assertNotIn("graph_read", get.call_args.kwargs)
+                    self.assertEqual(limited.close.call_count, int(enabled))
+                    ok.close.assert_not_called()
+
+    def test_graph_throttle_exhaustion_returns_last_response_without_extra_sleep(self):
+        responses = [Mock(status_code=400) for _ in range(3)]
+        for response in responses:
+            response.json.return_value = {"error": {"code": 4}}
+        get, wait = Mock(side_effect=responses), Mock()
+        self.assertIs(read_with_retry(get, sleep=wait, graph_read=True), responses[-1])
+        self.assertEqual(get.call_count, 3)
+        self.assertEqual([c.args for c in wait.call_args_list], [(1,), (2,)])
+        responses[-1].close.assert_not_called()
+
+    def test_graph_permanent_or_malformed_errors_are_not_retried(self):
+        for payload in (None, [], "secret-body", {"error": "secret-error"},
+                        {"error": {"code": 100}}, {"error": {"code": 190}},
+                        {"error": {"code": "4"}}, {"error": {"code": True}}):
+            with self.subTest(payload=payload):
+                response = Mock(status_code=400)
+                response.json.return_value = payload
+                get, wait = Mock(return_value=response), Mock()
+                self.assertIs(read_with_retry(get, sleep=wait, graph_read=True), response)
+                get.assert_called_once()
+                wait.assert_not_called()
+        response = Mock(status_code=400)
+        response.json.side_effect = ValueError("not JSON")
+        get = Mock(return_value=response)
+        self.assertIs(read_with_retry(get, graph_read=True), response)
+        get.assert_called_once()
+
     def test_read_429_then_200_with_bounded_backoff(self):
         get = Mock(side_effect=[SimpleNamespace(status_code=429), SimpleNamespace(status_code=200)])
         wait = Mock()
