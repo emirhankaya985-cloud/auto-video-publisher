@@ -13,7 +13,8 @@ from zoneinfo import ZoneInfo
 from meta_auth_loader import load_meta_auth
 from ntfy_notifications import send_ntfy
 from publication_safety import route_paused
-from public_link_runtime import graph_rows, route_clock, timestamp
+# Keep Drive/gdown imports out of this read-only watchdog's import path.
+# The production-only Graph reader is loaded lazily after route checks.
 from telegram_notifications import send_telegram, telegram_configured
 
 ISTANBUL = ZoneInfo("Europe/Istanbul")
@@ -32,8 +33,18 @@ def target_day(route, now):
     return now.astimezone(ISTANBUL).date()
 
 
+def _platform_day(route, row):
+    raw = row.get("created_time") or row.get("timestamp")
+    if not isinstance(raw, str) or not raw:
+        raise ValueError("Missing publication timestamp")
+    stamp = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    if stamp.tzinfo is None or stamp.utcoffset() is None:
+        raise ValueError("Publication timestamp must have timezone")
+    return stamp.astimezone(NEW_YORK if route == "daily_laugh" else ISTANBUL).date()
+
+
 def check_route(route, *, now=None, page_loader=load_meta_auth,
-                history_reader=graph_rows, paused=route_paused):
+                history_reader=None, paused=route_paused):
     if route not in TARGETS:
         raise ValueError("Unapproved monitored route")
     now = now or datetime.now(timezone.utc)
@@ -51,6 +62,11 @@ def check_route(route, *, now=None, page_loader=load_meta_auth,
         result["instagram"] = {"status": "disabled"}
 
     try:
+        if history_reader is None:
+            # Production workflow installs gdown for the existing publisher
+            # Graph reader. Offline monitoring tests never need Drive.
+            from public_link_runtime import graph_rows
+            history_reader = graph_rows
         auth = page_loader()
         pages = auth.get("pages") if isinstance(auth, dict) else None
         if not isinstance(pages, list):
@@ -74,7 +90,7 @@ def check_route(route, *, now=None, page_loader=load_meta_auth,
                 post_id = str(row.get("id") or "")
                 if not post_id.isdecimal():
                     raise ValueError("Unverifiable post ID")
-                if route_clock(route, timestamp(row)).date().isoformat() == day:
+                if _platform_day(route, row).isoformat() == day:
                     verified_ids.add(post_id)
             counts[platform] = len(verified_ids)
         result["counts"] = counts
