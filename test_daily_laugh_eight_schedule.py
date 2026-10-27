@@ -66,13 +66,19 @@ class DailyLaughEightSlotsTests(unittest.TestCase):
         self.assertEqual(len(day_slots), 8)
         self.assertEqual(len(set(day_slots)), 8)
 
-    def test_primary_and_backup_cron_cover_midnight_and_three_utc(self):
+    def test_legacy_publishers_are_manual_only_while_meta_cron_stays_active(self):
         root = Path(__file__).parent / ".github" / "workflows"
         main = (root / "omnichannel_schedule.yml").read_text(encoding="utf-8")
         backup = (root / "cloud_schedule_backup.yml").read_text(encoding="utf-8")
-        self.assertIn("*/5 0,1,2,3,19,20,21,22,23 * * *", main)
-        self.assertIn("35,45,55 0,1,2,3,19,20,21,22,23 * * *", backup)
-        self.assertNotIn("*/5 * * * *", main)
+        active_meta = (root / "public_link_schedule.yml").read_text(encoding="utf-8")
+        self.assertIn("  workflow_dispatch:", main)
+        self.assertIn("  workflow_dispatch:", backup)
+        self.assertNotIn("\n  schedule:", main)
+        self.assertNotIn("\n  schedule:", backup)
+        self.assertIn("vars.AUTOMATION_ENABLED == 'true'", main)
+        self.assertIn("  schedule:", active_meta)
+        self.assertIn("7,37 * * * *", active_meta)
+        self.assertIn("0,10,20,30 9 * * *", active_meta)
 
     def test_daily_report_target_is_eight_without_historical_inflation(self):
         name = "😂 Daily Laugh Lab"

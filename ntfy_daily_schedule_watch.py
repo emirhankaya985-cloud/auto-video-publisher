@@ -1,4 +1,4 @@
-"""Warn if yesterday's 23:59 TRT GitHub daily report never completed.
+"""Warn if yesterday's 23:15 TRT GitHub daily report never completed.
 
 This code does not publish media, edit Drive, or alter any workflow schedule.
 """
@@ -20,8 +20,8 @@ EXPECTED_REPOSITORY = "emirhankaya985-cloud/auto-video-publisher"
 def expected_window(now):
     utc_now = now.astimezone(timezone.utc)
     yesterday_utc = utc_now.date() - timedelta(days=1)
-    due = datetime.combine(yesterday_utc, time(20, 59), timezone.utc)
-    # The nightly GitHub schedule is 20:59 UTC. Ignore manual tests and
+    due = datetime.combine(yesterday_utc, time(20, 15), timezone.utc)
+    # The nightly GitHub schedule is 20:15 UTC. Ignore manual tests and
     # unrelated runs. A two-hour tolerance allows ordinary queue latency,
     # but a much later success would have measured a different local day.
     return due - timedelta(minutes=5), due + timedelta(hours=2)
@@ -85,7 +85,7 @@ def main():
     try:
         if verdict["status"] == "missing_or_failed":
             title = "🚨 Günlük rapor otomasyonu eksik"
-            message = ("Dünkü 23:59 Türkiye saati günlük raporunun başarılı "
+            message = ("Dünkü 23:15 Türkiye saati günlük raporunun başarılı "
                        "otomatik GitHub Actions çalışması bulunamadı. "
                        "İzlenme raporunun güncelliği doğrulanmadı.")
         else:

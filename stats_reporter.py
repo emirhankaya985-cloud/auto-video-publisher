@@ -516,9 +516,9 @@ def publication_progress(drive, account, day):
 
 
 def resolve_report_day(now, *, event_name=None):
-    """Honor the intended 23:59 TRT day when GitHub schedule starts late.
+    """Honor the intended 23:15 TRT day when GitHub schedule starts late.
 
-    GitHub cron runs at 20:59 UTC. If runner starts just after local midnight,
+    GitHub cron runs at 20:15 UTC. If runner starts just after local midnight,
     it must not silently relabel the previous nightly report as the next day.
     Manual dispatch always reports the actual day.
     """
@@ -715,7 +715,29 @@ def notify(message):
             raise ntfy_error
 
 
+def write_step_summary(report):
+    """Display the same report on GitHub Actions without additional API calls.
+
+    The summary never replaces Telegram/ntfy, and a UI write failure does
+    not cause a retry of notifications or social-media publications.
+    """
+    path = os.getenv("GITHUB_STEP_SUMMARY", "").strip()
+    if not path:
+        return False
+    try:
+        with open(path, "a", encoding="utf-8") as handle:
+            handle.write("## Gün Sonu Sosyal Medya İzlenmeleri\n\n")
+            handle.write("~~~text\n")
+            handle.write(report.replace("~~~", "~ ~ ~"))
+            handle.write("\n~~~\n")
+        return True
+    except OSError:
+        print("GitHub Actions rapor özeti yazılamadı.", flush=True)
+        return False
+
+
 if __name__ == "__main__":
     report = build_report()
     print(report)
+    write_step_summary(report)
     notify(report)
