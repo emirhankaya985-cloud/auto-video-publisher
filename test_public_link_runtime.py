@@ -725,7 +725,7 @@ class LinkRuntimeSafety(unittest.TestCase):
                     else:
                         self.assertTrue(flags["film_compact"])
                     upload.assert_called_once()
-                record = runtime.load(state_path)["entries"][key]
+                record = json.loads(state_path.read_text())["entries"][key]
                 self.assertEqual(record["status"], "ready")
                 self.assertEqual(record["prepublish_retry_count"], 2)
                 self.assertEqual(record["failure"]["recovery_next_profile"], 2)
@@ -762,7 +762,7 @@ class LinkRuntimeSafety(unittest.TestCase):
                     self.assertTrue(prepare.call_args.kwargs["force_transcode"])
                     self.assertFalse(prepare.call_args.kwargs["film_compact"])
                     upload.assert_called_once()
-                record = runtime.load(state_path)["entries"][key]
+                record = json.loads(state_path.read_text())["entries"][key]
                 self.assertEqual(record["status"], "done")
                 self.assertEqual(record["post_id"], "ig-live-post-verified")
 
@@ -797,7 +797,7 @@ class LinkRuntimeSafety(unittest.TestCase):
                 with self.assertRaises(SystemExit):
                     runtime.publish()
                 upload.assert_called_once()
-            record = runtime.load(state_path)["entries"][key]
+            record = json.loads(state_path.read_text())["entries"][key]
             self.assertEqual(record["status"], "uncertain")
             self.assertEqual(record["prepublish_retry_count"], 2)
             self.assertFalse(record["failure"]["safe_to_repost"])
