@@ -686,6 +686,122 @@ class LinkRuntimeSafety(unittest.TestCase):
                 self.assertTrue(prepare.call_args.kwargs["film_compact"])
                 self.assertEqual(ig.call_count, 1)
 
+    def test_second_known_instagram_400_schedules_final_safe_profile(self):
+        for route in ("penguen", "gonle"):
+            with self.subTest(route=route), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                state_path, plan_path = root / "state.json", root / "plan.json"
+                key = f"{route}:instagram:vid"
+                runtime.save(state_path, {"entries": {
+                    key: {"status": "intent", "prepublish_retry_count": 1}
+                }})
+                runtime.save(plan_path, [{
+                    "page": "Beyinsiz Penguen", "route": route,
+                    "id": "vid", "name": "clip.mp4",
+                    "platforms": ["instagram"], "captions": {"instagram": "unique"}
+                }])
+                def download(_id, target):
+                    target.write_bytes(b"0000ftypmedia")
+                    return target
+                error = runtime.MetaAPIError("HTTP 400")
+                error.stage = "Instagram ikili video aktarımı"
+                error.http_status, error.code, error.subcode = 400, 100, 2207009
+                with patch.object(runtime, "STATE", state_path), \
+                     patch.object(runtime, "PLAN", plan_path), \
+                     patch.object(runtime, "download", side_effect=download), \
+                     patch.object(runtime, "load_meta_auth", return_value={"pages": [
+                         {"page_name": "Beyinsiz Penguen", "page_token": "test"}
+                     ]}), \
+                     patch.object(runtime, "prepare_instagram_upload",
+                                  side_effect=lambda video, *a, **kw: video) as prepare, \
+                     patch.object(runtime, "upload_instagram_reel", side_effect=error) as upload:
+                    with self.assertRaises(SystemExit):
+                        runtime.publish()
+                    flags = prepare.call_args.kwargs
+                    self.assertTrue(flags["force_transcode"])
+                    self.assertFalse(flags["recovery_v3"])
+                    if route == "gonle":
+                        self.assertFalse(flags["film_compact"])
+                    else:
+                        self.assertTrue(flags["film_compact"])
+                    upload.assert_called_once()
+                record = json.loads(state_path.read_text())["entries"][key]
+                self.assertEqual(record["status"], "ready")
+                self.assertEqual(record["prepublish_retry_count"], 2)
+                self.assertEqual(record["failure"]["recovery_next_profile"], 2)
+
+    def test_final_profile_is_normalized_and_success_is_persisted(self):
+        for route in ("penguen", "gonle"):
+            with self.subTest(route=route), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                state_path, plan_path = root / "state.json", root / "plan.json"
+                key = f"{route}:instagram:vid"
+                runtime.save(state_path, {"entries": {
+                    key: {"status": "intent", "prepublish_retry_count": 2}
+                }})
+                runtime.save(plan_path, [{
+                    "page": "Beyinsiz Penguen", "route": route,
+                    "id": "vid", "name": "clip.mp4",
+                    "platforms": ["instagram"], "captions": {"instagram": "unique"}
+                }])
+                def download(_id, target):
+                    target.write_bytes(b"0000ftypmedia")
+                    return target
+                with patch.object(runtime, "STATE", state_path), \
+                     patch.object(runtime, "PLAN", plan_path), \
+                     patch.object(runtime, "download", side_effect=download), \
+                     patch.object(runtime, "load_meta_auth", return_value={"pages": [
+                         {"page_name": "Beyinsiz Penguen", "page_token": "test"}
+                     ]}), \
+                     patch.object(runtime, "prepare_instagram_upload",
+                                  side_effect=lambda video, *a, **kw: video) as prepare, \
+                     patch.object(runtime, "upload_instagram_reel",
+                                  return_value="ig-live-post-verified") as upload:
+                    runtime.publish()
+                    self.assertTrue(prepare.call_args.kwargs["recovery_v3"])
+                    self.assertTrue(prepare.call_args.kwargs["force_transcode"])
+                    self.assertFalse(prepare.call_args.kwargs["film_compact"])
+                    upload.assert_called_once()
+                record = json.loads(state_path.read_text())["entries"][key]
+                self.assertEqual(record["status"], "done")
+                self.assertEqual(record["post_id"], "ig-live-post-verified")
+
+    def test_third_failed_binary_400_holds_instead_of_infinite_posts(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            state_path, plan_path = root / "state.json", root / "plan.json"
+            key = "penguen:instagram:vid"
+            runtime.save(state_path, {"entries": {
+                key: {"status": "intent", "prepublish_retry_count": 2}
+            }})
+            runtime.save(plan_path, [{
+                "page": "Beyinsiz Penguen", "route": "penguen", "id": "vid",
+                "name": "clip.mp4", "platforms": ["instagram"],
+                "captions": {"instagram": "unique"}
+            }])
+            def download(_id, target):
+                target.write_bytes(b"0000ftypmedia")
+                return target
+            error = runtime.MetaAPIError("HTTP 400")
+            error.stage = "Instagram ikili video aktarımı"
+            error.http_status, error.code, error.subcode = 400, 100, 2207009
+            with patch.object(runtime, "STATE", state_path), \
+                 patch.object(runtime, "PLAN", plan_path), \
+                 patch.object(runtime, "download", side_effect=download), \
+                 patch.object(runtime, "load_meta_auth", return_value={"pages": [
+                     {"page_name": "Beyinsiz Penguen", "page_token": "test"}
+                 ]}), \
+                 patch.object(runtime, "prepare_instagram_upload",
+                              side_effect=lambda video, *a, **kw: video), \
+                 patch.object(runtime, "upload_instagram_reel", side_effect=error) as upload:
+                with self.assertRaises(SystemExit):
+                    runtime.publish()
+                upload.assert_called_once()
+            record = json.loads(state_path.read_text())["entries"][key]
+            self.assertEqual(record["status"], "uncertain")
+            self.assertEqual(record["prepublish_retry_count"], 2)
+            self.assertFalse(record["failure"]["safe_to_repost"])
+
     def test_film_recovery_upload_prepares_distinct_noncompact_bitstream(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
