@@ -252,3 +252,11 @@ izlenir; bu inceleme test amaçlı gerçek yayın tetiklemedi.
 - Telefon özetinde ölçüm zamanı ve gecikmeli gün açıklaması artık korunur. Hesap/platform/genel günlük satırlar gecikmeyi `N/A (gecikmeli ölçüm)` olarak ayırır; gerçek API başarısızlığı `Veri alınamadı`, ilk baseline yokluğu ayrı kalır. Genel izlenmeler gecikmede de korunur; geçmişe sahte günlük sayı yazılmaz.
 - Analitik GET okumalarına sınırlı 429/5xx/Graph kota retry eklendi; yetki hatası veya bozuk veri başarıya dönüştürülmez. Bildirim POST'u veya video yayını bu kontrol için tetiklenmedi.
 - Günlük fark, erişilebilir videoların önceki başarılı gün sonu snapshot'ına göre sayaç farkıdır; tam takvim günü için doğrudan platform Insights metriği veya benzersiz izleyici ölçümü iddiası değildir. Genel toplam da erişilebilir video sayaçlarıdır.
+
+## 27 Ekim 2026 — Telegram günlük/haftalık karşılaştırma tabloları
+
+- Kullanıcı açıkça hesap bazlı 1 gün / 7 gün önceye göre yüzde, ayrıntılı tablo ve Telegram teslimi istedi. `views_comparison.py` mevcut arşivden kesin gün tabanlarını kullanır; ilave Meta yetkisi veya video yayını gerekmez.
+- Üç Telegram HTML parçası: dünkü/şimdiki toplam, artış ve yüzde; 7 gün önceki toplam/artış/yüzde; ilk üç büyüyen hesap, hesap payları ve platform ayrıntısı. Ufak pozitif yüzdeler sıfırmış gibi yuvarlanmaz. Her parça gönderilmeden önce boyut sınırı kontrol edilir, etiketler HTML-escape edilir.
+- Eksik platform/7 günlük kayıt, değişen video kapsamı, azalan sayaç ve sıfır tabanda sahte yüzde yoktur. Haftalık veri eksikse arşiv başlangıcı ve açık neden gösterilir. Yüzde toplam video sayacının büyümesidir, günlük izlenme hızlarının değişimi değildir.
+- Ayrıntılı Telegram gönderimi kısmen başarısızsa iş başarısız olur; önceden kabul edilen parça tekrar gönderilmez. ntfy kompakt özeti korunur. JSON hesaplama kanıtı ayrı 90 günlük artifact'a kaydedilir.
+- Yerel regresyon ve aynı head SHA'daki CI sonucu PR'da tutulur; gerçek üç Telegram server ACK görülmeden teslim edildi denmez. Kullanıcının açık isteğiyle yeni rapor gönderimi yapılacaktır. Kod/test başarısı Android görünür teslimatı değildir.

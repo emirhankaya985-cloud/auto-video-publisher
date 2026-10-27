@@ -3,6 +3,8 @@ name: Meta-only nightly reporting — no publish regression
 on:
   pull_request:
     paths:
+      - 'views_comparison.py'
+      - 'test_views_comparison.py'
       - 'stats_reporter.py'
       - 'public_link_runtime.py'
       - 'test_public_link_runtime.py'
