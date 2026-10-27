@@ -5,12 +5,7 @@ permissions:
   actions: read
 
 on:
-  # Daily stats runs at 20:59 UTC; this follows shortly after (00:15 TRT).
-  schedule:
-    - cron: '15 21 * * *'
-  workflow_run:
-    workflows: ["Hesap Bazli Izlenme Raporu"]
-    types: [completed]
+  # Manual-only until Sheets credentials and independent opt-in are configured.
   workflow_dispatch:
     inputs:
       dry_run:
@@ -25,7 +20,7 @@ concurrency:
 
 jobs:
   sync:
-    if: vars.AUTOMATION_ENABLED == 'true'
+    if: vars.ANALYTICS_SHEETS_SYNC_ENABLED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
