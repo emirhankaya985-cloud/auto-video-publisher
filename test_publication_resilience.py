@@ -1,4 +1,5 @@
 """Offline failure injection across account discovery, planning and upload stages."""
+from contextlib import ExitStack
 import json
 import os
 import tempfile
@@ -17,6 +18,86 @@ def response(payload, status=200):
 
 
 class PublicationResilienceTests(unittest.TestCase):
+    def publication_fixture(self, root, status="intent"):
+        item = {"route": "gonle", "page": "Gönle Düşen", "id": "v1", "name": "1.mp4",
+                "platforms": ["facebook"], "captions": {"facebook": "approved caption"}}
+        state = {"schema": 1, "entries": {"gonle:facebook:v1": {
+            "route": "gonle", "platform": "facebook", "status": status,
+            "file": "1.mp4", "run_id": "999", "publish_caption": "approved caption",
+            "caption_hash": runtime.caption_key("approved caption")}}}
+        runtime.save(root / "state.json", state)
+        runtime.save(root / "plan.json", [item])
+        video = root / "source.mp4"
+        video.write_bytes(b"0000ftypoffline-test")
+        return item, state, video
+
+    def test_publish_replay_never_uploads_a_confirmed_post_twice(self):
+        with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
+            root = Path(tmp)
+            item, state, video = self.publication_fixture(root)
+            stack.enter_context(patch.dict(os.environ, {"GITHUB_RUN_ID": "999"}))
+            stack.enter_context(patch.object(runtime, "STATE", root / "state.json"))
+            stack.enter_context(patch.object(runtime, "PLAN", root / "plan.json"))
+            stack.enter_context(patch.object(runtime, "load_meta_auth", return_value={"pages": [{"page_name": "Gönle Düşen"}]}))
+            download = stack.enter_context(patch.object(runtime, "download", return_value=video))
+            stack.enter_context(patch.object(runtime, "verify_source_video", return_value=True))
+            def uploaded(*args):
+                saved = json.loads((root / "state.json").read_text())
+                self.assertEqual(saved["entries"]["gonle:facebook:v1"]["status"], "uncertain")
+                return "123"
+            post = stack.enter_context(patch.object(runtime, "upload_facebook_reel", side_effect=uploaded))
+            runtime.publish()
+            runtime.publish()
+            post.assert_called_once()
+            download.assert_called_once()
+            saved = json.loads((root / "state.json").read_text())
+            self.assertEqual(saved["entries"]["gonle:facebook:v1"]["post_id"], "123")
+
+    def test_crash_during_post_leaves_uncertain_and_replay_cannot_post(self):
+        with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
+            root = Path(tmp)
+            item, state, video = self.publication_fixture(root)
+            stack.enter_context(patch.dict(os.environ, {"GITHUB_RUN_ID": "999"}))
+            stack.enter_context(patch.object(runtime, "STATE", root / "state.json"))
+            stack.enter_context(patch.object(runtime, "PLAN", root / "plan.json"))
+            stack.enter_context(patch.object(runtime, "load_meta_auth", return_value={"pages": [{"page_name": "Gönle Düşen"}]}))
+            download = stack.enter_context(patch.object(runtime, "download", return_value=video))
+            stack.enter_context(patch.object(runtime, "verify_source_video", return_value=True))
+            post = stack.enter_context(patch.object(runtime, "upload_facebook_reel", side_effect=KeyboardInterrupt))
+            with self.assertRaises(KeyboardInterrupt):
+                runtime.publish()
+            with self.assertRaises(SystemExit):
+                runtime.publish()
+            post.assert_called_once()
+            download.assert_called_once()
+            saved = json.loads((root / "state.json").read_text())
+            self.assertEqual(saved["entries"]["gonle:facebook:v1"]["status"], "uncertain")
+
+    def test_intent_bindings_and_unreconciled_states_fail_before_upload(self):
+        for change in ({"status": "ready"}, {"status": "uncertain"},
+                       {"run_id": "old"}, {"file": "other.mp4"},
+                       {"caption_hash": "wrong"}, {"publish_caption": "changed"},
+                       {"status": "done"}):
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as tmp:
+                item, state, video = self.publication_fixture(Path(tmp))
+                state["entries"]["gonle:facebook:v1"].update(change)
+                with patch.dict(os.environ, {"GITHUB_RUN_ID": "999"}):
+                    with self.assertRaises(RuntimeError):
+                        runtime.pending_publication_platforms(item, state)
+
+    def test_partial_success_only_keeps_unpublished_platform(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            item, state, video = self.publication_fixture(Path(tmp))
+            item["platforms"].append("instagram")
+            item["captions"]["instagram"] = "approved caption"
+            state["entries"]["gonle:instagram:v1"] = dict(state["entries"]["gonle:facebook:v1"], platform="instagram")
+            state["entries"]["gonle:facebook:v1"].update(status="done", post_id="123")
+            with patch.dict(os.environ, {"GITHUB_RUN_ID": "999"}):
+                self.assertEqual(runtime.pending_publication_platforms(item, state), ["instagram"])
+            item["platforms"].append("instagram")
+            with self.assertRaises(RuntimeError):
+                runtime.pending_publication_platforms(item, state)
+
     def test_ledger_aliases_or_unverified_results_do_not_inflate_daily_quota(self):
         base = {"route": "gonle", "platform": "facebook", "status": "done",
                 "day": "2026-10-27", "post_id": "123"}
