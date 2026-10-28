@@ -29,9 +29,21 @@ class AssistantTests(unittest.TestCase):
         args, options = session.post.call_args
         self.assertEqual(args, (ai.ENDPOINT,))
         self.assertFalse(options["allow_redirects"])
-        self.assertEqual(options["json"]["model"], "openai/gpt-oss-120b")
+        self.assertEqual(options["json"]["model"], "nvidia/nemotron-3.5-super-vl-120b-a12b")
+        self.assertEqual(options["json"]["chat_template_kwargs"], {"enable_thinking": False})
+        self.assertNotIn("extra_body", options["json"])
+        self.assertFalse(options["json"]["stream"])
         self.assertNotIn("tools", options["json"])
         self.assertEqual(session.post.call_count, 1)
+
+    def test_other_model_override_has_no_nemotron_only_options(self):
+        session = Mock()
+        session.post.return_value = Mock(status_code=200)
+        session.post.return_value.json.return_value = {"choices": [{"message": {"content": "Özet"}}]}
+        with patch.dict(os.environ, {"NVIDIA_MODEL": "openai/gpt-oss-120b"}):
+            ai.answer("Özet", {}, session=session)
+        self.assertEqual(session.post.call_args.kwargs["json"]["model"], "openai/gpt-oss-120b")
+        self.assertNotIn("chat_template_kwargs", session.post.call_args.kwargs["json"])
 
     def test_failure_redacts_provider_body_and_key(self):
         session = Mock()

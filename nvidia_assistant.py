@@ -36,11 +36,17 @@ def answer(question, evidence, conversation=(), *, session=requests):
             raise ValueError("Invalid conversation")
         messages.append({"role": item["role"], "content": item["content"][:3000]})
     messages.append({"role": "user", "content": question})
+    model = os.getenv("NVIDIA_MODEL", "").strip() or "nvidia/nemotron-3.5-super-vl-120b-a12b"
+    payload = {"model": model, "messages": messages, "temperature": 0.2,
+               "max_tokens": 4096, "stream": False}
+    if model == "nvidia/nemotron-3.5-super-vl-120b-a12b":
+        # Native REST payload: the SDK's extra_body contents belong at top level.
+        # Routine summaries/chat need final content rather than reasoning output.
+        payload.update(temperature=1, top_p=0.95,
+                       chat_template_kwargs={"enable_thinking": False})
     try:
         response = session.post(ENDPOINT, headers={"Authorization": "Bearer " + key},
-            json={"model": os.getenv("NVIDIA_MODEL", "openai/gpt-oss-120b"),
-                  "messages": messages, "temperature": 0.2, "max_tokens": 1800,
-                  "stream": False}, timeout=55, allow_redirects=False)
+            json=payload, timeout=55, allow_redirects=False)
         if response.status_code != 200:
             raise RuntimeError("NVIDIA request not accepted")
         content = response.json()["choices"][0]["message"]["content"]
