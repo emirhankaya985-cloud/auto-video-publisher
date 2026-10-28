@@ -316,3 +316,15 @@ izlenir; bu inceleme test amaçlı gerçek yayın tetiklemedi.
   API hata redaksiyonu, bounded conversation, reset, eski ölçüm tarihi,
   sabit repo/main kaynağı ve ZIP üye doğrulaması. Gerçek AI/Telegram/Meta
   mesajı bu testler için gönderilmedi. Kapatma: feature flag false + worker stop.
+
+## 28 Ekim 2026 — Kullanıcının seçtiği Nemotron modeline uyum
+
+- Kullanıcının NVIDIA API örneği tam model ID'sini doğruladı:
+  `nvidia/nemotron-3.5-super-vl-120b-a12b`. Önceki gpt-oss varsayımı yerine
+  uygulama ve gece workflow varsayılanı güncellendi; NVIDIA_MODEL override korunur.
+- REST çağrısında SDK extra_body alanının içeriği doğrudan top-level'e verilir.
+  Nemotron metin ayarları temperature=1/top_p=0.95, enable_thinking=false;
+  reasoning metni, görsel örneği veya tool izni gönderilmez. Diğer model
+  override'ına Nemotron'a özel alanlar eklenmez. API retry yoktur.
+- API anahtarının eklendiği henüz doğrulanmadı; canlı model yanıtı veya
+  sürekli Telegram sohbeti başarılı diye raporlanamaz. Feature flag kapısı korunur.

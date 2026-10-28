@@ -1,9 +1,12 @@
 # Telegram + NVIDIA analiz yardımcısı
 
-Model varsayılanı NVIDIA kataloğundaki `openai/gpt-oss-120b`; farklı model
+Model varsayılanı NVIDIA kataloğundaki `nvidia/nemotron-3.5-super-vl-120b-a12b`; farklı model
 seçilirse `NVIDIA_MODEL` değiştirilebilir. Endpoint sabit NVIDIA HTTPS API'sidir.
 Bu entegrasyon ücretsiz/sınırsız kullanım garantisi vermez; hesabın sağlayıcı
 limitleri geçerlidir. Otomatik ücretli sağlayıcı geçişi veya POST retry yoktur.
+Nemotron için metin örneğindeki temperature=1/top_p=0.95 kullanılır. Sohbet ve
+özetlerde düşünme çıktısı kapalıdır (`chat_template_kwargs.enable_thinking=false`),
+yalnız son yanıt Telegram'a gönderilir. Görsel örneği ve tool çağrısı kullanılmaz.
 
 ## Gece özeti
 
@@ -27,7 +30,7 @@ Süreç ortamı:
 | --- | --- |
 | `NVIDIA_AI_ENABLED` | `true` |
 | `NVIDIA_API_KEY` | NVIDIA anahtarı (gizli) |
-| `NVIDIA_MODEL` | varsayılan `openai/gpt-oss-120b` |
+| `NVIDIA_MODEL` | varsayılan `nvidia/nemotron-3.5-super-vl-120b-a12b` |
 | `TELEGRAM_BOT_TOKEN` | mevcut bot token'ı (gizli) |
 | `TELEGRAM_CHAT_ID` | izinli sohbet kimliği |
 | `TELEGRAM_AI_OWNER_ID` | yalnız sahibin sayısal kullanıcı kimliği |
