@@ -271,3 +271,11 @@ izlenir; bu inceleme test amaçlı gerçek yayın tetiklemedi.
 - Gerçek uncertain/intent kayıtları ve Film/ToonZone bölüm sırası korunur. Filmmagrasi'nin eski kaynağı bu değişiklikle otomatik uzlaştırılmış sayılmaz; güvenilir dosya/platform kimliği kanıtı gerekir.
 - Regresyonlar tekil/çoklu çakışma, tek platform çakışmasında tüm klibi bekletme, uncertain kilidi ve Film sıra korumasını sınar. Kod/test sonucu canlı yayın kabulü değildir.
 - Geri alma: bu commit'i geri al; intent/result arşivlerini silme. Bu çalışma test yayını veya bildirim tetiklemez.
+
+
+## 28 Ekim 2026 — Onaylı konu etiket havuzları
+
+- Facebook üst sınırı 20, Instagram üst sınırı 5 hashtag. Bunlar doldurulacak kota değildir; yalnız hesap teması ve açık dosya/TXT ipuçlarıyla ilgili etiketler seçilir. Etiketlerin izlenmeyi artırdığı veya 20 Facebook etiketinin en iyi sonuç olduğu iddia edilmez.
+- Daily Laugh İngilizce etiketler kullanır. Oyuncu/karakter etiketi için açık isim gerekir; kullanıcı adı ve yeni kişi etiketi tahmin edilmez. Mevcut video-specific kişi kuralları korunur.
+- Eski TXT ile geçmiş eşleştirmesi önce yapılır. Yalnız yeni intent için etiketli açıklama oluşturulur; tam metin ve hash birlikte kaydedilir. Ready yeniden denemesi kayıtlı metni aynen kullanır; mevcut intent/uncertain metinleri politika değişikliğiyle yeniden yazılmaz. Eski sosyal medya gönderileri değiştirilmez.
+- Caption uzunluğu sınırında ana metin kesilmez; isteğe bağlı etiketler azaltılır. Desteklenmeyen rota değiştirilmez. Canlı test yayını ve bildirim tetiklenmez. Geri alma: ilgili commit'i geri al; state/intent arşivini koru.
