@@ -419,6 +419,59 @@ def seed_done(route, platform, name):
     return False
 
 
+def verified_film_duplicate(item, route, platform, files, entries, history, fingerprints):
+    """Prove a Drive export copy belongs to an already confirmed film post.
+
+    A same-part filename or caption alone never proves identity. Require the
+    old file ID in the current catalog, a confirmed ledger result, that exact
+    remote post/caption/date, and equal full source bytes. No Meta write here.
+    """
+    if route not in {"film", "film_second"}:
+        return None
+    def canonical(name):
+        return re.sub(r" \([0-9]+\)$", "", Path(name).stem).casefold()
+    name = canonical(item["name"])
+    matches = []
+    for key, prior in entries.items():
+        if (prior.get("route") != route or prior.get("platform") != platform
+                or prior.get("status") != "done" or not prior.get("post_id")
+                or canonical(prior.get("file", "")) != name):
+            continue
+        prior_file = files.get(prior["file"])
+        if (not prior_file or prior_file.get("id") == item["id"]
+                or key != f"{route}:{platform}:{prior_file['id']}"):
+            continue
+        remote = [r for r in history if str(r.get("id")) == str(prior["post_id"])]
+        if len(remote) != 1:
+            continue
+        row = remote[0]
+        post_id, day = history_publication_match(route, row)
+        if (day != prior.get("day") or not prior.get("caption_hash")
+                or caption_key(row.get("description") or row.get("caption")) != prior["caption_hash"]):
+            continue
+        matches.append((prior_file, prior))
+    # Multiple old confirmed sources for one part require explicit review.
+    if len(matches) != 1:
+        return None
+    prior_file, prior = matches[0]
+    with tempfile.TemporaryDirectory(prefix="film-duplicate-") as tmp:
+        for source in (item, prior_file):
+            if source["id"] not in fingerprints:
+                path = download(source["id"], Path(tmp) / (source["id"] + ".mp4"))
+                verify_source_video(path)
+                digest = hashlib.sha256()
+                with path.open("rb") as stream:
+                    for block in iter(lambda: stream.read(1024 * 1024), b""):
+                        digest.update(block)
+                fingerprints[source["id"]] = digest.hexdigest()
+    if fingerprints[item["id"]] != fingerprints[prior_file["id"]]:
+        raise RuntimeError("Aynı film/part dosyalarının içerikleri farklı; sıra bekletildi")
+    return dict(prior, file=item["name"], duplicate_of_file_id=prior_file["id"],
+                source_sha256=fingerprints[item["id"]],
+                reconciliation_proof="identical_source_bytes_and_exact_remote_post",
+                duplicate_verified_in_run_id=os.getenv("GITHUB_RUN_ID", ""))
+
+
 def route_enabled(route):
     return not route_paused("film" if route == "film_second" else route)
 
@@ -616,6 +669,7 @@ def plan(audit=False):
     planned_counts = {}
     batch_limit = 8 if os.getenv("CATCHUP_BATCH_DATE") == day else 1
     history_cache = {}
+    duplicate_fingerprints = {}
     rescue_only = os.getenv("IG_AUDITED_RESCUE_ONLY") == "true"
     for route, (source, page_name) in ROUTES.items():
         if rescue_only and route not in _AUDITED_IG_V3_FILES:
@@ -772,6 +826,23 @@ def plan(audit=False):
                 key = f"{route}:{p}:{item['id']}"
                 existing = state["entries"].get(key, {})
                 cap_hash = caption_key(captions[p])
+                if not existing and source == "film":
+                    try:
+                        duplicate = verified_film_duplicate(
+                            item, route, p, files, state["entries"], histories[p],
+                            duplicate_fingerprints,
+                        )
+                    except RuntimeError as exc:
+                        report.append("HELD film duplicate verification: " + str(exc))
+                        record_error("source_video", "source_or_cover_preparation_failed",
+                                     route=route, platform=p, video=item["name"], error=exc,
+                                     safe_to_retry=True)
+                        held = True
+                        continue
+                    if duplicate:
+                        state["entries"][key] = duplicate
+                        report.append(f"DUPLICATE VERIFIED: {item['name']} {p}; existing post_id={duplicate['post_id']}; no new upload.")
+                        continue
                 if cap_hash in ambiguous_captions[p]:
                     if source in {"humor", "gonle", "daily_laugh"} and not existing:
                         # Several real posts use this caption, but none proves

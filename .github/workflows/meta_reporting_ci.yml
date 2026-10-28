@@ -5,6 +5,7 @@ on:
     paths:
       - 'views_comparison.py'
       - 'test_views_comparison.py'
+      - 'test_film_duplicate_identity.py'
       - 'stats_reporter.py'
       - 'public_link_runtime.py'
       - 'test_public_link_runtime.py'
