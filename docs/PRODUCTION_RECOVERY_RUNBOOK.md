@@ -296,3 +296,23 @@ izlenir; bu inceleme test amaçlı gerçek yayın tetiklemedi.
 - Yeni planlayıcı yalnız aynı film/part kopyası için mevcut done kaynak ID'sini, tam uzak post ID/açıklama/yayın gününü ve iki MP4'ün doğrulanmış tam byte hash'ini birlikte şart koşar. Herhangi bir kanıt yoksa eski hold korunur. Farklı byte içeren iki part dosyası asla atlanmaz. Kaynak veya platforma yazım yapılmaz.
 - Kanıtlı kopya aynı eski post'a alias olur; orijinal `run_id` ve gün korunur. Günlük kota post ID'yi bir kez sayar; yeni gönderi/bildirim sayılmaz. Böylece tekrar Part 3 upload etmek yerine sıradaki Part 4 planlanabilir. Gerçek uncertain/intent, hak kapıları ve bölüm sırası değişmez.
 - Yerel testler byte eşitliği/farkı, uzak ID/tarih/açıklama yokluğu, uncertain kilidi, geçersiz medya, tek quota sayımı ve POST yapmadan Part 4 planlanmasını sınar. Kod/CI, sonraki planlı Part 4 gönderi kimliği olmadan canlı yayın kabulü değildir.
+
+## 28 Ekim 2026 — NVIDIA günlük yorum ve Telegram sohbet hazırlığı
+
+- Kullanıcı NVIDIA API anahtarını kendisi ayarlayacak. Varsayılan model NVIDIA
+  kataloğundaki `openai/gpt-oss-120b`; model değişkenle değiştirilebilir.
+- `NVIDIA_AI_ENABLED=true` ve secret olmadan model çağrısı yok. Normal üç
+  Telegram tablosu gönderildikten sonra ek AI özeti bağımsız çalışır. Model
+  hatası tabloların yeniden gönderilmesine veya yayın retry'ına yol açmaz.
+- Yeni owner/chat kontrollü long-poll worker sadece sabit production main
+  rapor artifact'larını okur. Son ölçüm tarihi korunur, yayın kanıtı olmayan
+  bağlamdan yayın başarısı üretilmemesi istenir. Hiçbir yayın aracı verilmez.
+- SQLite offset API'den önce kalıcıdır; belirsiz Telegram teslimatı kör
+  yinelemeye alınmaz. Aktif webhook silinmez. Tek sürekli süreç ve kalıcı
+  disk gerekir; herhangi bir ücretli servis oluşturulmadı.
+- Kurulum: `docs/TELEGRAM_NVIDIA_ASSISTANT.md`. Anahtar, izinli kullanıcı ID'si
+  ve worker host'u eksik olduğundan canlı sohbet kabulü henüz yoktur.
+- Mock testler: yetkisiz kullanıcı/chat, replay/restart, belirsiz send,
+  API hata redaksiyonu, bounded conversation, reset, eski ölçüm tarihi,
+  sabit repo/main kaynağı ve ZIP üye doğrulaması. Gerçek AI/Telegram/Meta
+  mesajı bu testler için gönderilmedi. Kapatma: feature flag false + worker stop.
