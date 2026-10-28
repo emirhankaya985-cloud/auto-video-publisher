@@ -279,3 +279,12 @@ izlenir; bu inceleme test amaçlı gerçek yayın tetiklemedi.
 - Daily Laugh İngilizce etiketler kullanır. Oyuncu/karakter etiketi için açık isim gerekir; kullanıcı adı ve yeni kişi etiketi tahmin edilmez. Mevcut video-specific kişi kuralları korunur.
 - Eski TXT ile geçmiş eşleştirmesi önce yapılır. Yalnız yeni intent için etiketli açıklama oluşturulur; tam metin ve hash birlikte kaydedilir. Ready yeniden denemesi kayıtlı metni aynen kullanır; mevcut intent/uncertain metinleri politika değişikliğiyle yeniden yazılmaz. Eski sosyal medya gönderileri değiştirilmez.
 - Caption uzunluğu sınırında ana metin kesilmez; isteğe bağlı etiketler azaltılır. Desteklenmeyen rota değiştirilmez. Canlı test yayını ve bildirim tetiklenmez. Geri alma: ilgili commit'i geri al; state/intent arşivini koru.
+
+## 28 Ekim 2026 — Yayın adımı tekrarına karşı ledger doğrulaması
+
+- Önceki kuyruk düzeltmesinin canlı kanıtı: [#40667349940](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/40667349940) Gönle Düşen `125.mp4` Facebook `2037241066936803` dahil 4 post, 0 hata yayımladı. Filmmagrasi kaynak kimliği engeli sürüyor. Bu kanıt aşağıdaki yeni guard'ın canlı kabulü değildir.
+- İnceleme bulgusu: `publish()` plan dosyasını kullanırken ledger'da zaten done olmuş platformları atlamıyordu. Aynı yayın adımının yerel planla yeniden çağrılması tekrar POST üretebilirdi; bu turda canlı çift paylaşım gözlenmiş olduğu iddia edilmez.
+- Yeni preflight indirmenin öncesinde ledger kaydını kontrol eder. Kimliği doğrulanmış done atlanır; ready/uncertain, eksik intent, değişen kayıtlı açıklama/hash/dosya veya başka run kimliği bekletilir. Tekrarlanan platform girdileri kabul edilmez. Eski içe aktarım kayıtlarında bulunmayan isteğe bağlı kimlik alanları uydurulmaz; yeni planner alanlarının mevcut bağları doğrulanır.
+- Meta POST'tan önce yerel ledger uncertain olarak kaydedilir. Kesinti sonrasında aynı publish çağrısı kör POST yinelemez. Normal planlama, geçmişi okuyup mevcut kontrollü kurtarma kurallarıyla yeni intent hazırlayabilir; bu koruma yeni retry yetkisi vermez.
+- 594 Python testi, 57 ek kontrol, 15 Node testi yerelde başarılı. Yeni senaryolar: aynı planı iki kez çağırma, POST sırasında kesinti, yanlış caption/dosya/run, belirsiz durum ve kısmi platform başarısı. Tüm dış çağrılar mock; gerçek yayın/bildirim tetiklenmedi.
+- Geri alma: ilgili commit'i geri al, state/intent/result arşivlerini koru. Yeşil CI yeni sürümün canlı yayın kanıtı değildir.

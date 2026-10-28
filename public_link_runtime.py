@@ -997,12 +997,58 @@ def verify_source_video(path):
     return True
 
 
+def pending_publication_platforms(item, state):
+    """Validate a persisted plan against its ledger before any download or POST."""
+    platforms = item.get("platforms")
+    if not isinstance(platforms, list) or len(platforms) != len(set(platforms)):
+        raise RuntimeError("Publication plan platform list invalid")
+    pending = []
+    for platform in platforms:
+        if platform not in {"facebook", "instagram"}:
+            raise RuntimeError("Publication plan platform invalid")
+        key = f"{item['route']}:{platform}:{item['id']}"
+        entry = state.get("entries", {}).get(key)
+        if not isinstance(entry, dict):
+            raise RuntimeError("Publication intent missing")
+        if entry.get("status") == "done":
+            if not str(entry.get("post_id") or "").strip():
+                raise RuntimeError("Completed publication has no confirmed ID")
+            continue
+        if entry.get("status") != "intent":
+            raise RuntimeError("Publication requires a fresh reconciled intent")
+        caption = item.get("captions", {}).get(platform)
+        if not isinstance(caption, str) or not caption.strip():
+            raise RuntimeError("Publication caption missing")
+        # Older imported intents may lack optional identity fields. New
+        # planner entries always persist them; never bypass a present binding.
+        if entry.get("caption_hash") and entry["caption_hash"] != caption_key(caption):
+            raise RuntimeError("Publication caption differs from persisted intent")
+        if entry.get("publish_caption") is not None and entry["publish_caption"] != caption:
+            raise RuntimeError("Publication text differs from persisted intent")
+        if entry.get("file") and entry["file"] != item.get("name"):
+            raise RuntimeError("Publication source differs from persisted intent")
+        if entry.get("run_id") and entry["run_id"] != os.getenv("GITHUB_RUN_ID"):
+            raise RuntimeError("Publication intent belongs to another run")
+        pending.append(platform)
+    return pending
+
+
 def publish():
     state = json.loads(STATE.read_text())
     plans = json.loads(PLAN.read_text())
     pages = {p["page_name"]: p for p in load_meta_auth()["pages"]}
     failures = []
-    for item in plans:
+    for original_item in plans:
+        item = dict(original_item)
+        try:
+            item["platforms"] = pending_publication_platforms(item, state)
+        except (RuntimeError, KeyError, TypeError) as exc:
+            failures.append(str(item.get("route", "unknown")) + ": publication intent validation failed")
+            record_error("publication_preflight", "intent_validation_failed",
+                         route=item.get("route"), video=item.get("name"), error=exc)
+            continue
+        if not item["platforms"]:
+            continue
         page = pages[item["page"]]
         with tempfile.TemporaryDirectory() as tmp:
             temp = Path(tmp)
@@ -1123,6 +1169,10 @@ def publish():
                     continue
                 key = f"{item['route']}:{platform}:{item['id']}"
                 try:
+                    # Persist the point of no blind retry BEFORE the external
+                    # write. A crash/replayed publish step must reconcile first.
+                    state["entries"][key]["status"] = "uncertain"
+                    save(STATE, state)
                     if platform == "facebook":
                         post = upload_facebook_reel(page, str(video), item["captions"][platform])
                     else:
