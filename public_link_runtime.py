@@ -28,6 +28,7 @@ from cloud_omnichannel_publisher import (
 )
 from instagram_media_compat import prepare_instagram_upload, probe
 from toonzone_cover_fallback import generate_part_cover
+from content_hashtags import prepare_caption
 from instagram_tagging import enhance_instagram_caption
 from publisher_error_journal import record_error
 from meta_auth_loader import load_meta_auth
@@ -754,6 +755,12 @@ def plan(audit=False):
                 if source in {"film", "toonzone"}:
                     break
                 continue
+            # Freeze exact text across retries/reconciliation when a new tag
+            # policy was used. Old intents retain their original text/hash.
+            for p in platforms:
+                prior = state["entries"].get(f"{route}:{p}:{item['id']}", {})
+                if isinstance(prior.get("publish_caption"), str):
+                    captions[p] = prior["publish_caption"]
             if other_humor_hashes and any(caption_key(c) in other_humor_hashes for c in captions.values()):
                 continue
             pending = []
@@ -883,6 +890,11 @@ def plan(audit=False):
                 continue
             if not pending:
                 continue
+            # Dedupe with the original TXT first; decorate only genuinely new
+            # intents, before their exact publication hashes are persisted.
+            for p in pending:
+                if not state["entries"].get(f"{route}:{p}:{item['id']}"):
+                    captions[p] = prepare_caption(captions[p], route, Path(item["name"]).stem, p)
             selected = dict(item, route=route, page=page_name, platforms=pending, captions=captions, caption_source=origin)
             if "instagram" in pending:
                 _, selected_tags = enhance_instagram_caption(captions["instagram"], route, Path(item["name"]).stem)
@@ -917,6 +929,7 @@ def plan(audit=False):
                     state["entries"][key] = {
                         "route": route, "platform": p, "status": "intent",
                         "caption_hash": caption_key(captions[p]), "file": item["name"],
+                        "publish_caption": captions[p],
                         "day": clock.date().isoformat(), "run_id": os.environ["GITHUB_RUN_ID"],
                         "prepublish_retry_count": old_attempts,
                     }

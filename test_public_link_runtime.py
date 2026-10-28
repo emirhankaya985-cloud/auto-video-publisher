@@ -1093,6 +1093,9 @@ class LinkRuntimeSafety(unittest.TestCase):
                 self.assertEqual(state["gonle:facebook:id-102"]["status"], "intent")
                 self.assertNotIn("post_id", state["gonle:facebook:id-102"])
                 summary = (root / "report.md").read_text()
+                planned_caption = planned[0]["captions"]["facebook"]
+                self.assertEqual(state["gonle:facebook:id-102"]["publish_caption"], planned_caption)
+                self.assertEqual(state["gonle:facebook:id-102"]["caption_hash"], runtime.caption_key(planned_caption))
                 self.assertIn("SKIP Gönle Düşen 101.mp4 facebook", summary)
                 self.assertIn("NEXT: 102.mp4", summary)
 
@@ -1310,6 +1313,38 @@ class LinkRuntimeSafety(unittest.TestCase):
             self.assertNotIn("post_id", state["gonle:facebook:id-101"])
             self.assertNotIn("gonle:facebook:id-102", state)
             self.assertIn("HELD: multiple Meta posts share the same caption", (root / "report.md").read_text())
+
+    def test_saved_tagged_caption_stays_exact_on_ready_retry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            body = "Frozen caption #Approved"
+            initial = {"schema": 1, "episode_days": {}, "entries": {
+                "gonle:facebook:v1": {
+                    "route": "gonle", "platform": "facebook", "status": "ready",
+                    "caption_hash": runtime.caption_key(body), "publish_caption": body,
+                    "file": "1.mp4", "day": "2026-10-20", "prepublish_retry_count": 1,
+                }
+            }}
+            with patch.dict(os.environ, {"GITHUB_RUN_ID": "456", "GITHUB_STEP_SUMMARY": str(root / "summary.md")}), \
+                    patch.object(runtime, "ROOT", root), \
+                    patch.object(runtime, "STATE", root / "state.json"), \
+                    patch.object(runtime, "PLAN", root / "plan.json"), \
+                    patch.object(runtime, "ROUTES", {"gonle": ("gonle", "Gönle Düşen")}), \
+                    patch.object(runtime, "FOLDERS", {"gonle": "folder"}), \
+                    patch.object(runtime, "restore", return_value=initial), \
+                    patch.object(runtime, "apply_verified_migration"), \
+                    patch.object(runtime, "load_meta_auth", return_value={"pages": [{"page_name": "Gönle Düşen", "page_token": "test"}]}), \
+                    patch.object(runtime, "inventory", return_value={"1.mp4": {"id": "v1", "name": "1.mp4"}}), \
+                    patch.object(runtime, "graph_rows", return_value=[]), \
+                    patch.object(runtime, "target_count", return_value=5), \
+                    patch.object(runtime, "copies", return_value=({"facebook": "changed TXT", "instagram": "changed TXT"}, "matching-txt")), \
+                    patch.object(runtime, "prepare_caption", side_effect=AssertionError("Do not redecorate existing intent")):
+                runtime.plan()
+            planned = json.loads((root / "plan.json").read_text())
+            self.assertEqual(planned[0]["captions"]["facebook"], body)
+            entry = json.loads((root / "state.json").read_text())["entries"]["gonle:facebook:v1"]
+            self.assertEqual(entry["caption_hash"], runtime.caption_key(body))
+            self.assertEqual(entry["prepublish_retry_count"], 1)
 
 
 if __name__ == "__main__":
