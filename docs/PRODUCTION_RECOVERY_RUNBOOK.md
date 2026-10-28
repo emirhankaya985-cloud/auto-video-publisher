@@ -262,3 +262,12 @@ izlenir; bu inceleme test amaçlı gerçek yayın tetiklemedi.
 - Yerel regresyon ve aynı head SHA'daki CI sonucu PR'da tutulur; gerçek üç Telegram server ACK görülmeden teslim edildi denmez. Kullanıcının açık isteğiyle yeni rapor gönderimi yapılacaktır. Kod/test başarısı Android görünür teslimatı değildir.
 
 **Canlı teslim kanıtı:** [27 Ekim rapor #40533771493](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/40533771493), ölçüm başlangıcı 18:43 TRT, gönderim yaklaşık 18:47 TRT: Telegram `telegram_report_parts=3`, `server_acks=3`; ntfy HTTP 200. `account-views-comparison` JSON artifact başarıyla yüklendi. Altı hesapta günlük yüzdeler hesaplandı; toplam 49.012.813, önceki rapor tabanına göre +3.268 / +%0,0067. Arşivin ilk günü 25 Ekim olduğundan 20 Ekim haftalık tabanı yok; bütün haftalık yüzdeler açıkça N/A gösterildi. Haftalık hesap için gerçek 7 gün önceki snapshot gerekir. Android ekranında görünür teslim ayrıca doğrulanmadı. Bu run hiçbir video yayını tetiklemedi.
+
+
+## 28 Ekim 2026 — Sırasız kuyruklarda eski açıklama çakışması
+
+- Gerçek [#40653567037](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/40653567037) Gönle Düşen ve Filmmagrasi için eski açıklama eşleşmesinde durdu; aynı koşum Film Instagram Part26'yı yayımladı. Başarılı job bütün rotaların tamamlandığı anlamına gelmez.
+- Gönle Düşen ve sırasız mizah kaynaklarında ledger kaydı olmayan, eski açıklamayla çakışan aday her iki platform için atlanır; sıradaki temiz aday aranır. Eski aday done yapılmaz, post ID uydurulmaz, metni değiştirilip yeniden gönderilmez.
+- Gerçek uncertain/intent kayıtları ve Film/ToonZone bölüm sırası korunur. Filmmagrasi'nin eski kaynağı bu değişiklikle otomatik uzlaştırılmış sayılmaz; güvenilir dosya/platform kimliği kanıtı gerekir.
+- Regresyonlar tekil/çoklu çakışma, tek platform çakışmasında tüm klibi bekletme, uncertain kilidi ve Film sıra korumasını sınar. Kod/test sonucu canlı yayın kabulü değildir.
+- Geri alma: bu commit'i geri al; intent/result arşivlerini silme. Bu çalışma test yayını veya bildirim tetiklemez.

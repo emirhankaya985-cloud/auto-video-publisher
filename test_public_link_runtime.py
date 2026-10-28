@@ -1044,8 +1044,100 @@ class LinkRuntimeSafety(unittest.TestCase):
                 self.assertEqual(state["daily_laugh:facebook:id-102"]["status"], "intent")
                 self.assertNotIn("post_id", state["daily_laugh:facebook:id-102"])
                 summary = (root / "report.md").read_text()
-                self.assertIn("SKIP Daily Laugh 101.mp4 facebook", summary)
+                self.assertIn("SKIP Daily Laugh Lab 101.mp4 facebook", summary)
                 self.assertIn("NEXT: 102.mp4", summary)
+
+    def test_gonle_caption_collision_skips_old_and_plans_new_without_duplicate(self):
+        """Old remote captions cannot lock out new unique clips or fabricate post IDs."""
+        for duplicate in (False, True):
+            with self.subTest(duplicate=duplicate), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                source = {
+                    "101.mp4": {"id": "id-101", "name": "101.mp4"},
+                    "102.mp4": {"id": "id-102", "name": "102.mp4"},
+                }
+                remote = [{
+                    "id": "111", "description": "Gönle Düşen · Video 101\n\nApproved comedy text",
+                    "created_time": "2026-10-20T10:00:00Z",
+                }]
+                if duplicate:
+                    remote.append({
+                        "id": "222", "description": "Gönle Düşen · Video 101\n\nApproved comedy text",
+                        "created_time": "2026-10-20T12:00:00Z",
+                    })
+                def captions(route, item, files, temp):
+                    body = f"Gönle Düşen · Video {Path(item['name']).stem}\n\nApproved comedy text"
+                    return {"facebook": body, "instagram": body}, "matching-txt"
+                with patch.dict(os.environ, {"GITHUB_RUN_ID": "456",
+                                             "GITHUB_STEP_SUMMARY": str(root / "summary.md")}), \
+                        patch.object(runtime, "ROOT", root), \
+                        patch.object(runtime, "STATE", root / "state.json"), \
+                        patch.object(runtime, "PLAN", root / "plan.json"), \
+                        patch.object(runtime, "ROUTES", {"gonle": ("gonle", "Gönle Düşen")}), \
+                        patch.object(runtime, "FOLDERS", {"gonle": "folder"}), \
+                        patch.object(runtime, "restore", return_value={"schema": 1, "entries": {}, "episode_days": {}}), \
+                        patch.object(runtime, "apply_verified_migration"), \
+                        patch.object(runtime, "load_meta_auth",
+                                     return_value={"pages": [{"page_name": "Gönle Düşen", "page_token": "test"}]}), \
+                        patch.object(runtime, "inventory", return_value=source), \
+                        patch.object(runtime, "graph_rows", return_value=remote), \
+                        patch.object(runtime, "target_count", return_value=5), \
+                        patch.object(runtime, "copies", side_effect=captions):
+                    runtime.plan()
+                planned = json.loads((root / "plan.json").read_text())
+                self.assertEqual(len(planned), 1)
+                self.assertEqual(planned[0]["name"], "102.mp4")
+                self.assertEqual(planned[0]["platforms"], ["facebook"])
+                state = json.loads((root / "state.json").read_text())["entries"]
+                self.assertNotIn("gonle:facebook:id-101", state)
+                self.assertEqual(state["gonle:facebook:id-102"]["status"], "intent")
+                self.assertNotIn("post_id", state["gonle:facebook:id-102"])
+                summary = (root / "report.md").read_text()
+                self.assertIn("SKIP Gönle Düşen 101.mp4 facebook", summary)
+                self.assertIn("NEXT: 102.mp4", summary)
+
+    def test_ordered_film_caption_collision_preserves_sequence(self):
+        """Old remote captions cannot lock out new unique clips or fabricate post IDs."""
+        for duplicate in (False, True):
+            with self.subTest(duplicate=duplicate), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                source = {
+                    "101.mp4": {"id": "id-101", "name": "101.mp4"},
+                    "102.mp4": {"id": "id-102", "name": "102.mp4"},
+                }
+                remote = [{
+                    "id": "111", "description": "Filmmagrasi · Video 101\n\nApproved comedy text",
+                    "created_time": "2026-10-20T10:00:00Z",
+                }]
+                if duplicate:
+                    remote.append({
+                        "id": "222", "description": "Filmmagrasi · Video 101\n\nApproved comedy text",
+                        "created_time": "2026-10-20T12:00:00Z",
+                    })
+                def captions(route, item, files, temp):
+                    body = f"Filmmagrasi · Video {Path(item['name']).stem}\n\nApproved comedy text"
+                    return {"facebook": body, "instagram": body}, "matching-txt"
+                with patch.dict(os.environ, {"GITHUB_RUN_ID": "456",
+                                             "GITHUB_STEP_SUMMARY": str(root / "summary.md")}), \
+                        patch.object(runtime, "ROOT", root), \
+                        patch.object(runtime, "STATE", root / "state.json"), \
+                        patch.object(runtime, "PLAN", root / "plan.json"), \
+                        patch.object(runtime, "ROUTES", {"film_second": ("film", "Filmmagrasi")}), \
+                        patch.object(runtime, "FOLDERS", {"film": "folder"}), \
+                        patch.object(runtime, "restore", return_value={"schema": 1, "entries": {}, "episode_days": {}}), \
+                        patch.object(runtime, "apply_verified_migration"), \
+                        patch.object(runtime, "load_meta_auth",
+                                     return_value={"pages": [{"page_name": "Filmmagrasi", "page_token": "test"}]}), \
+                        patch.object(runtime, "inventory", return_value=source), \
+                        patch.object(runtime, "graph_rows", return_value=remote), \
+                        patch.object(runtime, "target_count", return_value=5), \
+                        patch.object(runtime, "copies", side_effect=captions):
+                    runtime.plan()
+                planned = json.loads((root / "plan.json").read_text())
+                self.assertEqual(planned, [])
+                state = json.loads((root / "state.json").read_text())["entries"]
+                self.assertEqual(state, {})
+                self.assertIn("HELD:", (root / "report.md").read_text())
 
     def test_daily_laugh_instagram_collision_does_not_trigger_facebook_duplicate(self):
         """If IG has a matching unverified caption, skip the *whole* clip."""
@@ -1085,7 +1177,47 @@ class LinkRuntimeSafety(unittest.TestCase):
             self.assertEqual(set(planned[0]["platforms"]), {"facebook", "instagram"})
             state = json.loads((root / "state.json").read_text())["entries"]
             self.assertFalse(any(key.endswith(":id-101") for key in state))
-            self.assertIn("SKIP Daily Laugh 101.mp4 instagram", (root / "report.md").read_text())
+            self.assertIn("SKIP Daily Laugh Lab 101.mp4 instagram", (root / "report.md").read_text())
+
+    def test_gonle_instagram_collision_quarantines_both_platforms(self):
+        """If IG has a matching unverified caption, skip the *whole* clip."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = {
+                "101.mp4": {"id": "id-101", "name": "101.mp4"},
+                "102.mp4": {"id": "id-102", "name": "102.mp4"},
+            }
+            def captions(route, item, files, temp):
+                body = f"Gönle Düşen · Video {Path(item['name']).stem}\n\nApproved comedy text"
+                return {"facebook": body, "instagram": body}, "matching-txt"
+            def history(page, platform):
+                if platform == "instagram":
+                    return [{"id": "111", "caption": "Gönle Düşen · Video 101\n\nApproved comedy text",
+                             "timestamp": "2026-10-20T10:00:00Z"}]
+                return []
+            with patch.dict(os.environ, {"GITHUB_RUN_ID": "456",
+                                         "GITHUB_STEP_SUMMARY": str(root / "summary.md")}), \
+                    patch.object(runtime, "ROOT", root), \
+                    patch.object(runtime, "STATE", root / "state.json"), \
+                    patch.object(runtime, "PLAN", root / "plan.json"), \
+                    patch.object(runtime, "ROUTES", {"gonle": ("gonle", "Gönle Düşen")}), \
+                    patch.object(runtime, "FOLDERS", {"gonle": "folder"}), \
+                    patch.object(runtime, "restore", return_value={"schema": 1, "entries": {}, "episode_days": {}}), \
+                    patch.object(runtime, "apply_verified_migration"), \
+                    patch.object(runtime, "load_meta_auth",
+                                 return_value={"pages": [{"page_name": "Gönle Düşen", "page_token": "test", "instagram_id": "ig"}]}), \
+                    patch.object(runtime, "inventory", return_value=source), \
+                    patch.object(runtime, "graph_rows", side_effect=history), \
+                    patch.object(runtime, "target_count", return_value=5), \
+                    patch.object(runtime, "copies", side_effect=captions):
+                runtime.plan()
+            planned = json.loads((root / "plan.json").read_text())
+            self.assertEqual(len(planned), 1)
+            self.assertEqual(planned[0]["name"], "102.mp4")
+            self.assertEqual(set(planned[0]["platforms"]), {"facebook", "instagram"})
+            state = json.loads((root / "state.json").read_text())["entries"]
+            self.assertFalse(any(key.endswith(":id-101") for key in state))
+            self.assertIn("SKIP Gönle Düşen 101.mp4 instagram", (root / "report.md").read_text())
 
     def test_daily_laugh_existing_uncertain_intent_stays_held_on_duplicate_caption(self):
         """Do not evade an actual uncertain Meta POST by skipping its source."""
@@ -1131,6 +1263,52 @@ class LinkRuntimeSafety(unittest.TestCase):
             self.assertEqual(state["daily_laugh:facebook:id-101"]["status"], "uncertain")
             self.assertNotIn("post_id", state["daily_laugh:facebook:id-101"])
             self.assertNotIn("daily_laugh:facebook:id-102", state)
+            self.assertIn("HELD: multiple Meta posts share the same caption", (root / "report.md").read_text())
+
+    def test_gonle_existing_uncertain_intent_stays_held_on_duplicate_caption(self):
+        """Do not evade an actual uncertain Meta POST by skipping its source."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            body = "Gönle Düşen · Video 101\n\nApproved comedy text"
+            original = {"schema": 1, "episode_days": {}, "entries": {
+                "gonle:facebook:id-101": {
+                    "route": "gonle", "platform": "facebook", "status": "uncertain",
+                    "caption_hash": runtime.caption_key(body), "run_id": "111",
+                    "file": "101.mp4", "day": "2026-10-20",
+                }
+            }}
+            source = {
+                "101.mp4": {"id": "id-101", "name": "101.mp4"},
+                "102.mp4": {"id": "id-102", "name": "102.mp4"},
+            }
+            remote = [
+                {"id": "111", "description": body, "created_time": "2026-10-20T10:00:00Z"},
+                {"id": "222", "description": body, "created_time": "2026-10-20T12:00:00Z"},
+            ]
+            def captions(route, item, files, temp):
+                caption = f"Gönle Düşen · Video {Path(item['name']).stem}\n\nApproved comedy text"
+                return {"facebook": caption, "instagram": caption}, "matching-txt"
+            with patch.dict(os.environ, {"GITHUB_RUN_ID": "456",
+                                         "GITHUB_STEP_SUMMARY": str(root / "summary.md")}), \
+                    patch.object(runtime, "ROOT", root), \
+                    patch.object(runtime, "STATE", root / "state.json"), \
+                    patch.object(runtime, "PLAN", root / "plan.json"), \
+                    patch.object(runtime, "ROUTES", {"gonle": ("gonle", "Gönle Düşen")}), \
+                    patch.object(runtime, "FOLDERS", {"gonle": "folder"}), \
+                    patch.object(runtime, "restore", return_value=original), \
+                    patch.object(runtime, "apply_verified_migration"), \
+                    patch.object(runtime, "load_meta_auth",
+                                 return_value={"pages": [{"page_name": "Gönle Düşen", "page_token": "test"}]}), \
+                    patch.object(runtime, "inventory", return_value=source), \
+                    patch.object(runtime, "graph_rows", return_value=remote), \
+                    patch.object(runtime, "target_count", return_value=5), \
+                    patch.object(runtime, "copies", side_effect=captions):
+                runtime.plan()
+            self.assertEqual(json.loads((root / "plan.json").read_text()), [])
+            state = json.loads((root / "state.json").read_text())["entries"]
+            self.assertEqual(state["gonle:facebook:id-101"]["status"], "uncertain")
+            self.assertNotIn("post_id", state["gonle:facebook:id-101"])
+            self.assertNotIn("gonle:facebook:id-102", state)
             self.assertIn("HELD: multiple Meta posts share the same caption", (root / "report.md").read_text())
 
 
