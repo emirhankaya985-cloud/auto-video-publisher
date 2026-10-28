@@ -3,6 +3,9 @@ name: Meta-only nightly reporting — no publish regression
 on:
   pull_request:
     paths:
+      - 'nvidia_assistant.py'
+      - 'telegram_ai_worker.py'
+      - 'test_nvidia_assistant.py'
       - 'views_comparison.py'
       - 'test_views_comparison.py'
       - 'test_film_duplicate_identity.py'

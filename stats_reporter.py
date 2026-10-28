@@ -781,3 +781,5 @@ if __name__ == "__main__":
     print(report)
     write_step_summary(report)
     notify(report)
+    from nvidia_assistant import send_daily_summary
+    send_daily_summary(report.comparison)

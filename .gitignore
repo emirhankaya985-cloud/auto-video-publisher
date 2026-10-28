@@ -35,3 +35,4 @@ telegram_auth*.json
 *.sqlite3
 *.db
 *.log
+ai-runtime/

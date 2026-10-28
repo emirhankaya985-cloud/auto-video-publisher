@@ -44,6 +44,9 @@ jobs:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          NVIDIA_AI_ENABLED: ${{ vars.NVIDIA_AI_ENABLED }}
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          NVIDIA_MODEL: ${{ vars.NVIDIA_MODEL || 'openai/gpt-oss-120b' }}
         run: python stats_reporter.py
       - name: Preserve Meta view history for the next report (no Drive OAuth)
         if: ${{ always() }}
