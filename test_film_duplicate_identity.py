@@ -51,6 +51,7 @@ class FilmDuplicateIdentityTests(unittest.TestCase):
         cases = [lambda e, r: r.clear(),
                  lambda e, r: r[0].update(id="999"),
                  lambda e, r: r[0].update(description="different caption"),
+                 lambda e, r: r[0].update(description={"invalid": "shape"}),
                  lambda e, r: e.update(status="uncertain"),
                  lambda e, r: e.update(day="2026-10-26"),
                  lambda e, r: e.update(route="film"),

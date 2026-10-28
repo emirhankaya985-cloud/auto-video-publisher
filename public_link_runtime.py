@@ -445,9 +445,12 @@ def verified_film_duplicate(item, route, platform, files, entries, history, fing
         if len(remote) != 1:
             continue
         row = remote[0]
+        remote_caption = row.get("description") or row.get("caption")
+        if not isinstance(remote_caption, str):
+            continue
         post_id, day = history_publication_match(route, row)
         if (day != prior.get("day") or not prior.get("caption_hash")
-                or caption_key(row.get("description") or row.get("caption")) != prior["caption_hash"]):
+                or caption_key(remote_caption) != prior["caption_hash"]):
             continue
         matches.append((prior_file, prior))
     # Multiple old confirmed sources for one part require explicit review.
