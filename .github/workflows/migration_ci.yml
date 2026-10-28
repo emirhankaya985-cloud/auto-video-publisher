@@ -11,6 +11,7 @@ on:
       - 'publisher_error_journal.py'
       - 'publisher_incident_report.py'
       - 'test_publication_resilience.py'
+      - 'test_film_duplicate_identity.py'
       - 'test_public_link_runtime.py'
       - 'test_publisher_recovery.py'
       - 'migration_985_tests.py'
