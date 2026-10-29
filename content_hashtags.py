@@ -24,7 +24,8 @@ GROUPS = [
     ('iş work office', 'İşHayatı'), ('aile family', 'AileMizahı'),
     ('absürt absurt absurd', 'AbsürtMizah'), ('ironi irony', 'İroni'),
     ('caps meme', 'Caps TürkçeCaps'), ('nostalji nostalgi', 'Nostalji'),
-    ('yoksul yeşilçam yesilcam', 'Yoksul Yoksul1986 Yeşilçam YeşilçamKlasikleri KlasikTürkFilmleri'),
+    ('yoksul', 'Yoksul Yoksul1986'),
+    ('yeşilçam yesilcam', 'Yeşilçam YeşilçamKlasikleri KlasikTürkFilmleri'),
     ('kemalsunal kemal_sunal', 'KemalSunal'), ('şenerşen sener_sen', 'ŞenerŞen'),
     ('ilyassalman ilyas_salman', 'İlyasSalman'), ('münirözkul munir_ozkul', 'MünirÖzkul'),
     ('adilenaşit adile_nasit', 'AdileNaşit'),
@@ -56,6 +57,10 @@ def selected_tags(caption, route, stem, platform):
     groups = ENGLISH_GROUPS if route == 'daily_laugh' else GROUPS
     topical = []
     for cues, tags in groups:
+        # A film title must come from its source filename, not a generic genre
+        # word, reused TXT, or a hashtag inherited from an older template.
+        if 'Yoksul' in tags.split() and not re.match(r'^yoksul(?:_|$)', normalized(stem)):
+            continue
         if any(t in tags.split() for t in ('Yoksul', 'KemalSunal', 'ŞenerŞen', 'İlyasSalman', 'MünirÖzkul', 'AdileNaşit')) and route not in {'film', 'film_second'}:
             continue
         if any(t in tags.split() for t in ('Mordecai', 'Rigby', 'Benson', 'Skips', 'Pops', 'MuscleMan', 'HiFiveGhost')) and route != 'toonzone':

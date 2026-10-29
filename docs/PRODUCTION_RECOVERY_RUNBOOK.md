@@ -336,3 +336,11 @@ izlenir; bu inceleme test amaçlı gerçek yayın tetiklemedi.
 - 622 Python testi, 57 fonksiyon kontrolü ve 15 Node testi geçti. Gerçek yerel FFmpeg sentetik 4s 1080p kaynağı 720x1280, 4.083719s, 1.310.466 bayta dönüştürdü; metadata, atom ve full-decode kontrolleri başarılı. Bu Meta upload/publish kanıtı değildir; test için dış yayın/bildirim gönderilmedi.
 - [#40864640363](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/40864640363) ToonZone 3/4 uyarısından sonra #40906373670 uzak geçmişi FB4/IG4 ve daily target complete kaydetti. Eski alarm güncel açık arıza olarak sayılmaz.
 - 167.mp4 gerçek IG post ID'si sonraki normal planlı koşumda doğrulanmalı. Başarılı FB postu yeniden gönderilmez, intent/state silinmez. Geri alma: ilgili commit'i geri al; mevcut kurtarma sayacı ve sonuç arşivlerini koru.
+
+## 29 Ekim 2026 — 167.mp4 kurtarma kanıtı ve film etiketi ayrımı
+
+- [#40916153838](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/40916153838), güncel 1ebb8de sürümü: 167.mp4 Instagram post ID `18010043736003632`, 19:57 TRT; toplam 5 post, 0 hata, 0 eski/yeni belirsiz intent. Telegram/ntfy 5'er server ACK. Önceki Facebook 167 sonucu tekrar edilmedi.
+- Aynı result ledger'ındaki publish_caption alanları etiketlerin gerçek yeni gönderilerde kullanıldığını doğruluyor: Tarladaki IG5, Daily Laugh FB9/IG5. Ancak Avanak Apti etiketlerine genel Yeşilçam kuralı yanlışlıkla Yoksul/Yoksul1986 da ekliyordu.
+- Film adı kuralı tür kuralından ayrıldı: Yoksul etiketi yalnız Yoksul kaynak dosya adıyla eşleşir; eski TXT/hashtagler başka filmde bunu tetiklemez. Kaydedilmiş intent açıklamaları değiştirilmez; yeni intentler düzeltilmiş seçimi kullanır. Eski canlı gönderilere bu turda yazım yapılmadı.
+- Son büyüme raporu #40766656150, 28 Ekim 23:49 TRT ölçümü: erişilebilir video sayaç toplamı 49.020.699; önceki snapshot'a göre +5.868. Bu takipçi artışı, etiket kaynaklı nedensel etki veya 29 Ekim anlık ölçümü değildir.
+- Regresyonlar genel Yeşilçam ve eski yanlış etiketlerin başka filme başlık taşımamasını ve doğru Yoksul dosyasının kendi etiketlerini korumasını sınar. Geri alma: ilgili commit'i geri al; yayın state arşivini koru.
