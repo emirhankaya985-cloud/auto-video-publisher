@@ -328,3 +328,11 @@ izlenir; bu inceleme test amaçlı gerçek yayın tetiklemedi.
   override'ına Nemotron'a özel alanlar eklenmez. API retry yoktur.
 - API anahtarının eklendiği henüz doğrulanmadı; canlı model yanıtı veya
   sürekli Telegram sohbeti başarılı diye raporlanamaz. Feature flag kapısı korunur.
+
+## 29 Ekim 2026 — Kısa Reels ilk deneme medya profili
+
+- [#40906373670](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/40906373670): Tarladaki `167.mp4` IG binary upload tüm 15.101.641 bayt sonrası HTTP400 ProcessingFailedError verdi. Facebook post ID `2132945614262874` dahil 6 gerçek paylaşım tamamlandı; yalnız IG ready ve retry_count=1. Meta'nın iç ret nedeni kanıtlanmadı; bitrate tek kesin neden olarak sunulmaz.
+- Önceki 1080p/4Mbps ilk normalizasyonu kısa Tarladaki/Penguen/Daily Laugh rotalarında 720x1280 H264 Main 2.5Mbps / AAC-LC 112k ile değiştirildi. Kaynak süre kesilmez; ilk denemede zorunlu re-encode ve tam decode kontrolü yapılır. Film, ToonZone ve Gönle profilleri değişmedi. Sonraki kontrollü 360p ve 720p/1.8Mbps kurtarma profilleri ayrı kalır; POST retry sayısı genişletilmedi.
+- 622 Python testi, 57 fonksiyon kontrolü ve 15 Node testi geçti. Gerçek yerel FFmpeg sentetik 4s 1080p kaynağı 720x1280, 4.083719s, 1.310.466 bayta dönüştürdü; metadata, atom ve full-decode kontrolleri başarılı. Bu Meta upload/publish kanıtı değildir; test için dış yayın/bildirim gönderilmedi.
+- [#40864640363](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/40864640363) ToonZone 3/4 uyarısından sonra #40906373670 uzak geçmişi FB4/IG4 ve daily target complete kaydetti. Eski alarm güncel açık arıza olarak sayılmaz.
+- 167.mp4 gerçek IG post ID'si sonraki normal planlı koşumda doğrulanmalı. Başarılı FB postu yeniden gönderilmez, intent/state silinmez. Geri alma: ilgili commit'i geri al; mevcut kurtarma sayacı ve sonuç arşivlerini koru.

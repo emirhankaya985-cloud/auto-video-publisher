@@ -471,5 +471,42 @@ class InstagramMediaCompatibilityTests(unittest.TestCase):
         self.assertIn("aac_low", command)
 
 
+class ShortReelFirstPassTests(unittest.TestCase):
+    def test_short_profile_reduces_size_without_duration_cut(self):
+        from instagram_media_compat import _transcode_vertical
+        with patch("instagram_media_compat.subprocess.run") as run:
+            _transcode_vertical(Path("source.mp4"), Path("out.mp4"), short_reel=True)
+        command = run.call_args.args[0]
+        self.assertIn("scale=720:1280", command[command.index("-vf") + 1])
+        self.assertEqual(command[command.index("-b:v") + 1], "2500k")
+        self.assertEqual(command[command.index("-profile:v") + 1], "main")
+        self.assertNotIn("-t", command)
+        self.assertNotIn("-ss", command)
+        self.assertEqual(run.call_args.kwargs["timeout"], 900)
+
+    def test_short_profile_forces_reencode_and_full_decode_on_compliant_source(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source, target = Path(tmp) / "source.mp4", Path(tmp) / "out.mp4"
+            source.write_bytes(b"source")
+            def encode(src, out, **options):
+                self.assertTrue(options["short_reel"])
+                out.write_bytes(b"new-bitstream")
+            with patch("instagram_media_compat.probe", return_value=supported_probe()), \
+                    patch("instagram_media_compat.mp4_atom_structure", return_value=ATOM_OK), \
+                    patch("instagram_media_compat._transcode_vertical", side_effect=encode) as transcode, \
+                    patch("instagram_media_compat.remux_mp4_faststart") as remux, \
+                    patch("instagram_media_compat.check_full_decode") as decode:
+                self.assertEqual(prepare_instagram_upload(source, target, prefer_remux=True, short_reel=True), target)
+                transcode.assert_called_once()
+                remux.assert_not_called()
+                decode.assert_called_once_with(target)
+
+    def test_first_pass_and_recovery_profiles_cannot_be_mixed(self):
+        for option in ("film_compact", "toonzone_compact", "recovery_v3"):
+            with self.subTest(option=option):
+                with self.assertRaises(ValueError):
+                    prepare_instagram_upload("unused.mp4", "unused-out.mp4", short_reel=True, **{option: True})
+
+
 if __name__ == "__main__":
     unittest.main()
