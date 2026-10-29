@@ -692,6 +692,7 @@ class LinkRuntimeSafety(unittest.TestCase):
                 self.assertEqual(first["status"], "ready")
                 self.assertEqual(first["prepublish_retry_count"], 1)
                 self.assertFalse(prepare.call_args.kwargs["film_compact"])
+                self.assertTrue(prepare.call_args.kwargs["short_reel"])
                 self.assertFalse(prepare.call_args.kwargs["prefer_remux"])
                 self.assertTrue(prepare.call_args.kwargs["force_transcode"])
                 ig.assert_called_once()
@@ -705,6 +706,7 @@ class LinkRuntimeSafety(unittest.TestCase):
                 self.assertEqual(second["status"], "done")
                 self.assertEqual(second["post_id"], "ig-post-confirmed")
                 self.assertTrue(prepare.call_args.kwargs["film_compact"])
+                self.assertFalse(prepare.call_args.kwargs["short_reel"])
                 self.assertEqual(ig.call_count, 1)
 
     def test_second_known_instagram_400_schedules_final_safe_profile(self):

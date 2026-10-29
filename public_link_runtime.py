@@ -1193,6 +1193,10 @@ def publish():
                     )
                     prepared_ig = prepare_instagram_upload(
                         video, temp / "instagram.mp4",
+                        # 29 Oct: 167.mp4 rejected after a 15 MB 1080p first
+                        # pass. Keep full duration; start short routes at 720p.
+                        short_reel=(retry_count == 0 and item["route"] in {
+                            "tarladaki", "penguen", "daily_laugh"}),
                         # 24-25 Oct: repeated Meta HTTP 400 ProcessingFailedError
                         # despite a valid faststart stream-copy remux. Re-encode
                         # short humour/Daily Reels to 30fps H.264 + AAC instead.

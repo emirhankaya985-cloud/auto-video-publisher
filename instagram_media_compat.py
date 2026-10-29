@@ -217,7 +217,7 @@ def compatibility_issues(media, size_bytes, moov_front=True, has_edit_list=False
     return issues
 
 
-def _transcode_vertical(source, output):
+def _transcode_vertical(source, output, *, short_reel=False):
     command = [
         "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
         "-i", str(source), "-map", "0:v:0", "-map", "0:a:0?",
@@ -237,6 +237,14 @@ def _transcode_vertical(source, output):
         "-flags", "+cgop", "-tag:v", "avc1",
         "-map_metadata", "-1", str(output),
     ]
+    if short_reel:
+        # First-pass short reels: retain the full duration, reduce dimensions
+        # and bitrate rather than sending the previously rejected 1080p/4M.
+        command[command.index("-vf") + 1] = "scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2:black,setsar=1"
+        for option, value in (("-profile:v", "main"), ("-level:v", "4.0"),
+                              ("-b:v", "2500k"), ("-maxrate", "3500k"),
+                              ("-bufsize", "5M"), ("-ar", "44100")):
+            command[command.index(option) + 1] = value
     try:
         subprocess.run(command, check=True, capture_output=True, text=True, timeout=900)
     except (OSError, subprocess.SubprocessError):
@@ -444,12 +452,16 @@ def _validate_remux_timing(source_media, output_media):
 def prepare_instagram_upload(
     source, converted_path, prefer_remux=False, film_compact=False,
     toonzone_compact=False, return_method=False, force_transcode=False,
-    recovery_v3=False,
+    recovery_v3=False, short_reel=False,
 ):
     """Return the original if compliant; otherwise convert and verify before upload."""
     source = Path(source)
     converted_path = Path(converted_path)
     compact_profile = film_compact or toonzone_compact
+    if short_reel and (compact_profile or recovery_v3):
+        raise ValueError("Short-Reel first pass cannot combine recovery profiles")
+    if short_reel:
+        force_transcode = True
     try:
         original_probe = probe(source)
         atoms = mp4_atom_structure(source)
@@ -526,6 +538,8 @@ def prepare_instagram_upload(
         _transcode_recovery_v3(source, converted_path)
     elif compact_profile:
         _transcode_film_compact(source, converted_path)
+    elif short_reel:
+        _transcode_vertical(source, converted_path, short_reel=True)
     else:
         _transcode_vertical(source, converted_path)
     try:
