@@ -5,6 +5,10 @@ on:
   pull_request:
     paths:
       - 'public_link_runtime.py'
+      - 'content_hashtags.py'
+      - 'test_content_hashtags.py'
+      - 'instagram_media_compat.py'
+      - 'test_instagram_media_compat.py'
       - 'publisher_recovery.py'
       - 'cloud_omnichannel_publisher.py'
       - 'meta_auth_loader.py'

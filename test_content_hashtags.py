@@ -26,3 +26,16 @@ class HashtagTests(unittest.TestCase):
         value = 'x'*2198
         self.assertEqual(prepare_caption(value, 'gonle', '1', 'instagram'), value)
         self.assertEqual(prepare_caption('original #tag', 'unknown', '1', 'instagram'), 'original #tag')
+
+class FilmTitleIsolationTests(unittest.TestCase):
+    def test_generic_yesilcam_does_not_invent_yoksul_title(self):
+        for platform in ('facebook', 'instagram'):
+            for caption in ('Yeşilçam Kemal Sunal', 'nostalji #Yoksul #Yoksul1986 #Yeşilçam'):
+                with self.subTest(platform=platform, caption=caption):
+                    tags = selected_tags(caption, 'film', 'Avanak_Apti_Part_10 (1)', platform)
+                    self.assertNotIn('#Yoksul', tags)
+                    self.assertNotIn('#Yoksul1986', tags)
+                    out = prepare_caption(caption, 'film', 'Avanak_Apti_Part_10 (1)', platform)
+                    self.assertNotIn('#Yoksul', out)
+    def test_yoksul_filename_keeps_its_own_title_tags(self):
+        self.assertIn('#Yoksul1986', selected_tags('Film sahnesi', 'film', 'Yoksul_1986_Part_1', 'instagram'))
