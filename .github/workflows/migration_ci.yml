@@ -4,6 +4,9 @@ on:
     branches: [main]
   pull_request:
     paths:
+      - 'meta_cross_engagement.py'
+      - 'test_meta_cross_engagement.py'
+      - '.github/workflows/meta_cross_engagement.yml'
       - 'public_link_runtime.py'
       - 'content_hashtags.py'
       - 'test_content_hashtags.py'
