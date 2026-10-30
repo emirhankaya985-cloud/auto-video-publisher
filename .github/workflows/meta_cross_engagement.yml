@@ -1,10 +1,10 @@
 name: Meta cross-account engagement
 on:
   schedule:
-    # Hourly Meta identity/content and permission audit (TRT, every hour).
+    # Hourly Meta identity/content and permission audit, at HH:07 TRT.
+    # Avoid top-of-hour GitHub Actions congestion; schedule can still be delayed.
     # Scheduled runs remain dry_run: never mass-like, save, or repost.
-    # GitHub Actions scheduled jobs may start late.
-    - cron: '0 * * * *'
+    - cron: '7 * * * *'
   push:
     branches: [main]
     # One owner-requested initial batch; unrelated pushes do not execute it.
