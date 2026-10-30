@@ -76,6 +76,88 @@ def caption_key(value):
     return hashlib.sha256(" ".join(value.split()).encode()).hexdigest()
 
 
+# Proven in production job logs and the 30 Oct GET-only diagnostic. Binding
+# includes the exact old intent, source and text hash; no heuristic association.
+_LEGACY_IG_CONTAINERS = {
+    ("film", "1Zn8kYmexuUe3z1EKLtCrKFCwj4qVnIa2"): (
+        "Avanak_Apti_Part_10 (1).mp4", "41036563337", "17904577569599675",
+        "d7bfd2238b0de47372e0536e61c79545049346aa56a7a75b0d5e707a342d1417",
+        "1239298989276639", "17841477990224124"),
+    ("toonzone", "1rdn35OLH8Sh4IAxSMTkErVxHLb2MX9Ic"): (
+        "S01E07_Grilled_Cheese_Deluxe_Part3.mp4", "41049898379", "17910279864580142",
+        "15e8f8d4715275c7ecaa8797b261a8ab4346853414f60aa6a54bf1385ff9e46e",
+        "1298191963387372", "17841477404255851"),
+}
+
+
+def bind_legacy_ig_container(route, platform, item, entry, page, *, allow_reserved=False):
+    proof = _LEGACY_IG_CONTAINERS.get((route, item["id"]))
+    if platform != "instagram" or not proof or entry.get("status") == "done":
+        return None
+    name, origin, container, cap_hash, page_id, ig_id = proof
+    binding = {"container_id": container, "origin_run_id": origin,
+               "caption_hash": cap_hash, "source_id": item["id"]}
+    prior = entry.get("failure", {})
+    valid = (item["name"] == name and entry.get("file") == name
+             and entry.get("route") == route and entry.get("platform") == platform
+             and entry.get("caption_hash") == cap_hash
+             and caption_key(entry.get("publish_caption")) == cap_hash
+             and str(page.get("page_id")) == page_id
+             and str(page.get("instagram_id")) == ig_id
+             and not entry.get("container_publish_attempted")
+             and ((entry.get("run_id") == origin
+                   and prior.get("stage") == "Instagram ikili video aktarımı"
+                   and prior.get("http_status") == 400)
+                  or (entry.get("container_resume") == binding
+                      and (entry.get("resume_no_publish_confirmed") is True
+                           or (allow_reserved and entry.get("status") == "intent"
+                               and entry.get("run_id") == os.getenv("GITHUB_RUN_ID"))))))
+    # Known containers can never fall back to another binary upload, even if
+    # the source/text proof becomes unavailable or a publish became ambiguous.
+    entry["status"] = "uncertain"
+    entry["failure"] = dict(prior, container_id=container, container_status="UNVERIFIED")
+    if not valid:
+        return None
+    entry["container_resume"] = binding
+    entry["failure"] = dict(prior, container_id=container, container_status="UNVERIFIED")
+    entry["status"] = "ready"
+    return container
+
+
+def publish_existing_ig_intent(item, page, state):
+    from cloud_omnichannel_publisher import resume_instagram_container
+    if item["platforms"] != ["instagram"]:
+        raise RuntimeError("Existing container recovery requires Instagram-only intent")
+    key = f"{item['route']}:instagram:{item['id']}"
+    entry = state["entries"][key]
+    container = item["resume_container_id"]
+    if entry.get("container_resume", {}).get("container_id") != container:
+        raise RuntimeError("Existing container intent mismatch")
+    # Re-check the complete immutable binding after the persisted plan.
+    check = dict(entry)
+    if bind_legacy_ig_container(item["route"], "instagram", item, check, page, allow_reserved=True) != container:
+        raise RuntimeError("Existing container proof changed")
+    entry["status"] = "uncertain"
+    save(STATE, state)
+    def reserve_publish():
+        entry["container_publish_attempted"] = True
+        entry.pop("resume_no_publish_confirmed", None)
+        save(STATE, state)
+    post = resume_instagram_container(page, container, reserve_publish)
+    if not post:
+        entry["resume_no_publish_confirmed"] = True
+        record_error("previous_intent_hold", "unreconciled_previous_intent",
+                     route=item["route"], platform="instagram", video=item["name"], status="uncertain")
+        save(STATE, state)
+        return False
+    entry.update(status="done", post_id=str(post))
+    entry.pop("failure", None)
+    save(STATE, state)
+    print(json.dumps({"page": item["page"], "file": item["name"], "platform": "instagram",
+                      "post_id": str(post), "reused_container": container}, ensure_ascii=False), flush=True)
+    return True
+
+
 def github_get(path):
     repo = os.environ["GITHUB_REPOSITORY"]
     response = read_with_retry(
@@ -912,6 +994,8 @@ def plan(audit=False):
                                 report.append("HELD: remote caption matches but source identity is unverified.")
                                 held = True
                     continue
+                if not audit:
+                    bind_legacy_ig_container(route, p, item, existing, page)
                 # Historical compact IG uploads that failed *before*
                 # media_publish were incorrectly treated as uncertain forever.
                 # Reclassify only exact, persisted pre-publish HTTP400 evidence,
@@ -1006,6 +1090,12 @@ def plan(audit=False):
                 if not state["entries"].get(f"{route}:{p}:{item['id']}"):
                     captions[p] = prepare_caption(captions[p], route, Path(item["name"]).stem, p)
             selected = dict(item, route=route, page=page_name, platforms=pending, captions=captions, caption_source=origin)
+            ig_entry = state["entries"].get(f"{route}:instagram:{item['id']}", {})
+            if "instagram" in pending and ig_entry.get("container_resume"):
+                if pending != ["instagram"]:
+                    report.append("HELD: existing container requires isolated Instagram recovery.")
+                    continue
+                selected["resume_container_id"] = ig_entry["container_resume"]["container_id"]
             if "instagram" in pending:
                 _, selected_tags = enhance_instagram_caption(captions["instagram"], route, Path(item["name"]).stem)
                 if selected_tags:
@@ -1035,6 +1125,7 @@ def plan(audit=False):
             if not audit:
                 for p in pending:
                     key = f"{route}:{p}:{item['id']}"
+                    old_resume = state["entries"].get(key, {}).get("container_resume")
                     old_attempts = state["entries"].get(key, {}).get("prepublish_retry_count", 0)
                     state["entries"][key] = {
                         "route": route, "platform": p, "status": "intent",
@@ -1043,6 +1134,8 @@ def plan(audit=False):
                         "day": clock.date().isoformat(), "run_id": os.environ["GITHUB_RUN_ID"],
                         "prepublish_retry_count": old_attempts,
                     }
+                    if p == "instagram" and old_resume:
+                        state["entries"][key]["container_resume"] = old_resume
                 plans.append(selected)
                 for p in pending:
                     planned_counts[(route, p)] = planned_counts.get((route, p), 0) + 1
@@ -1160,6 +1253,16 @@ def publish():
         if not item["platforms"]:
             continue
         page = pages[item["page"]]
+        if item.get("resume_container_id"):
+            try:
+                if not publish_existing_ig_intent(item, page, state):
+                    failures.append(item["page"] + " instagram: existing container not FINISHED")
+            except Exception as exc:
+                failures.append(item["page"] + " instagram: existing container reconciliation " + type(exc).__name__)
+                record_error("instagram_publish", "existing_container_reconciliation_failed",
+                             route=item["route"], platform="instagram", video=item["name"], error=exc)
+                save(STATE, state)
+            continue
         with tempfile.TemporaryDirectory() as tmp:
             temp = Path(tmp)
             try:

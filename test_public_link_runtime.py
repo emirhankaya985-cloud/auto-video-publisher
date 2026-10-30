@@ -108,6 +108,115 @@ class LinkRuntimeSafety(unittest.TestCase):
             self.assertIn("#CR7", captions["instagram"])
             self.assertNotIn("@cristiano", captions["facebook"])
 
+    def legacy_container_fixture(self):
+        route, source = "toonzone", "1rdn35OLH8Sh4IAxSMTkErVxHLb2MX9Ic"
+        proof = list(runtime._LEGACY_IG_CONTAINERS[(route, source)])
+        caption = "exact prior intent text"
+        proof[3] = runtime.caption_key(caption)
+        item = {"route": route, "id": source, "name": proof[0], "page": "ToonZone",
+                "platforms": ["instagram"], "captions": {"instagram": caption}}
+        entry = {"route": route, "platform": "instagram", "file": proof[0],
+                 "run_id": proof[1], "status": "ready", "caption_hash": proof[3],
+                 "publish_caption": caption,
+                 "failure": {"stage": "Instagram ikili video aktarımı", "http_status": 400}}
+        page = {"page_id": proof[4], "instagram_id": proof[5], "page_token": "test"}
+        return item, entry, page, tuple(proof)
+
+    def test_legacy_container_requires_exact_source_text_run_and_account(self):
+        item, entry, page, proof = self.legacy_container_fixture()
+        with patch.dict(runtime._LEGACY_IG_CONTAINERS, {(item["route"], item["id"]): proof}):
+            import copy
+            for field, value in (("run_id", "other"), ("file", "other.mp4"),
+                                 ("publish_caption", "changed"), ("caption_hash", "wrong"),
+                                 ("container_publish_attempted", True)):
+                e = copy.deepcopy(entry); e[field] = value
+                self.assertIsNone(runtime.bind_legacy_ig_container("toonzone", "instagram", item, e, page))
+                self.assertEqual(e["status"], "uncertain")
+                self.assertEqual(e["failure"]["container_status"], "UNVERIFIED")
+            self.assertIsNone(runtime.bind_legacy_ig_container("toonzone", "instagram", item,
+                              copy.deepcopy(entry), dict(page, instagram_id="wrong")))
+            self.assertEqual(runtime.bind_legacy_ig_container("toonzone", "instagram", item, entry, page), proof[2])
+
+    def test_planner_archives_exact_existing_container_without_reupload_plan(self):
+        route, source = "film", "1Zn8kYmexuUe3z1EKLtCrKFCwj4qVnIa2"
+        proof=list(runtime._LEGACY_IG_CONTAINERS[(route, source)])
+        caption="test original caption"; proof[3]=runtime.caption_key(caption)
+        entry={"route": route, "platform": "instagram", "file": proof[0], "run_id": proof[1],
+               "status": "uncertain", "prepublish_retry_count": 2, "caption_hash": proof[3],
+               "publish_caption": caption, "failure": {"stage": "Instagram ikili video aktarımı", "http_status": 400}}
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            with patch.dict(os.environ, {"GITHUB_STEP_SUMMARY":str(root/"summary"), "GITHUB_RUN_ID":"500"}), \
+                 patch.dict(runtime._LEGACY_IG_CONTAINERS, {(route,source):tuple(proof)}), \
+                 patch.object(runtime,"ROOT",root), patch.object(runtime,"STATE",root/"state.json"), \
+                 patch.object(runtime,"PLAN",root/"plan.json"), \
+                 patch.object(runtime,"FOLDERS",{"film":"folder"}), \
+                 patch.object(runtime,"ROUTES",{"film":("film","Film Mağarası")}), \
+                 patch.object(runtime,"restore",return_value={"schema":1,"episode_days":{},"entries":{f"film:instagram:{source}":entry}}), \
+                 patch.object(runtime,"apply_verified_migration"), \
+                 patch.object(runtime,"load_meta_auth",return_value={"pages":[{"page_name":"Film Mağarası","page_id":proof[4],"instagram_id":proof[5]}]}), \
+                 patch.object(runtime,"inventory",return_value={proof[0]:{"name":proof[0],"id":source}}), \
+                 patch.object(runtime,"graph_rows",return_value=[]), \
+                 patch.object(runtime,"target_count",return_value=1), \
+                 patch.object(runtime,"seed_done",side_effect=lambda r,p,n:p=="facebook"), \
+                 patch.object(runtime,"copies",return_value=({"facebook":"FB", "instagram":caption},"matching-txt")):
+                runtime.plan()
+            plans=json.loads((root/"plan.json").read_text())
+            ledger=json.loads((root/"state.json").read_text())
+            self.assertEqual(len(plans),1)
+            self.assertEqual(plans[0]["platforms"],["instagram"])
+            self.assertEqual(plans[0]["resume_container_id"],proof[2])
+            saved=ledger["entries"][f"film:instagram:{source}"]
+            self.assertEqual(saved["container_resume"]["origin_run_id"],proof[1])
+            self.assertEqual(saved["run_id"],"500")
+            self.assertNotIn("resume_no_publish_confirmed",saved)
+
+    def test_archived_resume_intent_cannot_rearm_ambiguous_publish(self):
+        item, entry, page, proof = self.legacy_container_fixture()
+        with patch.dict(runtime._LEGACY_IG_CONTAINERS, {(item["route"], item["id"]): proof}):
+            runtime.bind_legacy_ig_container("toonzone", "instagram", item, entry, page)
+            entry.update(run_id="new", status="intent")
+            self.assertIsNone(runtime.bind_legacy_ig_container("toonzone", "instagram", item, entry, page))
+            entry["resume_no_publish_confirmed"] = True
+            self.assertEqual(runtime.bind_legacy_ig_container("toonzone", "instagram", item, entry, page), proof[2])
+
+    def test_existing_container_publish_records_write_marker_and_never_downloads(self):
+        item, entry, page, proof = self.legacy_container_fixture()
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"GITHUB_RUN_ID": "new"}), \
+             patch.dict(runtime._LEGACY_IG_CONTAINERS, {(item["route"], item["id"]): proof}), \
+             patch.object(runtime, "STATE", Path(tmp)/"state.json"), \
+             patch.object(runtime, "download") as download:
+            runtime.bind_legacy_ig_container("toonzone", "instagram", item, entry, page)
+            entry.update(status="intent", run_id="new")
+            item["resume_container_id"] = proof[2]
+            key = f"toonzone:instagram:{item['id']}"
+            state = {"entries": {key: entry}}
+            def resume(p, cid, before):
+                before()
+                saved = json.loads(runtime.STATE.read_text())["entries"][key]
+                self.assertTrue(saved["container_publish_attempted"])
+                self.assertEqual(saved["status"], "uncertain")
+                return "confirmed-media"
+            with patch("cloud_omnichannel_publisher.resume_instagram_container", side_effect=resume):
+                self.assertTrue(runtime.publish_existing_ig_intent(item, page, state))
+            download.assert_not_called()
+            self.assertEqual(state["entries"][key]["post_id"], "confirmed-media")
+
+    def test_existing_container_not_finished_persists_proven_no_publish(self):
+        item, entry, page, proof = self.legacy_container_fixture()
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"GITHUB_RUN_ID": "new"}), \
+             patch.dict(runtime._LEGACY_IG_CONTAINERS, {(item["route"], item["id"]): proof}), \
+             patch.object(runtime, "STATE", Path(tmp)/"state.json"), \
+             patch.object(runtime, "record_error"), \
+             patch("cloud_omnichannel_publisher.resume_instagram_container", return_value=None):
+            runtime.bind_legacy_ig_container("toonzone", "instagram", item, entry, page)
+            entry.update(status="intent", run_id="new")
+            item["resume_container_id"] = proof[2]
+            state = {"entries": {f"toonzone:instagram:{item['id']}": entry}}
+            self.assertFalse(runtime.publish_existing_ig_intent(item, page, state))
+            self.assertTrue(entry["resume_no_publish_confirmed"])
+            self.assertNotIn("container_publish_attempted", entry)
+
     def test_drive_download_retries_transient_url_error_and_removes_partial(self):
         with tempfile.TemporaryDirectory() as d:
             dest = Path(d) / "video.mp4"

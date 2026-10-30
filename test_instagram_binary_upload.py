@@ -14,6 +14,32 @@ from cloud_omnichannel_publisher import (
 
 
 class InstagramBinaryUploadTests(unittest.TestCase):
+    def test_resume_existing_container_only_publishes_finished_with_reserved_marker(self):
+        from cloud_omnichannel_publisher import resume_instagram_container
+        page = {"instagram_id": "123", "page_token": "test"}
+        response = Mock(status_code=200); response.json.return_value = {"id": "456", "status_code": "FINISHED"}
+        events=[]
+        with patch("cloud_omnichannel_publisher.requests.get", return_value=response), \
+             patch("cloud_omnichannel_publisher._publish_instagram_container", side_effect=lambda *a: events.append("publish") or "789"), \
+             patch("cloud_omnichannel_publisher._upload_instagram_binary") as binary:
+            self.assertEqual(resume_instagram_container(page, "456", lambda: events.append("reserve")), "789")
+            self.assertEqual(events, ["reserve", "publish"])
+            binary.assert_not_called()
+
+    def test_resume_existing_container_never_publishes_other_status_or_identity(self):
+        from cloud_omnichannel_publisher import resume_instagram_container
+        page = {"instagram_id": "123", "page_token": "test"}
+        for status in ("IN_PROGRESS", "ERROR", "EXPIRED", "PUBLISHED", "unknown"):
+            response = Mock(status_code=200); response.json.return_value = {"id": "456", "status_code": status}
+            with patch("cloud_omnichannel_publisher.requests.get", return_value=response), \
+                 patch("cloud_omnichannel_publisher._publish_instagram_container") as publish:
+                reserve=Mock()
+                self.assertIsNone(resume_instagram_container(page, "456", reserve))
+                reserve.assert_not_called(); publish.assert_not_called()
+        response.json.return_value = {"id": "wrong", "status_code": "FINISHED"}
+        with patch("cloud_omnichannel_publisher.requests.get", return_value=response), self.assertRaises(RuntimeError):
+            resume_instagram_container(page, "456", Mock())
+
     def test_curl_streams_video_and_keeps_token_out_of_argv(self):
         token = "EAAtestSecret123"
         with tempfile.NamedTemporaryFile() as video:

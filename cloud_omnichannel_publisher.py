@@ -790,6 +790,32 @@ def upload_instagram_reel(
         )
         return {"container_id": container_id, "status": "FINISHED", "published": False}
 
+    return _publish_instagram_container(page, container_id)
+
+
+def resume_instagram_container(page, container_id, before_publish):
+    """GET an existing container; issue its first publish only after FINISHED.
+
+    The caller must supply persisted source/intent proof and reserve the write
+    durably in before_publish. No container creation or binary transfer occurs.
+    """
+    if not str(container_id).isdecimal():
+        raise ValueError("Invalid existing Instagram container")
+    status = _graph_json(read_with_retry(
+        requests.get, f"https://graph.facebook.com/{GRAPH_API_VERSION}/{container_id}",
+        params={"fields": "status_code,status", "access_token": page["page_token"]},
+        timeout=30, graph_read=True, sleep=time.sleep,
+    ), "Instagram mevcut container kontrolü")
+    if str(status.get("id", container_id)) != str(container_id):
+        raise RuntimeError("Instagram container identity mismatch")
+    if status.get("status_code") != "FINISHED":
+        return None
+    before_publish()
+    return _publish_instagram_container(page, container_id)
+
+
+def _publish_instagram_container(page, container_id):
+    ig_user_id, page_token = page["instagram_id"], page["page_token"]
     pub_url = f"https://graph.facebook.com/{GRAPH_API_VERSION}/{ig_user_id}/media_publish"
     print(f"Instagram media_publish başlatılıyor: container={container_id}.", flush=True)
     pub_res = _graph_json(
