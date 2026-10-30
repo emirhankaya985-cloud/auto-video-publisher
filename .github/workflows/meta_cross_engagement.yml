@@ -68,7 +68,8 @@ jobs:
       META_NEW_ROUTES_RIGHTS_APPROVED: ${{ vars.META_NEW_ROUTES_RIGHTS_APPROVED }}
       META_CROSS_ENGAGEMENT_ENABLED: ${{ vars.META_CROSS_ENGAGEMENT_ENABLED || 'true' }}
       META_CROSS_REPOST_ENABLED: 'false'
-      ENGAGEMENT_MODE: ${{ inputs.mode || (github.event_name == 'push' && 'dry_run' || 'apply') }}
+      # Scheduled and push runs are audit-only; explicit workflow_dispatch apply is needed for writes.
+      ENGAGEMENT_MODE: ${{ inputs.mode || 'dry_run' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
