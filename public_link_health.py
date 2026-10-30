@@ -13,6 +13,7 @@ import requests
 
 from ntfy_notifications import send_ntfy
 from telegram_notifications import send_telegram, telegram_configured
+import publisher_alert_history as alert_history
 
 EXPECTED_REPO = "emirhankaya985-cloud/auto-video-publisher"
 WORKFLOW = "public_link_schedule.yml"
@@ -65,11 +66,13 @@ def check_publisher(*, now=None, token=None, get=requests.get):
         completed = [r for _, r in recent if r.get("status") == "completed"]
         if len(completed) >= 2 and all(r.get("conclusion") == "failure" for r in completed[:2]):
             return {"status": "unhealthy", "reason": "consecutive_failures",
-                    "recent_runs": len(recent)}
+                    "recent_runs": len(recent),
+                    "failed_run_ids": [str(r["id"]) for r in completed[:2] if str(r.get("id", "")).isdigit()]}
         if not any(r.get("status") == "completed" and r.get("conclusion") == "success"
                    for _, r in recent):
             return {"status": "unhealthy", "reason": "no_recent_success",
-                    "recent_runs": len(recent)}
+                    "recent_runs": len(recent),
+                    "failed_run_ids": [str(r["id"]) for r in completed if r.get("conclusion")=="failure" and str(r.get("id", "")).isdigit()]}
         return {"status": "healthy", "recent_runs": len(recent)}
     except requests.RequestException:
         return {"status": "unknown", "reason": "github_request_failed"}
@@ -89,6 +92,13 @@ def main():
                          f"- This is an Actions health check, not proof of individual published posts.\n")
     if verdict["status"] == "healthy":
         return 0
+    if os.getenv("CORRELATE_PUBLISHER_ALERTS")=="true" and verdict.get("failed_run_ids"):
+        try:
+            if alert_history.covered(alert_history.restore(),run_ids=verdict["failed_run_ids"]):
+                print('{"notification":"duplicate_health_alert_suppressed","health":"unhealthy","reason":"publisher_incident_already_acknowledged"}',flush=True)
+                return 1
+        except Exception:
+            print('{"correlation":"unavailable","new_health_alert_preserved":true}',flush=True)
     title = "🚨 985 Meta video yayıncısı kontrolü"
     message = ("985 hesabındaki otomatik Meta yayınlarının son 3 saatte "
                "başarıyla tamamlandığı doğrulanamadı. "

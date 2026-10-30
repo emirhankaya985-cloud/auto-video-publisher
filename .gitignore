@@ -36,3 +36,6 @@ telegram_auth*.json
 *.db
 *.log
 ai-runtime/
+
+# Runtime-only deadline verdict (preserved by Actions artifacts)
+target-verdict.json

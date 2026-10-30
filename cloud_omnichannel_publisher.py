@@ -690,32 +690,59 @@ def upload_instagram_reel(
         f"upload_host={urlsplit(upload_uri).hostname}; publish={'enabled' if publish else 'disabled'}.",
         flush=True,
     )
-    binary_result = _upload_instagram_binary(upload_uri, page_token, video_path, file_size)
-    print(
-        f"Instagram binary upload kabul edildi: container={container_id}; "
-        f"http={binary_result.get('_http_status')}; bytes={binary_result.get('_uploaded_bytes')}/{file_size}; "
-        f"elapsed_seconds={time.monotonic() - started:.1f}.",
-        flush=True,
-    )
+    binary_error = None
+    try:
+        binary_result = _upload_instagram_binary(upload_uri, page_token, video_path, file_size)
+    except MetaAPIError as exc:
+        # A full binary transfer can return a processing rejection while the
+        # container still has an asynchronous outcome. Read that SAME container;
+        # never resend bytes or create a replacement container here.
+        if (exc.http_status != 400 or exc.stage != "Instagram ikili video aktarımı"
+                or exc.code not in (None, 100, -1) or not str(container_id).isdecimal()
+                or (exc.code == -1 and exc.subcode not in (2207001, 2207053))
+                or getattr(exc, "uploaded_bytes", None) != file_size
+                or getattr(exc, "upload_bytes", None) != file_size):
+            raise
+        binary_error = exc
+        exc.container_id = str(container_id)
+        print(f"Instagram binary HTTP400: container={container_id}; "
+              "aynı container salt-okunur kontrol ediliyor; yeniden yükleme yok.", flush=True)
+    if binary_error is None:
+        print(
+            f"Instagram binary upload kabul edildi: container={container_id}; "
+            f"http={binary_result.get('_http_status')}; bytes={binary_result.get('_uploaded_bytes')}/{file_size}; "
+            f"elapsed_seconds={time.monotonic() - started:.1f}.",
+            flush=True,
+        )
     
     status_url = f"https://graph.facebook.com/{GRAPH_API_VERSION}/{container_id}"
     for poll_count in range(1, 31):
         time.sleep(5)
-        status_payload = _graph_json(
-            read_with_retry(requests.get,
-                status_url,
-                params={
+        try:
+            status_payload = _graph_json(
+                read_with_retry(requests.get,
+                    status_url,
+                    params={
                     # A resumable IG container exposes status only here.
                     # Requesting error details (including ``error`` itself)
                     # causes Graph #100 before media_publish can run.
-                    "fields": "status_code,status",
-                    "access_token": page_token,
-                },
-                timeout=30, graph_read=True, sleep=time.sleep,
-            ),
-            "Instagram video işleme durumu",
-        )
+                        "fields": "status_code,status",
+                        "access_token": page_token,
+                    },
+                    timeout=30, graph_read=True, sleep=time.sleep,
+                ),
+                "Instagram video işleme durumu",
+            )
+            if str(status_payload.get("id", container_id)) != str(container_id):
+                raise RuntimeError("Instagram container kimliği değişti; yayın durduruldu.")
+        except Exception:
+            if binary_error is not None:
+                binary_error.container_status = "UNVERIFIED"
+                raise binary_error from None
+            raise
         st = status_payload.get("status_code") or status_payload.get("status")
+        if binary_error is not None:
+            binary_error.container_status = st if st in {"FINISHED", "ERROR", "EXPIRED", "IN_PROGRESS", "PUBLISHED"} else "UNVERIFIED"
         if st == "FINISHED":
             print(
                 f"Instagram container işlendi: container={container_id}; "
@@ -731,7 +758,9 @@ def upload_instagram_reel(
                 f"elapsed_seconds={time.monotonic() - started:.1f}.",
                 flush=True,
             )
-            raise MetaAPIError(
+            if binary_error is not None:
+                raise binary_error
+            error = MetaAPIError(
                 "Instagram video işleme durumu",
                 400,
                 message=(
@@ -741,8 +770,16 @@ def upload_instagram_reel(
                 code=status_payload.get("code"),
                 subcode=status_payload.get("subcode"),
             )
+            error.container_id, error.container_status = str(container_id), "ERROR"
+            raise error
+        elif st in {"EXPIRED", "PUBLISHED"}:
+            if binary_error is not None:
+                raise binary_error
+            raise RuntimeError("Instagram container yeniden yayımlanamaz veya süresi dolmuş.")
             
     else:
+        if binary_error is not None:
+            raise binary_error
         raise RuntimeError("Instagram video işleme zaman aşımı.")
 
     if not publish:

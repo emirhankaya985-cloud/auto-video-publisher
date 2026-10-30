@@ -1,12 +1,15 @@
 """Read-only status check for known rejected IG resumable upload containers."""
 import json
 import os
+import re
 from pathlib import Path
 import requests
 
 PINNED = {
  "film_part16": ("1239298989276639", "17841477990224124", "17903621700599675"),
  "toonzone_part3": ("1298191963387372", "17841477404255851", "17909360826580142"),
+ "film_avanak_part10_oct30": ("1239298989276639", "17841477990224124", "17904577569599675"),
+ "toonzone_s01e07_part3_oct30": ("1298191963387372", "17841477404255851", "17910279864580142"),
 }
 STATES = frozenset(("IN_PROGRESS", "FINISHED", "PUBLISHED", "ERROR", "EXPIRED"))
 
@@ -36,8 +39,20 @@ def inspect(pages, key, get=None):
         state = data.get("status_code")
         if state not in STATES:
             return {**result, "status": "UNVERIFIED", "reason": "unknown_meta_status"}
+        detail = str(data.get("status") or "").lower()
+        # Only fixed categories / documented numeric error codes; never emit
+        # raw provider status text, tokens or signed source URLs.
+        categories = [key for key, words in {
+            "duration": ("duration", "too long", "too short"),
+            "codec": ("codec", "h264", "h.264", "aac"),
+            "dimensions": ("dimension", "aspect ratio", "resolution"),
+            "copyright_or_policy": ("copyright", "policy", "rights"),
+            "processing": ("processing", "process failed"),
+        }.items() if any(word in detail for word in words)]
+        codes = sorted(set(re.findall(r"\b2207\d{3}\b", detail)))
         return {**result, "status": state,
                 "status_detail_present": bool(data.get("status")),
+                "detail_categories": categories, "detail_codes": codes,
                 "instruction": "do_not_reupload_or_publish"}
     except (requests.RequestException, ValueError, TypeError):
         return {**result, "status": "UNVERIFIED", "reason": "read_failure"}

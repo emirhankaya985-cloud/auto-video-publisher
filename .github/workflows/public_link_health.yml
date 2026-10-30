@@ -30,6 +30,7 @@ jobs:
       - name: Verify scheduled Meta runs and alert on persistent failure
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          CORRELATE_PUBLISHER_ALERTS: true
           NTFY_TOPIC_URL: ${{ secrets.NTFY_TOPIC_URL }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}

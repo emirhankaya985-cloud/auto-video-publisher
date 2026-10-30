@@ -20,3 +20,8 @@ Re-check the two *existing* containers at the user's request. This exact marker 
 ## 26 October pre-recovery GET
 
 Recheck the existing exact IG container IDs before the one-time 720p/96kbps rescue. This is read-only, cannot publish, and will not alter old intents. Treat IN_PROGRESS as nonfinal; never claim it is a confirmed Reel.
+
+30 October 2026: read-only GET of the audited Film Avanak Apti Part 10 and
+ToonZone S01E07 Part 3 containers, alongside the two old pinned containers.
+No upload, media_publish, token change or queue edit. Output only fixed
+classification labels and numeric error codes, never raw provider status text.

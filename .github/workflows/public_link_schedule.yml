@@ -125,13 +125,14 @@ jobs:
           path: link-runtime/report.md
           if-no-files-found: ignore
           retention-days: 30
-      - name: Per-post Telegram and ntfy notifications plus failure alerts (no uploads)
+      - name: Per-post Telegram and ntfy notification preparation (no sends)
         # A failed notification must never retry or reclassify a Meta publication.
         # A missing required delivery channel makes the WORKFLOW fail, never
         # reruns the successful Meta upload; later always() artifacts remain.
         if: ${{ always() && steps.release_gate.outputs.publish_allowed == 'true' }}
-        id: notify
+        id: notify_plan
         env:
+          PUBLISH_ALERT_MODE: prepare
           REQUIRE_DUAL_NOTIFICATIONS: 'true'
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -141,6 +142,34 @@ jobs:
           PLAN_STEP_OUTCOME: ${{ steps.plan.outcome }}
           PUBLISH_STEP_OUTCOME: ${{ steps.publish.outcome }}
         run: python telegram_publish_report.py
+      - name: Persist notification intent before sending messages
+        id: notify_intent
+        if: ${{ always() && steps.notify_plan.outcome == 'success' && steps.notify_plan.outputs.alert_archive_needed == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: link-alert-intent
+          path: link-runtime/alert-history.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Send reserved notifications once (no video uploads)
+        id: notify
+        if: ${{ always() && steps.release_gate.outputs.publish_allowed == 'true' && steps.notify_plan.outcome == 'success' && (steps.notify_plan.outputs.alert_archive_needed != 'true' || steps.notify_intent.outcome == 'success') }}
+        env:
+          PUBLISH_ALERT_MODE: send
+          ALERT_INTENT_ARCHIVED: ${{ steps.notify_intent.outcome == 'success' && 'true' || 'false' }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          NTFY_TOPIC_URL: ${{ secrets.NTFY_TOPIC_URL }}
+        run: python telegram_publish_report.py
+      - name: Preserve notification results and server acknowledgements
+        if: ${{ always() && steps.notify_plan.outputs.alert_archive_needed == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: link-alert-result
+          path: link-runtime/alert-history.json
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Generate final per-run incident and recovery ledger (no API writes)
         if: always()
         # Evidence anomalies must fail the run, while subsequent always() steps
@@ -150,7 +179,7 @@ jobs:
           OUTCOME_VERIFY: ${{ steps.verify.outcome }}
           OUTCOME_PLAN: ${{ steps.plan.outcome }}
           OUTCOME_PUBLISH: ${{ steps.publish.outcome }}
-          OUTCOME_NOTIFY: ${{ steps.notify.outcome }}
+          OUTCOME_NOTIFY: ${{ (steps.notify_plan.outcome == 'failure' || steps.notify_intent.outcome == 'failure' || steps.notify.outcome == 'failure') && 'failure' || steps.notify.outcome }}
         run: python publisher_incident_report.py
       - name: Preserve final incident report including notification failures
         if: always()

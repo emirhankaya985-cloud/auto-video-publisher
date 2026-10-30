@@ -114,7 +114,7 @@ class LinkRuntimeSafety(unittest.TestCase):
             tries = []
 
             def fake_drive(**kwargs):
-                tries.append(1)
+                tries.append(kwargs["use_cookies"])
                 if len(tries) == 1:
                     dest.write_bytes(b"incomplete")
                     raise RuntimeError("FileURLRetrievalError https://secret.private/link")
@@ -126,8 +126,8 @@ class LinkRuntimeSafety(unittest.TestCase):
                     patch.object(runtime.time, "sleep") as sleeping:
                 self.assertEqual(runtime.download("id", dest), dest)
             self.assertEqual(dest.read_bytes(), b"good mp4 data")
-            self.assertEqual(len(tries), 2)
-            sleeping.assert_called_once_with(1)
+            self.assertEqual(tries, [True, False])
+            sleeping.assert_called_once_with(2)
 
     def test_drive_download_does_not_accept_partial_or_empty_files(self):
         with tempfile.TemporaryDirectory() as d:
