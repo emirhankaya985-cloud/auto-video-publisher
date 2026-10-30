@@ -78,3 +78,18 @@ kesinlikle POST yapılmamış preflight kayıtları yalnız bir kez version=2 il
 yeniden değerlendirilebilir; belirsiz/başarılı POST kayıtları açılamaz.
 
 [Meta Video referansı: id ve from](https://developers.facebook.com/docs/graph-api/reference/video/)
+
+## Canlı sonuç ve güncel paylaşım engeli
+
+İlk gerçek batch: [#41045806381](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/41045806381).
+7 Facebook sayfasında 91 tekil paylaşım ID'si kabul edildi; 119 ret (113 Graph368,
+6 Graph200) kaydedildi. Bu, beğeni/kaydetme/Instagram repost başarısı değildir.
+
+368 geldiğinde ilgili platform/işlem bütün aktörlerde durur. Önceki 368 kayıtları
+da kalıcı `provider_holds` durumuna geçirilir; yeni gün/run veya 48 saatlik action
+budaması hold'u sıfırlamaz. Günlük 13:00 kontrolü devam eder, ancak Facebook
+paylaşım POST'ları bu hold sürerken engellenir. Meta tarafındaki kısıtlama
+çözüldüğü doğrulandıktan sonra ayrı ve açık bir bakım işlemiyle değerlendirilmeli;
+bekleme, yeni token veya başka aktörle otomatik aşma yoktur.
+
+[Meta hata yönetimi: 368](https://developers.facebook.com/docs/graph-api/guides/error-handling/)
