@@ -825,7 +825,7 @@ class LinkRuntimeSafety(unittest.TestCase):
             self.assertEqual(record["prepublish_retry_count"], 2)
             self.assertFalse(record["failure"]["safe_to_repost"])
 
-    def test_film_recovery_upload_prepares_distinct_noncompact_bitstream(self):
+    def test_film_recovery_upload_uses_bounded_720p_profile(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             state_path, plan_path = root / "state.json", root / "plan.json"
@@ -854,6 +854,7 @@ class LinkRuntimeSafety(unittest.TestCase):
             self.assertTrue(prepare.call_args.kwargs["force_transcode"])
             self.assertFalse(prepare.call_args.kwargs["film_compact"])
             self.assertFalse(prepare.call_args.kwargs["toonzone_compact"])
+            self.assertTrue(prepare.call_args.kwargs["recovery_v3"])
             self.assertEqual(json.loads(state_path.read_text())["entries"][
                 "film:instagram:vid"]["status"], "done")
             ig.assert_called_once()

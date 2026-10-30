@@ -546,6 +546,30 @@ def audited_ig_v4_eligible(route, platform, name, entry):
             and fail.get("graph_code") in (None, 100))
 
 
+def audited_avanak_part10_recovery_eligible(route, platform, item, entry):
+    """One 720p recovery for the audited 30 Oct rejected 1080p upload.
+
+    The planner must also reconcile remote history and the saved caption.
+    This exact binary-stage rejection never reached media_publish.
+    """
+    if (route != "film" or platform != "instagram"
+            or item.get("id") != "1Zn8kYmexuUe3z1EKLtCrKFCwj4qVnIa2"
+            or item.get("name") != "Avanak_Apti_Part_10 (1).mp4"
+            or not isinstance(entry, dict)):
+        return False
+    failure = entry.get("failure")
+    return (entry.get("status") == "uncertain"
+            and type(entry.get("prepublish_retry_count")) is int
+            and entry["prepublish_retry_count"] == 1
+            and str(entry.get("run_id", "")) == "41029613650"
+            and isinstance(failure, dict)
+            and failure.get("stage") == "Instagram ikili video aktarımı"
+            and type(failure.get("http_status")) is int
+            and failure["http_status"] == 400
+            and failure.get("graph_code") is None
+            and failure.get("graph_subcode") is None)
+
+
 def facebook_can_continue_past_ig_rejection(route, platform, entry):
     """Only an exhausted, proven pre-media_publish IG 400 can hold IG alone.
 
@@ -925,6 +949,13 @@ def plan(audit=False):
                         f"RECOVERY V4: {item['name']} instagram 180s compact "
                         "profile validated FINISHED in no-publish test."
                     )
+                if (not audit and existing.get("caption_hash") == cap_hash
+                        and audited_avanak_part10_recovery_eligible(route, p, item, existing)):
+                    existing.update(status="ready", prepublish_retry_count=2)
+                    report.append(
+                        "RECOVERY: audited Avanak Apti Part 10 binary rejection; "
+                        "one bounded 720p/96k attempt after remote reconciliation."
+                    )
                 if existing and existing.get("status") != "ready":
                     report.append(f"HELD: {item['name']} {p} has an uncertain previous intent.")
                     # A green GitHub run is NOT proof these queues are healthy.
@@ -1224,6 +1255,10 @@ def publish():
                         ),
                         recovery_v3=(
                             short_recovery_v3
+                            # Film/ToonZone's alternate encoder previously fell
+                            # through to 1080p/4M (95 MB for a 7 MB source).
+                            # Use the existing bounded 720p/1.8M/96k profile.
+                            or alternate_compact_profile
                             or (retry_count == 2 and
                                 item["route"] in _AUDITED_IG_V3_FILES and
                                 item["name"] == _AUDITED_IG_V3_FILES[item["route"]])

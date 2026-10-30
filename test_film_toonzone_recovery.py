@@ -10,19 +10,20 @@ from test_public_link_runtime import runtime
 
 
 class FilmToonZoneRecoveryTests(unittest.TestCase):
-    def _run(self, route, name, retry_count=0, run_id="40107188749"):
+    def _run(self, route, name, retry_count=0, run_id="40107188749", source_id="clip",
+             history_error=None, saved_caption_hash=None):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             caption = "RECOVERY-IG-EXACT"
             original = {"schema": 1, "entries": {
-                f"{route}:facebook:clip": {
+                f"{route}:facebook:{source_id}": {
                     "route": route, "platform": "facebook", "status": "done",
                     "post_id": "2520090981810851", "day": "2026-10-24",
                     "run_id": "40107188749",
                 },
-                f"{route}:instagram:clip": {
+                f"{route}:instagram:{source_id}": {
                     "route": route, "platform": "instagram", "status": "uncertain",
-                    "caption_hash": runtime.caption_key(caption), "file": name,
+                    "caption_hash": saved_caption_hash or runtime.caption_key(caption), "file": name,
                     "day": "2026-10-24", "run_id": run_id,
                     "prepublish_retry_count": retry_count,
                     "failure": {
@@ -37,7 +38,7 @@ class FilmToonZoneRecoveryTests(unittest.TestCase):
             covers = {cover_name: {"id": "right-cover"}} if route == "toonzone" else {}
             def inventory(folder_id):
                 if folder_id == folder:
-                    return {name: {"name": name, "id": "clip"}}
+                    return {name: {"name": name, "id": source_id}}
                 return covers
             with patch.dict(os.environ, {"GITHUB_RUN_ID": "500",
                                          "GITHUB_STEP_SUMMARY": str(root / "summary.md")}), \
@@ -57,7 +58,7 @@ class FilmToonZoneRecoveryTests(unittest.TestCase):
                  }]}), \
                  patch.object(runtime, "inventory", side_effect=inventory), \
                  patch.object(runtime, "route_enabled", return_value=True), \
-                 patch.object(runtime, "graph_rows", return_value=[]), \
+                 patch.object(runtime, "graph_rows", return_value=[], side_effect=history_error), \
                  patch.object(runtime, "target_count", return_value=4), \
                  patch.object(runtime, "seed_done", return_value=False), \
                  patch.object(runtime, "copies", return_value=(
@@ -67,6 +68,57 @@ class FilmToonZoneRecoveryTests(unittest.TestCase):
             return (json.loads((root / "plan.json").read_text()),
                     json.loads((root / "state.json").read_text())["entries"],
                     (root / "report.md").read_text())
+
+    def test_audited_part10_recovery_keeps_facebook_done_and_is_consumed_once(self):
+        source_id = "1Zn8kYmexuUe3z1EKLtCrKFCwj4qVnIa2"
+        for retry_count in (1, 2):
+            planned, state, report = self._run(
+                "film", "Avanak_Apti_Part_10 (1).mp4", retry_count=retry_count,
+                run_id="41029613650", source_id=source_id)
+            self.assertEqual(state[f"film:facebook:{source_id}"]["post_id"], "2520090981810851")
+            if retry_count == 1:
+                self.assertEqual(planned[0]["platforms"], ["instagram"])
+                self.assertEqual(state[f"film:instagram:{source_id}"]["prepublish_retry_count"], 2)
+                self.assertIn("720p/96k", report)
+            else:
+                self.assertEqual(planned, [])
+                self.assertEqual(state[f"film:instagram:{source_id}"]["status"], "uncertain")
+
+    def test_part10_recovery_rejects_other_files_runs_and_publish_uncertainty(self):
+        import copy
+        item = {"id": "1Zn8kYmexuUe3z1EKLtCrKFCwj4qVnIa2",
+                "name": "Avanak_Apti_Part_10 (1).mp4"}
+        entry = {"status": "uncertain", "prepublish_retry_count": 1,
+                 "run_id": "41029613650", "failure": {
+                     "stage": "Instagram ikili video aktarımı", "http_status": 400}}
+        eligible = runtime.audited_avanak_part10_recovery_eligible
+        self.assertTrue(eligible("film", "instagram", item, entry))
+        for field, value in (("run_id", "other"), ("prepublish_retry_count", 2),
+                             ("prepublish_retry_count", True), ("status", "done")):
+            changed = copy.deepcopy(entry)
+            changed[field] = value
+            self.assertFalse(eligible("film", "instagram", item, changed))
+        for field, value in (("stage", "Instagram media_publish"),
+                             ("http_status", 500), ("graph_code", 190)):
+            changed = copy.deepcopy(entry)
+            changed["failure"][field] = value
+            self.assertFalse(eligible("film", "instagram", item, changed))
+        self.assertFalse(eligible("film", "facebook", item, entry))
+        self.assertFalse(eligible("toonzone", "instagram", item, entry))
+        self.assertFalse(eligible("film", "instagram", dict(item, id="other-source"), entry))
+        self.assertFalse(eligible("film", "instagram", dict(item, name="Part11.mp4"), entry))
+
+    def test_part10_recovery_requires_readable_history_and_unchanged_caption(self):
+        source_id = "1Zn8kYmexuUe3z1EKLtCrKFCwj4qVnIa2"
+        for extra in ({"history_error": RuntimeError("history unavailable")},
+                      {"saved_caption_hash": "different-caption"}):
+            planned, state, _ = self._run(
+                "film", "Avanak_Apti_Part_10 (1).mp4", retry_count=1,
+                run_id="41029613650", source_id=source_id, **extra)
+            self.assertEqual(planned, [])
+            self.assertEqual(state[f"film:instagram:{source_id}"]["status"], "uncertain")
+            self.assertEqual(state[f"film:instagram:{source_id}"]["prepublish_retry_count"], 1)
+            self.assertEqual(state[f"film:facebook:{source_id}"]["status"], "done")
 
     def test_film_part16_recovery_is_instagram_only(self):
         plans, state, report = self._run("film", "Yoksul_1986_Part_16.mp4")
