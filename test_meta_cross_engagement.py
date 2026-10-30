@@ -66,8 +66,8 @@ class EngagementTests(unittest.TestCase):
     def test_one_like_requires_preflight_success_and_no_meta_writes(self):
         posts = [dict(platform="instagram", post_id="123", owner="33")]
         ledger = {"schema": 1, "actions": {}}
-        with patch.object(m, "verified_media", side_effect=ValueError("bad owner")), \\
-             patch.object(m, "perform") as writer:
+        with (patch.object(m, "verified_media", side_effect=ValueError("bad owner")),
+              patch.object(m, "perform") as writer):
             tasks, report = m.build_one_like(posts, actors(), ledger, "200", "100", now=NOW)
             writer.assert_not_called()
         self.assertEqual(tasks, [])
