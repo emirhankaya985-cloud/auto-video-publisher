@@ -18,3 +18,13 @@ Daily schedule: 0 10 * * * UTC = 13:00 Europe/Istanbul. Normal publisher
 workflow completions no longer trigger engagement. GitHub cron may start late.
 Kill switch: META_CROSS_ENGAGEMENT_ENABLED=false. The owner-approved default
 is now enabled; UI workflow_dispatch still defaults to dry_run for previews.
+
+## Corrected Video preflight, same authorized initial batch
+
+Initial run 41044986946 sent zero POSTs: all 210 planned shares stopped before
+posting. The publisher's numeric IDs represent Video nodes. Read id/from for
+ownership and construct the canonical Facebook Watch link from that verified
+Video ID instead of requesting the PagePost permalink_url field on a Video.
+Only this audited run's no-POST preflight failures may be rechecked once with
+source_check_version=2. Accepted/uncertain/reserved/rejected POST states are
+never reopened. This marker edit starts the corrected initial attempt.
