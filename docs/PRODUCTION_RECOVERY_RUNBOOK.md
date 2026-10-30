@@ -363,3 +363,11 @@ izlenir; bu inceleme test amaçlı gerçek yayın tetiklemedi.
 - Varsayılan `dry_run`; canlı etkinleştirme değişkeni bu kod eklenirken açılmaz. Gerekli yeni IG izni mevcut tokenlarda doğrulanmış değildir. Mock test veya plan çıktısı canlı beğeni/kaydetme/paylaşım kanıtı sayılmaz.
 - Yapılandırma, kesin API sınırları, geri alma ve birincil kaynaklar: `docs/META_CROSS_ENGAGEMENT.md`. Kapatma: `META_CROSS_ENGAGEMENT_ENABLED=false`; geçmiş intent/result kayıtlarını koru.
 - Yerel kabul: 648 Python testi (21 yeni etkileşim senaryosu dahil), 57 fonksiyon kontrolü ve 15 Node testi başarılı. Workflow intent-before-execute sırası, main checkout, read-only GitHub yetkileri ve varsayılan kapalı bayrak ayrıca kontrol edildi. Canlı etkileşim POST'u gönderilmedi.
+
+## 30 Ekim 2026 — 13:00 TRT günlük etkileşim ve ilk canlı batch yetkisi
+
+- Kullanıcı ilk batch'in şimdi çalışmasını ve ardından her gün 13:00 TRT otomatik yürütmeyi açıkça istedi. Workflow `0 10 * * *` UTC cron'una taşındı; eski publisher-workflow_run tetikleyicisi kaldırıldı. GitHub cron başlangıcı gecikebilir. Yalnız tarihli başlangıç marker'ı ilk main push batch'ini tetikler; ilgisiz push'lar tetiklemez.
+- Artık yalnız son run'ın birkaç videosu değil, en yeni tamamlanan yayın state'indeki son 24 saatin bütün doğrulanmış native postları işlenir. Her kaynak run'ın repo/main/iş akışı/zaman/sonuç kanıtı denetlenir; aliases/reconciliation ve eski run'lar seçilmez. Önceki bağımsız etkileşim ledger'ı tekrarları engeller.
+- Kullanıcı isteğiyle workflow default enable/apply açıldı; `META_CROSS_ENGAGEMENT_ENABLED=false` kill switch'i korunur. UI manuel preview varsayılanı dry_run kalır. Secret veya OAuth izin değişikliği yapılmadı.
+- Gerçek read-only kanıt: [önizleme #41044005387](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/41044005387), 13 doğrulanmış aktör, 18 Facebook repost adayı, 21 FB like ve 6 IG like isteği `missing_permission`. `pages_manage_engagement` ve `instagram_manage_engagement` izinleri tokenlarda yok. Bu eksiklik aktivasyonla aşılamaz. Kaydetme ve Instagram repost hâlâ unsupported.
+- Sonraki canlı batch sonucu gerçek share_post_id/API alındılarıyla ayrıca kontrol edilecek; bu belge ilk canlı batch tamamlandı iddiası değildir. Video yayın state'i ve başarılı videolar değiştirilmez.

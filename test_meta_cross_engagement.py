@@ -208,6 +208,56 @@ class EngagementTests(unittest.TestCase):
         with patch.object(m,"github",return_value=response):
             with self.assertRaises(ValueError):m.read_source("100",now=NOW)
 
+    def test_latest_source_ignores_running_foreign_and_stale_runs(self):
+        good = {"id": 100, "path": m.SOURCE_WORKFLOW, "head_branch": "main",
+                "head_repository": {"full_name": m.REPO}, "status": "completed",
+                "conclusion": "failure", "created_at": (NOW-timedelta(hours=1)).isoformat()}
+        response = Mock()
+        response.json.return_value = {"workflow_runs": [
+            dict(good, id=101, status="in_progress"),
+            dict(good, id=102, head_branch="other"),
+            dict(good, id=103, head_repository={"full_name":"foreign/repo"}),
+            dict(good, id=104, created_at=(NOW-timedelta(hours=25)).isoformat()), good]}
+        with patch.object(m, "github", return_value=response):
+            self.assertEqual(m.latest_source_id(now=NOW), "100")
+        response.json.return_value={"workflow_runs":[]}
+        with patch.object(m,"github",return_value=response):
+            with self.assertRaises(ValueError):m.latest_source_id(now=NOW)
+
+    def test_daily_window_collects_several_provenance_runs_without_old_or_alias_posts(self):
+        def row(rid, pid, **extra):
+            return dict(status="done",run_id=rid,day="2026-10-30",route="tarladaki",
+                        platform="facebook",post_id=pid,**extra)
+        state={"entries":{"a":row("100","1000"),"b":row("99","1001"),
+                          "old":row("98","1002"),"alias":row("99","1003",duplicate_of_file_id="orig")}}
+        recent={"path":m.SOURCE_WORKFLOW,"head_branch":"main","head_repository":{"full_name":m.REPO},
+                "status":"completed","conclusion":"success","created_at":(NOW-timedelta(hours=2)).isoformat()}
+        def get(path):
+            response=Mock()
+            response.json.return_value=(dict(recent,created_at=(NOW-timedelta(hours=25)).isoformat())
+                                        if path.endswith("98") else recent)
+            return response
+        with patch.object(m,"github",side_effect=get):
+            posts=m.recent_posts(state,"100",actors(),now=NOW)
+        self.assertEqual({p["post_id"] for p in posts},{"1000","1001"})
+        self.assertEqual({p["source_run_id"] for p in posts},{"100","99"})
+        ledger={"schema":1,"actions":{}}
+        tasks,_=m.build_plan(posts,actors(),ledger,"200","100",now=NOW)
+        self.assertEqual({t["source_run_id"] for t in tasks},{"100","99"})
+
+    def test_unavailable_provenance_stops_batch_before_claiming(self):
+        state={"entries":{"a":dict(status="done",run_id="99",day="2026-10-30",
+               route="tarladaki",platform="facebook",post_id="123")}}
+        with patch.object(m,"github",side_effect=ValueError("unavailable")):
+            with self.assertRaises(ValueError):m.recent_posts(state,"100",actors(),now=NOW)
+
+    def test_source_run_timestamp_and_metadata_fail_closed(self):
+        good={"path":m.SOURCE_WORKFLOW,"head_branch":"main","head_repository":{"full_name":m.REPO},
+              "status":"completed","conclusion":"success","created_at":NOW.isoformat()}
+        for value in (None,"bad",NOW.replace(tzinfo=None).isoformat(),(NOW+timedelta(minutes=1)).isoformat()):
+            self.assertFalse(m.source_run_valid(dict(good,created_at=value),NOW))
+        self.assertFalse(m.source_run_valid(dict(good,head_repository=None),NOW))
+
     def test_foreign_workflow_artifact_cannot_be_used_as_prior_state(self):
         listing=Mock();listing.json.return_value={"artifacts":[{"id":123,"name":"cross-engagement-result","workflow_run":{"id":200}}]}
         run=Mock();run.json.return_value={"path":"foreign.yml","head_branch":"main","head_repository":{"full_name":m.REPO}}

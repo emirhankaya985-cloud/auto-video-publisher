@@ -13,6 +13,7 @@ import os
 import re
 import time
 import zipfile
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -234,7 +235,7 @@ def build_plan(posts, actors, ledger, run_id, source_run_id, *, now):
                 continue
             for operation in OPERATIONS:
                 task = dict(source, actor=actor["id"], operation=operation,
-                            source_run_id=source_run_id)
+                            source_run_id=source.get("source_run_id", source_run_id))
                 action_key = key(task)
                 if (task["platform"], operation) not in SUPPORTED:
                     report.append(dict(task, status="unsupported_by_verified_api"))
@@ -358,12 +359,59 @@ def archive(artifact_id, member):
         return json.loads(z.read(member))
 
 
+def source_run_valid(run, now):
+    try:
+        return (run.get("path") == SOURCE_WORKFLOW and run.get("head_branch") == "main"
+            and run.get("head_repository", {}).get("full_name") == REPO
+            and run.get("status") == "completed" and run.get("conclusion") in {"success", "failure"}
+            and now - timedelta(hours=24) <= stamp(run.get("created_at")) <= now)
+    except (ValueError, AttributeError):
+        return False
+
+
+def latest_source_id(*, now):
+    body = github("actions/workflows/public_link_schedule.yml/runs?branch=main&per_page=30").json()
+    if not isinstance(body.get("workflow_runs"), list):
+        raise ValueError("invalid publisher run list")
+    valid = [r for r in body["workflow_runs"] if source_run_valid(r, now)]
+    if not valid:
+        raise ValueError("no recent completed publisher run")
+    newest = max(valid, key=lambda r: stamp(r["created_at"]))
+    if not str(newest.get("id", "")).isdigit():
+        raise ValueError("invalid source run ID")
+    return str(newest["id"])
+
+
+def recent_posts(state, anchor_id, actors, *, now):
+    """One latest ledger supplies all original posts from verified recent runs.
+
+    Validate the provenance run of every candidate, including partial publisher
+    failures; never substitute a foreign run or an unverified historical alias.
+    """
+    if not isinstance(state, dict) or not isinstance(state.get("entries"), dict):
+        raise ValueError("invalid publisher state")
+    candidate_ids = set()
+    for row in state["entries"].values():
+        if not isinstance(row, dict):
+            raise ValueError("invalid publisher row")
+        day, rid = row.get("day", ""), str(row.get("run_id", ""))
+        if (isinstance(day, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", day)
+                and (now - timedelta(days=2)).date().isoformat() <= day <= now.date().isoformat()
+                and row.get("status") == "done" and rid.isdigit()):
+            candidate_ids.add(rid)
+    if len(candidate_ids) > 128:
+        raise ValueError("too many provenance runs; no partial batch")
+    result = []
+    for rid in sorted(candidate_ids, key=int):
+        if rid != anchor_id and not source_run_valid(github(f"actions/runs/{rid}").json(), now):
+            continue
+        result.extend(dict(p, source_run_id=rid) for p in source_posts(state, rid, actors))
+    return result
+
+
 def read_source(source_run_id, *, now):
     run = github(f"actions/runs/{source_run_id}").json()
-    if (run.get("path") != SOURCE_WORKFLOW or run.get("head_branch") != "main"
-            or run.get("head_repository", {}).get("full_name") != REPO
-            or run.get("status") != "completed" or run.get("conclusion") not in {"success", "failure"}
-            or not now - timedelta(hours=24) <= stamp(run.get("created_at")) <= now):
+    if not source_run_valid(run, now):
         raise ValueError("invalid or stale source run")
     data = github(f"actions/runs/{source_run_id}/artifacts?per_page=100").json()
     artifacts = [a for a in data.get("artifacts", []) if a.get("name") == "link-state-result" and not a.get("expired")]
@@ -396,23 +444,32 @@ def main():
     args = parser.parse_args()
     now = datetime.now(timezone.utc)
     run_id, source_id = os.environ["GITHUB_RUN_ID"], os.environ["SOURCE_RUN_ID"]
-    if os.getenv("GITHUB_REPOSITORY") != REPO or not run_id.isdigit() or not source_id.isdigit():
+    if os.getenv("GITHUB_REPOSITORY") != REPO or not run_id.isdigit() or not (source_id.isdigit() or source_id == "latest"):
         raise ValueError("invalid workflow identity")
     live = os.getenv("META_CROSS_ENGAGEMENT_ENABLED") == "true" and os.getenv("ENGAGEMENT_MODE") == "apply"
     actors = accounts(load_meta_auth(), os.getenv("META_ACCESS_TOKEN", ""))
     if not actors:
         raise ValueError("no verified enabled accounts")
     if args.action == "plan":
+        if source_id == "latest":
+            source_id = latest_source_id(now=now)
         ledger = restore()
-        tasks, report = build_plan(source_posts(read_source(source_id, now=now), source_id, actors),
+        state = read_source(source_id, now=now)
+        posts = (recent_posts(state, source_id, actors, now=now)
+                 if os.getenv("ENGAGEMENT_SCOPE") == "recent_window"
+                 else source_posts(state, source_id, actors))
+        tasks, report = build_plan(posts,
                                    actors, ledger, run_id, source_id, now=now)
+        blocked_counts = dict(Counter(f"{r['platform']}/{r['operation']}/{r['status']}" for r in report))
         save(PLAN, tasks)
         save(REPORT, {"mode": "apply" if live else "dry_run", "planned": len(tasks),
-                      "verified_accounts": len(actors), "blocked": report})
+                      "source_run_id": source_id, "source_posts": len(posts),
+                      "verified_accounts": len(actors), "blocked": report, "blocked_counts": blocked_counts})
         if live:
             save(STATE, ledger)
         print(json.dumps({"mode": "apply" if live else "dry_run", "planned": len(tasks),
-                          "verified_accounts": len(actors), "blocked": len(report)}))
+                          "source_posts": len(posts), "verified_accounts": len(actors),
+                          "blocked": len(report), "blocked_counts": blocked_counts}))
     elif live:
         ledger = json.loads(STATE.read_text())
         execute(json.loads(PLAN.read_text()), actors, ledger, run_id, persist=lambda x: save(STATE, x))
@@ -421,7 +478,10 @@ def main():
             if value.get("run_id") == run_id:
                 status = value["status"]
                 counts[status] = counts.get(status, 0) + 1
-        print(json.dumps({"results": counts, "publication_state_modified": False}))
+        by_operation = dict(Counter(f"{v['platform']}/{v['operation']}/{v['status']}"
+                                    for v in ledger["actions"].values() if v.get("run_id") == run_id))
+        print(json.dumps({"results": counts, "by_operation": by_operation,
+                          "publication_state_modified": False}))
     else:
         print('{"mode":"dry_run","writes":0}')
 
