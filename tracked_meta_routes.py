@@ -9,6 +9,8 @@ import os
 import sys
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
+from pathlib import Path
+import publisher_alert_history as alert_history
 
 from meta_auth_loader import load_meta_auth
 from ntfy_notifications import send_ntfy
@@ -114,6 +116,7 @@ def main():
               flush=True)
         return 1
     verdict = check_route(route)
+    Path("target-verdict.json").write_text(json.dumps(verdict,ensure_ascii=False,indent=2),encoding="utf-8")
     print(json.dumps(verdict, ensure_ascii=False, sort_keys=True), flush=True)
     summary = os.getenv("GITHUB_STEP_SUMMARY", "")
     if summary:
@@ -128,6 +131,14 @@ def main():
             )
     if verdict["status"] in ("healthy", "disabled"):
         return 0
+    if os.getenv("CORRELATE_PUBLISHER_ALERTS")=="true" and verdict.get("status")=="behind":
+        missing=[p for p,n in verdict.get("missing",{}).items() if n]
+        try:
+            if alert_history.covered(alert_history.restore(),route=route,platforms=missing):
+                print('{"notification":"duplicate_target_alert_suppressed","target":"behind","reason":"publisher_incident_already_acknowledged"}',flush=True)
+                return 1
+        except Exception:
+            print('{"correlation":"unavailable","new_target_alert_preserved":true}',flush=True)
 
     missing = verdict.get("missing")
     deficits = ", ".join(f"{p}: {n} eksik" for p, n in (missing or {}).items() if n)

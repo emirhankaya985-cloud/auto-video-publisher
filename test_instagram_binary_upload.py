@@ -143,6 +143,48 @@ class InstagramBinaryUploadTests(unittest.TestCase):
         self.assertEqual(get.call_args_list[1].kwargs["params"]["fields"], "id,permalink")
         self.assertEqual(post.call_count, 2)  # Container creation + exactly one publish.
 
+    def _rejected_binary(self, status, *, code=None, uploaded=5, publish=False):
+        error=MetaAPIError("Instagram ikili video aktarımı",400,message="ProcessingFailed",code=code,
+                           upload_bytes=5,uploaded_bytes=uploaded)
+        with patch("cloud_omnichannel_publisher.os.path.getsize",return_value=5), \
+             patch("cloud_omnichannel_publisher._sha256_file",return_value="a"*64), \
+             patch("cloud_omnichannel_publisher._upload_instagram_binary",side_effect=error) as binary, \
+             patch("cloud_omnichannel_publisher.time.sleep"), \
+             patch("cloud_omnichannel_publisher.requests.post") as post, \
+             patch("cloud_omnichannel_publisher.requests.get") as get:
+            post.side_effect=[Mock(status_code=200,json=lambda:{"id":"12345","uri":"https://rupload.facebook.com/1"}),
+                              Mock(status_code=200,json=lambda:{"id":"67890"})]
+            get.return_value=Mock(status_code=200,json=lambda:{"id":"12345","status_code":status})
+            try:
+                out=upload_instagram_reel({"instagram_id":"11","page_token":"secret"},"video.mp4","caption",publish=publish)
+            except Exception as exc:
+                out=exc
+            return out,binary.call_count,post.call_count,get.call_count
+
+    def test_full_binary_400_finished_container_is_not_reuploaded(self):
+        out,binary,post,get=self._rejected_binary("FINISHED")
+        self.assertEqual(out,{"container_id":"12345","status":"FINISHED","published":False})
+        self.assertEqual((binary,post,get),(1,1,1))
+
+    def test_full_binary_400_finished_can_publish_same_container_once(self):
+        out,binary,post,get=self._rejected_binary("FINISHED",publish=True)
+        self.assertEqual(out,"67890")
+        self.assertEqual((binary,post),(1,2))
+
+    def test_binary_400_error_published_and_expired_never_publish(self):
+        for state in ("ERROR","PUBLISHED","EXPIRED"):
+            with self.subTest(state=state):
+                out,binary,post,get=self._rejected_binary(state,publish=True)
+                self.assertIsInstance(out,MetaAPIError)
+                self.assertEqual(out.container_status,state)
+                self.assertEqual((binary,post),(1,1))
+
+    def test_partial_transfer_and_policy_errors_never_continue(self):
+        for options in ({"uploaded":4},{"code":368},{"code":190}):
+            out,binary,post,get=self._rejected_binary("FINISHED",publish=True,**options)
+            self.assertIsInstance(out,MetaAPIError)
+            self.assertEqual((binary,post,get),(1,1,0))
+
     def test_reels_tags_are_sent_at_container_creation_only(self):
         with patch("cloud_omnichannel_publisher.os.path.getsize", return_value=5), \
              patch("cloud_omnichannel_publisher._sha256_file", return_value="a" * 64), \

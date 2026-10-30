@@ -73,7 +73,7 @@ def classify_meta_failure(exc):
         reason = "invalid_media_or_graph_request"
     else:
         reason = "unclassified_upload_result"
-    return {
+    result = {
         "reason": reason,
         "stage": stage if isinstance(stage, str) and len(stage) < 80 else "unknown",
         "http_status": http if isinstance(http, int) else None,
@@ -82,6 +82,13 @@ def classify_meta_failure(exc):
         "post_write_action": "reconcile_with_remote_history_before_any_retry",
         "safe_to_repost": False,
     }
+    container = getattr(exc, "container_id", None)
+    status = getattr(exc, "container_status", None)
+    if isinstance(container, str) and container.isdecimal() and len(container) <= 32:
+        result["container_id"] = container
+    if status in {"IN_PROGRESS", "FINISHED", "PUBLISHED", "ERROR", "EXPIRED", "UNVERIFIED"}:
+        result["container_status"] = status
+    return result
 
 
 def confirmed_media_error_is_pre_publish(exc):
@@ -113,6 +120,8 @@ def known_pre_publish_media_rejection(exc, route, previous_retries=0):
     Every scheduled attempt first reconciles the platform's recent history.
     """
     if type(previous_retries) is not int or previous_retries < 0:
+        return False
+    if getattr(exc, "container_status", None) in {"PUBLISHED", "FINISHED", "IN_PROGRESS", "UNVERIFIED"}:
         return False
     if route in _TWO_ALTERNATE_PROFILE_ROUTES:
         allowed = previous_retries < 2

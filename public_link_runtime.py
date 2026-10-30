@@ -156,8 +156,11 @@ def download(file_id, path):
     failures = []
     for attempt in range(3):
         try:
+            # A stale Drive confirmation cookie can poison every retry in the
+            # same runner. Keep the first established path, then use a clean
+            # public-link session instead of repeating the identical request.
             result = gdown.download(id=file_id, output=str(path), quiet=True,
-                                    use_cookies=True, timeout=40)
+                                    use_cookies=(attempt == 0), timeout=40)
             if result and path.is_file() and path.stat().st_size > 0:
                 return path
             failures.append("empty_or_missing")
@@ -168,7 +171,7 @@ def download(file_id, path):
         if path.exists():
             path.unlink()
         if attempt < 2:
-            time.sleep(2 ** attempt)
+            time.sleep((2, 8)[attempt])
     raise RuntimeError(
         "Paylaşılan Drive dosyası 3 denemede indirilemedi "
         f"({','.join(failures)})"
@@ -586,7 +589,8 @@ def facebook_can_continue_past_ig_rejection(route, platform, entry):
     marker = SimpleNamespace(stage=prior.get("stage"),
                              http_status=prior.get("http_status"),
                              code=prior.get("graph_code"),
-                             subcode=prior.get("graph_subcode"))
+                             subcode=prior.get("graph_subcode"),
+                             container_status=prior.get("container_status"))
     return known_pre_publish_media_rejection(marker, route, previous_retries=0)
 
 
@@ -922,6 +926,7 @@ def plan(audit=False):
                         http_status=prior_failure.get("http_status"),
                         code=prior_failure.get("graph_code"),
                         subcode=prior_failure.get("graph_subcode"),
+                        container_status=prior_failure.get("container_status"),
                     )
                     previous_attempts = existing.get("prepublish_retry_count", 0)
                     if known_pre_publish_media_rejection(prior, route, previous_attempts):

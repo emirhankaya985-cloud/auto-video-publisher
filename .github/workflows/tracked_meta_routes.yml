@@ -17,6 +17,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: tracked-meta-route-deadline
@@ -28,6 +29,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
+      GITHUB_TOKEN: ${{ github.token }}
+      CORRELATE_PUBLISHER_ALERTS: true
       TARGET_ROUTE: ${{ inputs.route || (github.event.schedule == '40 10 * * *' && 'toonzone' || 'daily_laugh') }}
       META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
       ENABLE_TOONZONE_ROUTES: ${{ vars.ENABLE_TOONZONE_ROUTES }}
@@ -52,3 +55,11 @@ jobs:
         run: python -m unittest -v test_tracked_meta_routes.py
       - name: Check verified Facebook and Instagram video goals and alert only on deficits
         run: python tracked_meta_routes.py
+      - name: Preserve the actual target deficit even when duplicate phone alerts are suppressed
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tracked-route-verdict
+          path: target-verdict.json
+          if-no-files-found: ignore
+          retention-days: 7

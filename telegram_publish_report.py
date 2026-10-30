@@ -13,6 +13,8 @@ from pathlib import Path
 from telegram_notifications import send_telegram, telegram_configured
 from ntfy_notifications import send_ntfy
 from publisher_error_journal import read_errors, record_error
+import publisher_alert_history as alert_history
+from datetime import timedelta
 
 STATE_PATH = Path("link-runtime/state.json")
 ALLOWED_STEP_RESULTS = {"success", "failure", "skipped", "cancelled", ""}
@@ -105,7 +107,101 @@ def post_message(row, run_id):
     return title, body
 
 
+def _prepare_durable(messages, posts, events, state, run_id, *, telegram_on, ntfy_on, base_failures, category):
+    now=alert_history.now_utc()
+    history=alert_history.restore()
+    before=json.dumps(history,sort_keys=True)
+    descriptors=alert_history.incident_descriptors(events)
+    if not descriptors:
+        k=alert_history.identity("incident",extra="workflow")
+        descriptors={k:{"kind":"incident","route":"workflow","platform":"unknown","video":"","family":"workflow"}}
+    groups=[]
+    for i,(title,body) in enumerate(messages):
+        if i<len(posts):
+            post=posts[i]
+            k=alert_history.identity("post",post["route"],post["platform"],extra=str(post["post_id"]))
+            keys={k:{"kind":"post","route":post["route"],"platform":post["platform"],"video":post.get("file","")}}
+        elif title=="🚨 Bildirim kanalı eksik":
+            k=alert_history.identity("incident",extra="notification_configuration")
+            keys={k:{"kind":"incident","route":"notifications","platform":"unknown","video":"","family":"configuration"}}
+        else:
+            keys=descriptors
+        groups.append((title,body,keys))
+    observed={k:d for _,_,keys in groups for k,d in keys.items()}
+    alert_history.observe(history,observed,state,run_id,now=now)
+    planned=[]
+    for title,body,keys in groups:
+        msg=alert_history.reserve(history,title,body,keys,run_id,now=now)
+        if msg: planned.append(msg)
+    refresh=not history.get("archived_at") or now-alert_history.stamp(history["archived_at"])>=timedelta(hours=24)
+    archive_needed=refresh or before!=json.dumps(history,sort_keys=True)
+    if archive_needed: history["archived_at"]=now.isoformat()
+    if os.getenv("GITHUB_OUTPUT"):
+        with open(os.environ["GITHUB_OUTPUT"],"a",encoding="utf-8") as output:
+            output.write(f"alert_archive_needed={str(archive_needed).lower()}\n")
+    alert_history.save(alert_history.HISTORY,history)
+    alert_history.save(alert_history.PREPARED,{"run_id":run_id,"messages":planned,
+        "telegram":telegram_on,"ntfy":ntfy_on,"base_failures":base_failures,
+        "confirmed_posts":len(posts),"recorded_errors":len(events),"category":category})
+    print(json.dumps({"status":"notification_intents_prepared","messages":len(planned),
+        "duplicate_messages_suppressed":len(messages)-len(planned),"sent":0}),flush=True)
+    return 0
+
+
+def _send_durable():
+    run_id=os.getenv("GITHUB_RUN_ID","")
+    try:
+        plan=alert_history.read(alert_history.PREPARED)
+        history=alert_history.validate(alert_history.read(alert_history.HISTORY))
+        if plan.get("run_id")!=run_id or not run_id.isdigit(): raise ValueError("intent run mismatch")
+        if plan["messages"] and os.getenv("ALERT_INTENT_ARCHIVED")!="true":
+            raise ValueError("durable notification intent missing")
+        for msg in plan["messages"]:
+            if any(history["records"][k].get("intent_run_id")!=run_id for k in msg["keys"]):
+                raise ValueError("notification intent mismatch")
+    except (ValueError,OSError,KeyError,TypeError):
+        print('{"status":"notification_intent_unverified","sent":0}',flush=True)
+        return 1
+    failures=plan["base_failures"]
+    acks={"telegram":0,"ntfy":0}
+    run_url=f"https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/{run_id}"
+    for msg in plan["messages"]:
+        for channel in ("telegram","ntfy"):
+            if not plan[channel]: continue
+            # A repeated send step does not repeat an already ACKed message.
+            if any(channel in history["records"][k].get("attempted_channels",[]) for k in msg["keys"]):
+                if not all(channel in history["records"][k].get("server_acks",[]) for k in msg["keys"]): failures+=1
+                continue
+            for k in msg["keys"]:
+                history["records"][k].setdefault("attempted_channels",[]).append(channel)
+            alert_history.save(alert_history.HISTORY,history)
+            try:
+                if channel=="telegram":
+                    result=send_telegram(msg["title"],msg["body"])
+                else:
+                    info=msg["title"].startswith("ℹ️")
+                    warning=msg["title"].startswith(("🚨","⚠️"))
+                    result=send_ntfy(msg["title"],msg["body"],priority=2 if info else 4 if warning else 3,
+                        tags=["information_source"] if info else ["warning"] if warning else ["white_check_mark"],
+                        click=run_url,timeout=20,require_ack=True)
+                if result.get("server_ack") is not True: raise RuntimeError("no server ack")
+                alert_history.mark_ack(history,msg,channel)
+                acks[channel]+=1
+            except Exception as exc:
+                failures+=1
+                record_error(channel+"_notification","notification_delivery_failed",error=exc)
+            finally:
+                alert_history.save(alert_history.HISTORY,history)
+    print(json.dumps({"status":"completed" if not failures else "partial_notification_failure",
+        "confirmed_posts":plan["confirmed_posts"],"recorded_errors":plan["recorded_errors"],
+        "telegram_server_acks":acks["telegram"],"ntfy_server_acks":acks["ntfy"],
+        "delivery_failures":failures,"phone_delivery_verified":False}),flush=True)
+    return 1 if failures else 0
+
+
 def main():
+    if os.getenv("PUBLISH_ALERT_MODE")=="send":
+        return _send_durable()
     run_id = os.getenv("GITHUB_RUN_ID", "")
     plan_outcome = os.getenv("PLAN_STEP_OUTCOME", "")
     publish_outcome = os.getenv("PUBLISH_STEP_OUTCOME", "")
@@ -137,6 +233,8 @@ def main():
         return 1
 
     if not message and not events:
+        if os.getenv("PUBLISH_ALERT_MODE")=="prepare":
+            return _prepare_durable([],posts,events,state,run_id,telegram_on=telegram_on,ntfy_on=ntfy_on,base_failures=0,category=category)
         print('{"status":"no_posts_or_errors","messages_sent":0}', flush=True)
         return 0
 
@@ -162,7 +260,7 @@ def main():
             details.append(part)
         if len(events) > 8:
             details.append(f"• Diğer {len(events) - 8} olayın tamamı GitHub error journal'da.")
-        title = "ℹ️ Mevcut Instagram engelleri" if known_holds_only else "🚨 Meta yayın uyarısı"
+        title = "ℹ️ Mevcut Instagram engelleri" if known_holds_only else "⚠️ Kısmi yayın sonucu" if posts else "🚨 Meta yayın uyarısı"
         warning = (message if category == "alert" else
                    (f"ℹ️ Daha önce bildirilen engeller devam ediyor; yeni Meta POST hatası yok.\nGitHub çalışma: {run_id}"
                     if known_holds_only else
@@ -192,6 +290,9 @@ def main():
                              "Gönderi yeniden yayımlanmayacak. Eksik kanal: "
                              + ", ".join(missing)
                              + "\n🔎 " + run_url))
+    if os.getenv("PUBLISH_ALERT_MODE")=="prepare":
+        return _prepare_durable(messages,posts,events,state,run_id,telegram_on=telegram_on,
+            ntfy_on=ntfy_on,base_failures=failures,category=category)
     for title, body in messages:
         if telegram_on:
             try:
