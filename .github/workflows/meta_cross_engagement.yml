@@ -56,6 +56,8 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       SOURCE_RUN_ID: ${{ inputs.source_run_id || 'latest' }}
       ENGAGEMENT_SCOPE: recent_window
+      # Stage 1: ToonZone only in hourly READ-ONLY coverage. No automatic likes.
+      META_AUDIT_FOCUS: 'ToonZone'
       META_AUTH_JSON: ${{ secrets.META_AUTH_JSON }}
       META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
       ENABLE_TP_NORMAL_ROUTES: ${{ vars.ENABLE_TP_NORMAL_ROUTES }}

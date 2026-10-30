@@ -40,6 +40,34 @@ class EngagementTests(unittest.TestCase):
         enabled_for_legacy_repost_tests.start()
         self.addCleanup(enabled_for_legacy_repost_tests.stop)
 
+    def test_toonzone_focus_scopes_read_only_report_to_verified_sources(self):
+        aa = actors()
+        aa[("instagram", "55")] = dict(platform="instagram", id="55",
+            name="ToonZone", grants=set(GRANTS), token="secret", owner_page="11")
+        posts = [dict(platform="instagram", post_id="123", owner="55"),
+                 dict(platform="facebook", post_id="456", owner="11"),
+                 dict(platform="instagram", post_id="789", owner="33")]
+        chosen, info = m.scope_audit_posts(posts, aa, "ToonZone")
+        self.assertEqual(chosen, posts[:1])
+        self.assertEqual(info["focus_account"], "ToonZone")
+        self.assertEqual(info["other_source_posts_excluded"], 2)
+        self.assertEqual(info["candidate_review_accounts"],
+                         ["Beyinsiz Penguen", "Tarladaki Fasulye"])
+        self.assertNotIn("secret", json.dumps(info))
+        with self.assertRaises(ValueError):
+            m.scope_audit_posts(posts, aa, "unknown")
+
+    def test_toonzone_focus_fails_closed_on_apply(self):
+        with patch.dict(m.os.environ, {"GITHUB_REPOSITORY": m.REPO,
+                "GITHUB_RUN_ID": "200", "SOURCE_RUN_ID": "100",
+                "ENGAGEMENT_MODE": "apply", "META_CROSS_ENGAGEMENT_ENABLED": "true",
+                "META_AUDIT_FOCUS": "ToonZone"}), \
+             patch("sys.argv", ["meta_cross_engagement.py", "plan"]), \
+             patch.object(m, "accounts") as accounts:
+            with self.assertRaisesRegex(ValueError, "read-only"):
+                m.main()
+            accounts.assert_not_called()
+
     def test_one_like_prefers_instagram_and_never_reserves_repost(self):
         posts = [dict(platform="facebook", post_id="123", owner="11"),
                  dict(platform="instagram", post_id="456", owner="33")]

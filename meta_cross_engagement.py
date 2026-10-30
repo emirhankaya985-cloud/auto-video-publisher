@@ -217,6 +217,28 @@ def source_posts(state, source_run_id, actors):
     return output
 
 
+def scope_audit_posts(posts, actors, focus):
+    """Scope read-only source review without changing or forging engagement.
+
+    Only native, verified recent publisher posts are eligible. This is not a
+    historical backfill or a confirmation that any other account liked them.
+    """
+    if not focus:
+        return posts, {"focus_account": "all", "focus_source_posts": len(posts),
+                       "other_source_posts_excluded": 0, "candidate_review_accounts": []}
+    if focus not in ROUTE_NAMES.values():
+        raise ValueError("unrecognized focus account")
+    owners = {(a["platform"], a["id"]) for a in actors.values() if a["name"] == focus}
+    selected = [p for p in posts if (p["platform"], p["owner"]) in owners]
+    platforms = {p["platform"] for p in selected}
+    reviewers = sorted({a["name"] for a in actors.values()
+                        if a["name"] != focus and a["platform"] in platforms
+                        and permission(a["platform"], "like") <= a["grants"]})
+    return selected, {"focus_account": focus, "focus_source_posts": len(selected),
+                      "other_source_posts_excluded": len(posts) - len(selected),
+                      "candidate_review_accounts": reviewers}
+
+
 def key(task):
     raw = ":".join(task[k] for k in ("platform", "actor", "post_id", "operation"))
     return hashlib.sha256(raw.encode()).hexdigest()
@@ -570,6 +592,11 @@ def main():
                    and os.getenv("GITHUB_REF") == "refs/heads/main")
     live = (os.getenv("META_CROSS_ENGAGEMENT_ENABLED") == "true"
             and (mode == "apply" or single_like))
+    focus = os.getenv("META_AUDIT_FOCUS", "").strip()
+    if focus and live:
+        # A focus is exclusively for read-only coverage; never escalate to
+        # coordinated cross-account likes via manual apply or old push modes.
+        raise ValueError("focused account coverage is read-only")
     actors = accounts(load_meta_auth(), os.getenv("META_ACCESS_TOKEN", ""))
     if not actors:
         raise ValueError("no verified enabled accounts")
@@ -581,6 +608,7 @@ def main():
         posts = (recent_posts(state, source_id, actors, now=now)
                  if os.getenv("ENGAGEMENT_SCOPE") == "recent_window"
                  else source_posts(state, source_id, actors))
+        posts, focus_info = scope_audit_posts(posts, actors, focus)
         tasks, report = (build_one_like(posts, actors, ledger, run_id, source_id, now=now)
                          if single_like else build_plan(posts, actors, ledger, run_id,
                                                         source_id, now=now))
@@ -591,12 +619,14 @@ def main():
         save(PLAN, tasks)
         save(REPORT, {"mode": "apply" if live else "dry_run", "planned": len(tasks),
                       "source_run_id": source_id, "source_posts": len(posts),
-                      "verified_accounts": len(actors), "blocked": report, "blocked_counts": blocked_counts,
+                      "verified_accounts": len(actors), **focus_info,
+                      "blocked": report, "blocked_counts": blocked_counts,
                       "provider_holds": ledger.get("provider_holds", {})})
         if live:
             save(STATE, ledger)
         print(json.dumps({"mode": "apply" if live else "dry_run", "planned": len(tasks),
                           "source_posts": len(posts), "verified_accounts": len(actors),
+                          **focus_info,
                           "blocked": len(report), "blocked_counts": blocked_counts,
                           "provider_holds": ledger.get("provider_holds", {})}))
     elif live:
