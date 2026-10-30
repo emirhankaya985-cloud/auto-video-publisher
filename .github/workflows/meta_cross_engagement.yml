@@ -1,8 +1,10 @@
 name: Meta cross-account engagement
 on:
   schedule:
-    # 13:00 and 01:00 Europe/Istanbul = 10:00 and 22:00 UTC. GitHub may start late.
-    - cron: '0 10,22 * * *'
+    # Hourly Meta identity/content and permission audit (TRT, every hour).
+    # Scheduled runs remain dry_run: never mass-like, save, or repost.
+    # GitHub Actions scheduled jobs may start late.
+    - cron: '0 * * * *'
   push:
     branches: [main]
     # One owner-requested initial batch; unrelated pushes do not execute it.
@@ -68,8 +70,7 @@ jobs:
       META_NEW_ROUTES_RIGHTS_APPROVED: ${{ vars.META_NEW_ROUTES_RIGHTS_APPROVED }}
       META_CROSS_ENGAGEMENT_ENABLED: ${{ vars.META_CROSS_ENGAGEMENT_ENABLED || 'true' }}
       META_CROSS_REPOST_ENABLED: 'false'
-      # Scheduled and push runs are audit-only; explicit workflow_dispatch apply is needed for writes.
-      # Scheduled and push runs remain read-only; the one-off live test is complete.
+      # Schedule and push remain read-only; a previous single-like trial is complete.
       GITHUB_EVENT_NAME: ${{ github.event_name }}
       GITHUB_REF: ${{ github.ref }}
       ENGAGEMENT_MODE: ${{ inputs.mode || 'dry_run' }}
