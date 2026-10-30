@@ -69,7 +69,10 @@ jobs:
       META_CROSS_ENGAGEMENT_ENABLED: ${{ vars.META_CROSS_ENGAGEMENT_ENABLED || 'true' }}
       META_CROSS_REPOST_ENABLED: 'false'
       # Scheduled and push runs are audit-only; explicit workflow_dispatch apply is needed for writes.
-      ENGAGEMENT_MODE: ${{ inputs.mode || 'dry_run' }}
+      # One-time manual owner smoke via dedicated push marker, never schedule.
+      GITHUB_EVENT_NAME: ${{ github.event_name }}
+      GITHUB_REF: ${{ github.ref }}
+      ENGAGEMENT_MODE: ${{ inputs.mode || (github.event_name == 'push' && 'single_like' || 'dry_run') }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -81,7 +84,7 @@ jobs:
       - name: Read recent publisher results and verified actor identities; prepare independent ledger
         run: python meta_cross_engagement.py plan
       - name: Persist all intents before any engagement POST
-        if: env.META_CROSS_ENGAGEMENT_ENABLED == 'true' && env.ENGAGEMENT_MODE == 'apply'
+        if: env.META_CROSS_ENGAGEMENT_ENABLED == 'true' && (env.ENGAGEMENT_MODE == 'apply' || env.ENGAGEMENT_MODE == 'single_like')
         uses: actions/upload-artifact@v4
         with:
           name: cross-engagement-intent
