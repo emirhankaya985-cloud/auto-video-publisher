@@ -222,9 +222,28 @@ def permission(platform, operation):
     return {"pages_manage_engagement"} if operation == "like" else {"pages_manage_posts"}
 
 
+def provider_holds(ledger):
+    """Persist Meta policy restrictions; never rotate actors to continue a lane.
+
+    Migrate definitive 368 receipts from earlier runners before pruning their
+    action records. A hold is not cleared by time, a fresh source or a new run.
+    """
+    holds = ledger.setdefault("provider_holds", {})
+    if not isinstance(holds, dict):
+        raise ValueError("invalid provider hold state")
+    for record in ledger["actions"].values():
+        lane = (record.get("platform"), record.get("operation"))
+        if (record.get("status") == "rejected" and type(record.get("graph_code")) is int
+                and record["graph_code"] == 368 and lane in SUPPORTED):
+            holds.setdefault("/".join(lane), {"graph_code": 368, "reason": "meta_provider_restriction",
+                                              "run_id": str(record.get("run_id", ""))})
+    return holds
+
+
 def build_plan(posts, actors, ledger, run_id, source_run_id, *, now):
     if ledger.get("schema") != 1 or not isinstance(ledger.get("actions"), dict):
         raise ValueError("invalid engagement ledger; reset forbidden")
+    holds = provider_holds(ledger)
     # Old source runs cannot be replayed after 24h; retain intent/results 48h.
     ledger["actions"] = {k: v for k, v in ledger["actions"].items()
                          if stamp(v["at"]) >= now - timedelta(hours=48)}
@@ -253,6 +272,8 @@ def build_plan(posts, actors, ledger, run_id, source_run_id, *, now):
                     report.append(dict(task, status="missing_permission"))
                 elif action_key in ledger["actions"] and not repair_preflight:
                     report.append(dict(task, status="already_recorded"))
+                elif f"{task['platform']}/{operation}" in holds:
+                    report.append(dict(task, status="provider_restriction_hold"))
                 else:
                     # Reserve the ENTIRE batch in a GitHub artifact before POST.
                     ledger["actions"][action_key] = dict(task, status="reserved",
@@ -311,12 +332,18 @@ def perform(task, actor, link):
 def execute(tasks, actors, ledger, run_id, *, persist, sleep=time.sleep):
     stopped = set()
     source_checks = {}
+    holds = provider_holds(ledger)
     for task in tasks:
         record = ledger["actions"].get(key(task))
         if (not record or record.get("status") != "reserved" or record.get("run_id") != run_id
                 or any(record.get(k) != v for k, v in task.items())):
             continue
         actor_key = (task["platform"], task["actor"])
+        lane = f"{task['platform']}/{task['operation']}"
+        if lane in holds:
+            record["status"] = "provider_restriction_hold"
+            persist(ledger)
+            continue
         actor = actors.get(actor_key)
         if not actor or actor_key in stopped or not account_enabled(actor["name"], task["platform"]):
             record["status"] = "blocked_actor"
@@ -357,6 +384,8 @@ def execute(tasks, actors, ledger, run_id, *, persist, sleep=time.sleep):
                           http_status=exc.http, graph_code=exc.code)
             if exc.http in {401, 403, 429} or exc.code in {4, 10, 17, 32, 190, 200, 613}:
                 stopped.add(actor_key)
+            if exc.code == 368:
+                holds[lane] = {"graph_code": 368, "reason": "meta_provider_restriction", "run_id": run_id}
         persist(ledger)
     return ledger
 
@@ -496,12 +525,14 @@ def main():
         save(PLAN, tasks)
         save(REPORT, {"mode": "apply" if live else "dry_run", "planned": len(tasks),
                       "source_run_id": source_id, "source_posts": len(posts),
-                      "verified_accounts": len(actors), "blocked": report, "blocked_counts": blocked_counts})
+                      "verified_accounts": len(actors), "blocked": report, "blocked_counts": blocked_counts,
+                      "provider_holds": ledger.get("provider_holds", {})})
         if live:
             save(STATE, ledger)
         print(json.dumps({"mode": "apply" if live else "dry_run", "planned": len(tasks),
                           "source_posts": len(posts), "verified_accounts": len(actors),
-                          "blocked": len(report), "blocked_counts": blocked_counts}))
+                          "blocked": len(report), "blocked_counts": blocked_counts,
+                          "provider_holds": ledger.get("provider_holds", {})}))
     elif live:
         ledger = json.loads(STATE.read_text())
         execute(json.loads(PLAN.read_text()), actors, ledger, run_id, persist=lambda x: save(STATE, x))
@@ -513,8 +544,8 @@ def main():
         by_operation = dict(Counter(f"{v['platform']}/{v['operation']}/{v['status']}"
                                     for v in ledger["actions"].values() if v.get("run_id") == run_id))
         print(json.dumps({"results": counts, "by_operation": by_operation,
-                          "publication_state_modified": False}))
-        if any(counts.get(s) for s in ("source_or_permission_unverified", "uncertain", "rejected", "blocked_actor")):
+                          "provider_holds": ledger.get("provider_holds", {}), "publication_state_modified": False}))
+        if ledger.get("provider_holds") or any(counts.get(s) for s in ("source_or_permission_unverified", "uncertain", "rejected", "blocked_actor", "provider_restriction_hold")):
             raise SystemExit(1)
     else:
         print('{"mode":"dry_run","writes":0}')

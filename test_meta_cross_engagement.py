@@ -201,6 +201,33 @@ class EngagementTests(unittest.TestCase):
             post.assert_not_called()
         self.assertEqual(ledger["actions"][m.key(t)]["status"],"blocked_actor")
 
+    def test_policy_block_stops_other_actors_without_more_posts(self):
+        one=task("repost");two=dict(one,actor="11")
+        ledger=reserved(one);ledger["actions"].update(reserved(two)["actions"])
+        with patch.object(m,"verified_media",return_value="https://www.facebook.com/watch/?v=123"), \
+             patch.object(m,"perform",side_effect=m.GraphFailure(400,368,definite=True)) as post:
+            m.execute([one,two],actors(),ledger,"200",persist=Mock(),sleep=Mock())
+            post.assert_called_once()
+        self.assertEqual(ledger["actions"][m.key(two)]["status"],"provider_restriction_hold")
+        self.assertEqual(ledger["provider_holds"]["facebook/repost"]["graph_code"],368)
+
+    def test_prior_368_hold_survives_pruning_and_blocks_new_sources(self):
+        old=task("repost");ledger=reserved(old)
+        record=ledger["actions"][m.key(old)]
+        record.update(status="rejected",graph_code=368,at=(NOW-timedelta(hours=49)).isoformat())
+        posts=[dict(platform="facebook",post_id="456",owner="11")]
+        planned,report=m.build_plan(posts,actors(),ledger,"201","100",now=NOW)
+        self.assertFalse(any(t["operation"]=="repost" for t in planned))
+        self.assertTrue(any(r["status"]=="provider_restriction_hold" for r in report))
+        self.assertNotIn(m.key(old),ledger["actions"])
+        planned,_=m.build_plan(posts,actors(),ledger,"202","100",now=NOW+timedelta(days=3))
+        self.assertFalse(any(t["operation"]=="repost" for t in planned))
+        self.assertIn("facebook/repost",ledger["provider_holds"])
+
+    def test_malformed_provider_hold_state_cannot_be_reset(self):
+        with self.assertRaises(ValueError):
+            m.build_plan([],actors(),{"schema":1,"actions":{},"provider_holds":[]},"200","100",now=NOW)
+
     def test_graph_transport_failure_is_single_attempt_and_redacted(self):
         post = Mock(side_effect=requests.Timeout("private-token signed-url"))
         with self.assertRaises(m.GraphFailure) as error:
