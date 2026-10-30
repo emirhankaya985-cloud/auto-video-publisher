@@ -1,8 +1,8 @@
 name: Meta cross-account engagement
 on:
   schedule:
-    # 13:00 Europe/Istanbul = 10:00 UTC. GitHub may start cron late.
-    - cron: '0 10 * * *'
+    # 13:00 and 01:00 Europe/Istanbul = 10:00 and 22:00 UTC. GitHub may start late.
+    - cron: '0 10,22 * * *'
   push:
     branches: [main]
     # One owner-requested initial batch; unrelated pushes do not execute it.
@@ -67,7 +67,8 @@ jobs:
       ENABLE_NEW_META_ROUTES: ${{ vars.ENABLE_NEW_META_ROUTES }}
       META_NEW_ROUTES_RIGHTS_APPROVED: ${{ vars.META_NEW_ROUTES_RIGHTS_APPROVED }}
       META_CROSS_ENGAGEMENT_ENABLED: ${{ vars.META_CROSS_ENGAGEMENT_ENABLED || 'true' }}
-      ENGAGEMENT_MODE: ${{ inputs.mode || 'apply' }}
+      META_CROSS_REPOST_ENABLED: 'false'
+      ENGAGEMENT_MODE: ${{ inputs.mode || (github.event_name == 'push' && 'dry_run' || 'apply') }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:

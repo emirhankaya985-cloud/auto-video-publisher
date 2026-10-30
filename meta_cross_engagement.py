@@ -38,6 +38,12 @@ ROUTE_NAMES = {
     "film": "Film Mağarası", "film_second": "Filmmagrasi", "toonzone": "ToonZone",
 }
 OPERATIONS = ("like", "save", "repost")
+
+
+def repost_enabled():
+    """Explicit opt-in only: owner has disabled all Facebook repost writes."""
+    return os.getenv("META_CROSS_REPOST_ENABLED") == "true"
+
 SUPPORTED = {("facebook", "like"), ("instagram", "like"), ("facebook", "repost")}
 ID = re.compile(r"[0-9]+(?:_[0-9]+)?\Z")
 
@@ -264,7 +270,9 @@ def build_plan(posts, actors, ledger, run_id, source_run_id, *, now):
                     and prior.get("run_id") == "41044986946"
                     and "source_check_version" not in prior
                     and all(prior.get(k) == v for k, v in task.items()))
-                if (task["platform"], operation) not in SUPPORTED:
+                if operation == "repost" and not repost_enabled():
+                    report.append(dict(task, status="disabled_by_owner"))
+                elif (task["platform"], operation) not in SUPPORTED:
                     report.append(dict(task, status="unsupported_by_verified_api"))
                 elif operation == "repost" and task["owner"] == task["actor"]:
                     report.append(dict(task, status="self_share_not_applicable"))
@@ -321,6 +329,8 @@ def perform(task, actor, link):
         if body.get("success") is not True:
             raise GraphFailure()
         return {"api_ack": True}
+    if task["operation"] == "repost" and not repost_enabled():
+        raise ValueError("repost disabled by owner")
     if task["operation"] == "repost" and task["platform"] == "facebook":
         body = graph("POST", f"{actor['id']}/feed", actor["token"], {"link": link})
         if not ID.fullmatch(str(body.get("id", ""))):
@@ -337,6 +347,10 @@ def execute(tasks, actors, ledger, run_id, *, persist, sleep=time.sleep):
         record = ledger["actions"].get(key(task))
         if (not record or record.get("status") != "reserved" or record.get("run_id") != run_id
                 or any(record.get(k) != v for k, v in task.items())):
+            continue
+        if task["operation"] == "repost" and not repost_enabled():
+            record["status"] = "disabled_by_owner"
+            persist(ledger)
             continue
         actor_key = (task["platform"], task["actor"])
         lane = f"{task['platform']}/{task['operation']}"
