@@ -51,3 +51,7 @@ POST/retries. The 01:00/13:00 daily schedules remain dry-run reports only.
 A prior Meta 368 hold on Facebook repost stays active. Do not interpret one
 API acknowledgement as a growth outcome or authorization for a bulk run.
 Once the trial has finished, restore push default to dry_run.
+
+## 31 October 2026 — ToonZone-focused read-only audit trial
+
+The owner selected ToonZone as the first account to review before other accounts. PR #45 merged after mock CI tests. This single marker change invokes the repository's push-triggered Meta audit in `dry_run` mode only. The workflow has `META_AUDIT_FOCUS=ToonZone`, so only verified recently published ToonZone media are included in the read-only plan. The output identifies candidate managed accounts with matching access, but does not confirm any actual likes and sends zero Meta engagement POSTs. A live `apply` is explicitly blocked while a focus is set. Hourly HH:07 TRT audits remain in effect; neither saves nor reposts are sent.
