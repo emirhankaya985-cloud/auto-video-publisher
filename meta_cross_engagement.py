@@ -513,6 +513,50 @@ def restore():
     return archive(newest["id"], "engagement.json")
 
 
+
+def build_one_like(posts, actors, ledger, run_id, source_run_id, *, now):
+    """One authorized, cross-account like only; no write before live preflight.
+
+    This is a limited, owner-requested one-time API smoke trial, NOT a
+    bulk-engagement runner. Do not reserve any save or repost intents.
+    """
+    if ledger.get("schema") != 1 or not isinstance(ledger.get("actions"), dict):
+        raise ValueError("invalid engagement ledger; reset forbidden")
+    holds = provider_holds(ledger)
+    for platform in ("instagram", "facebook"):
+        if f"{platform}/like" in holds:
+            continue
+        checked = 0
+        for source in sorted((p for p in posts if p["platform"] == platform),
+                             key=lambda p: p["post_id"]):
+            for actor in sorted((a for a in actors.values()
+                                 if a["platform"] == platform and a["id"] != source["owner"]
+                                 and permission(platform, "like") <= a["grants"]),
+                                key=lambda a: a["id"]):
+                task = dict(source, actor=actor["id"], operation="like",
+                            source_run_id=source.get("source_run_id", source_run_id))
+                if key(task) in ledger["actions"]:
+                    continue
+                if checked >= 8:
+                    break
+                checked += 1
+                try:
+                    verified_media(task, actors)
+                except (GraphFailure, ValueError, KeyError):
+                    continue
+                # Reuse the hardened ledger reservation, then keep only
+                # the one verified like; no other operation can be reserved.
+                selected = {("like", platform, actor["id"]): actor}
+                # build_plan works from actor.values(); key shape is not used.
+                tasks, report = build_plan([source], selected, ledger, run_id,
+                                           source_run_id, now=now)
+                if len(tasks) != 1 or tasks[0]["operation"] != "like":
+                    raise ValueError("unexpected single-like reservation")
+                return tasks, report
+            if checked >= 8:
+                break
+    return [], [{"status": "no_eligible_verified_single_like"}]
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("action", choices=("plan", "execute"))
@@ -521,7 +565,11 @@ def main():
     run_id, source_id = os.environ["GITHUB_RUN_ID"], os.environ["SOURCE_RUN_ID"]
     if os.getenv("GITHUB_REPOSITORY") != REPO or not run_id.isdigit() or not (source_id.isdigit() or source_id == "latest"):
         raise ValueError("invalid workflow identity")
-    live = os.getenv("META_CROSS_ENGAGEMENT_ENABLED") == "true" and os.getenv("ENGAGEMENT_MODE") == "apply"
+    mode = os.getenv("ENGAGEMENT_MODE")
+    single_like = (mode == "single_like" and os.getenv("GITHUB_EVENT_NAME") == "push"
+                   and os.getenv("GITHUB_REF") == "refs/heads/main")
+    live = (os.getenv("META_CROSS_ENGAGEMENT_ENABLED") == "true"
+            and (mode == "apply" or single_like))
     actors = accounts(load_meta_auth(), os.getenv("META_ACCESS_TOKEN", ""))
     if not actors:
         raise ValueError("no verified enabled accounts")
@@ -533,8 +581,12 @@ def main():
         posts = (recent_posts(state, source_id, actors, now=now)
                  if os.getenv("ENGAGEMENT_SCOPE") == "recent_window"
                  else source_posts(state, source_id, actors))
-        tasks, report = build_plan(posts,
-                                   actors, ledger, run_id, source_id, now=now)
+        tasks, report = (build_one_like(posts, actors, ledger, run_id, source_id, now=now)
+                         if single_like else build_plan(posts, actors, ledger, run_id,
+                                                        source_id, now=now))
+        if single_like and live and (len(tasks) != 1 or tasks[0]["operation"] != "like"
+                                     or tasks[0]["actor"] == tasks[0]["owner"]):
+            raise ValueError("single-like plan not safe")
         blocked_counts = dict(Counter(f"{r['platform']}/{r['operation']}/{r['status']}" for r in report))
         save(PLAN, tasks)
         save(REPORT, {"mode": "apply" if live else "dry_run", "planned": len(tasks),
@@ -549,7 +601,11 @@ def main():
                           "provider_holds": ledger.get("provider_holds", {})}))
     elif live:
         ledger = json.loads(STATE.read_text())
-        execute(json.loads(PLAN.read_text()), actors, ledger, run_id, persist=lambda x: save(STATE, x))
+        tasks = json.loads(PLAN.read_text())
+        if single_like and (len(tasks) != 1 or tasks[0].get("operation") != "like"
+                            or tasks[0].get("actor") == tasks[0].get("owner")):
+            raise ValueError("single-like execution scope invalid")
+        execute(tasks, actors, ledger, run_id, persist=lambda x: save(STATE, x))
         counts = {}
         for value in ledger["actions"].values():
             if value.get("run_id") == run_id:
@@ -559,7 +615,7 @@ def main():
                                     for v in ledger["actions"].values() if v.get("run_id") == run_id))
         print(json.dumps({"results": counts, "by_operation": by_operation,
                           "provider_holds": ledger.get("provider_holds", {}), "publication_state_modified": False}))
-        if ledger.get("provider_holds") or any(counts.get(s) for s in ("source_or_permission_unverified", "uncertain", "rejected", "blocked_actor", "provider_restriction_hold")):
+        if (ledger.get("provider_holds") and not single_like) or any(counts.get(s) for s in ("source_or_permission_unverified", "uncertain", "rejected", "blocked_actor", "provider_restriction_hold")):
             raise SystemExit(1)
     else:
         print('{"mode":"dry_run","writes":0}')
