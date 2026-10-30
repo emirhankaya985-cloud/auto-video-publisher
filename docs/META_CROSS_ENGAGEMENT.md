@@ -67,3 +67,14 @@ silinmez. Doğrulanmamış API'ler, mobil private API, çerez/şifre veya taray�
 
 Resmi kaynaklar 30 Ekim 2026'da doğrudan HTTP üzerinden okunmuştur. Like API
 changelog'a göre bütün sürümlerde geçerlidir; mevcut üretim Graph v24.0 korunur.
+
+## İlk canlı batch sonrası Video kontrolü
+
+İlk batch 210 adayı POST öncesi durdurdu ve sıfır paylaşım üretti. Numeric
+Facebook Video kaynaklarında artık yalnız id/from okunup sahiplik doğrulanır;
+doğrulanmış Video ID için `https://www.facebook.com/watch/?v=VIDEO_ID` bağlantısı
+paylaşılır. Bu, Graph API'den alınan permalink iddiası değildir. İlk batch'in
+kesinlikle POST yapılmamış preflight kayıtları yalnız bir kez version=2 ile
+yeniden değerlendirilebilir; belirsiz/başarılı POST kayıtları açılamaz.
+
+[Meta Video referansı: id ve from](https://developers.facebook.com/docs/graph-api/reference/video/)

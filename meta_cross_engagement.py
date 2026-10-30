@@ -237,34 +237,52 @@ def build_plan(posts, actors, ledger, run_id, source_run_id, *, now):
                 task = dict(source, actor=actor["id"], operation=operation,
                             source_run_id=source.get("source_run_id", source_run_id))
                 action_key = key(task)
+                prior = ledger["actions"].get(action_key, {})
+                # Audited first batch made ZERO POSTs: only these exact local
+                # preflight failures may use the corrected Video field set.
+                repair_preflight = (task["platform"] == "facebook" and operation == "repost"
+                    and prior.get("status") == "source_or_permission_unverified"
+                    and prior.get("run_id") == "41044986946"
+                    and "source_check_version" not in prior
+                    and all(prior.get(k) == v for k, v in task.items()))
                 if (task["platform"], operation) not in SUPPORTED:
                     report.append(dict(task, status="unsupported_by_verified_api"))
                 elif operation == "repost" and task["owner"] == task["actor"]:
                     report.append(dict(task, status="self_share_not_applicable"))
                 elif not permission(task["platform"], operation) <= actor["grants"]:
                     report.append(dict(task, status="missing_permission"))
-                elif action_key in ledger["actions"]:
+                elif action_key in ledger["actions"] and not repair_preflight:
                     report.append(dict(task, status="already_recorded"))
                 else:
                     # Reserve the ENTIRE batch in a GitHub artifact before POST.
                     ledger["actions"][action_key] = dict(task, status="reserved",
-                        run_id=run_id, at=now.isoformat())
+                        run_id=run_id, at=now.isoformat(), source_check_version=2)
                     tasks.append(task)
     return tasks, report
 
 
 def verified_media(task, actors):
     source = actors[(task["platform"], task["owner"])]
-    fields = "id,from,permalink_url" if task["platform"] == "facebook" else "id,owner,permalink,media_type"
+    # The publisher records a Video ID, not a PagePost ID. permalink_url is
+    # not a common Video field; do not fail the owner check by requesting it.
+    fields = "id,from" if task["platform"] == "facebook" else "id,owner,permalink,media_type"
     body = graph("GET", task["post_id"], source["token"], {"fields": fields})
     owner = body.get("from" if task["platform"] == "facebook" else "owner")
-    if (str(body.get("id")) != task["post_id"] or not isinstance(owner, dict)
-            or str(owner.get("id")) != task["owner"]):
-        raise ValueError("source ownership unverified")
+    if str(body.get("id")) != task["post_id"]:
+        raise ValueError("source_id_mismatch")
+    if not isinstance(owner, dict):
+        raise ValueError("source_owner_missing")
+    if str(owner.get("id")) != task["owner"]:
+        raise ValueError("source_owner_mismatch")
     if task["platform"] == "instagram" and body.get("media_type") not in {"IMAGE", "VIDEO", "CAROUSEL_ALBUM"}:
         raise ValueError("unsupported Instagram media")
-    if task["operation"] == "repost":
-        link = body.get("permalink_url")
+    if task["platform"] == "facebook" and task["operation"] == "repost":
+        if task["post_id"].isdigit():
+            # Canonical Facebook Watch URL of the verified owned Video ID.
+            # This is a link share, never a claim that Meta returned a permalink.
+            return f"https://www.facebook.com/watch/?v={task['post_id']}"
+        # Composite PagePost IDs, if ever present, have a separate field read.
+        link = graph("GET", task["post_id"], source["token"], {"fields": "id,permalink_url"}).get("permalink_url")
         parsed = urlsplit(link) if isinstance(link, str) else None
         if (not parsed or parsed.scheme != "https" or parsed.hostname not in
                 {"www.facebook.com", "facebook.com", "m.facebook.com"}
@@ -292,6 +310,7 @@ def perform(task, actor, link):
 
 def execute(tasks, actors, ledger, run_id, *, persist, sleep=time.sleep):
     stopped = set()
+    source_checks = {}
     for task in tasks:
         record = ledger["actions"].get(key(task))
         if (not record or record.get("status") != "reserved" or record.get("run_id") != run_id
@@ -308,9 +327,22 @@ def execute(tasks, actors, ledger, run_id, *, persist, sleep=time.sleep):
                 raise ValueError("unsupported operation")
             if not permission(task["platform"], task["operation"]) <= actor["grants"]:
                 raise ValueError("missing permission")
-            link = verified_media(task, actors)
-        except (GraphFailure, ValueError, KeyError):
+            source_key = (task["platform"], task["post_id"], task["owner"], task["operation"])
+            if source_key not in source_checks:
+                try:
+                    source_checks[source_key] = verified_media(task, actors)
+                except (GraphFailure, ValueError, KeyError) as exc:
+                    source_checks[source_key] = exc
+            link = source_checks[source_key]
+            if isinstance(link, Exception):
+                raise link
+        except (GraphFailure, ValueError, KeyError) as exc:
             record["status"] = "source_or_permission_unverified"
+            record["preflight_error_type"] = type(exc).__name__
+            if isinstance(exc, GraphFailure):
+                record.update(http_status=exc.http, graph_code=exc.code)
+            elif str(exc) in {"source_id_mismatch", "source_owner_missing", "source_owner_mismatch"}:
+                record["preflight_reason"] = str(exc)
             persist(ledger)
             continue
         # Crash, malformed acknowledgement, transport/5xx: never repeat a POST.
@@ -482,6 +514,8 @@ def main():
                                     for v in ledger["actions"].values() if v.get("run_id") == run_id))
         print(json.dumps({"results": counts, "by_operation": by_operation,
                           "publication_state_modified": False}))
+        if any(counts.get(s) for s in ("source_or_permission_unverified", "uncertain", "rejected", "blocked_actor")):
+            raise SystemExit(1)
     else:
         print('{"mode":"dry_run","writes":0}')
 

@@ -109,13 +109,44 @@ class EngagementTests(unittest.TestCase):
                     m.perform(t, actors()[(t["platform"], t["actor"])], None)
                 graph.assert_not_called()
 
-    def test_mismatched_owner_and_external_links_block(self):
-        for body in ({"id": "123", "from": {"id": "99"}, "permalink_url": "https://www.facebook.com/reel/123/"},
-                     {"id": "123", "from": {"id": "11"}, "permalink_url": "https://evil.test/"},
-                     {"id": "123", "from": {"id": "11"}, "permalink_url": "https://www.facebook.com.evil.test/"}):
-            with patch.object(m, "graph", return_value=body):
-                with self.assertRaises(ValueError):
-                    m.verified_media(task("repost"), actors())
+    def test_video_ownership_does_not_request_pagepost_permalink_field(self):
+        with patch.object(m,"graph",return_value={"id":"123","from":{"id":"11"}}) as graph:
+            self.assertEqual(m.verified_media(task("repost"),actors()),"https://www.facebook.com/watch/?v=123")
+            self.assertEqual(graph.call_args.args[3],{"fields":"id,from"})
+        with patch.object(m,"graph",return_value={"id":"123","from":{"id":"99"}}):
+            with self.assertRaises(ValueError):m.verified_media(task("repost"),actors())
+        with patch.object(m,"graph",return_value={"id":"999","from":{"id":"11"}}):
+            with self.assertRaises(ValueError):m.verified_media(task("repost"),actors())
+
+    def test_video_link_is_constructed_only_from_verified_id_not_response_url(self):
+        with patch.object(m,"graph",return_value={"id":"123","from":{"id":"11"},"permalink_url":"https://evil.test/"}):
+            self.assertEqual(m.verified_media(task("repost"),actors()),"https://www.facebook.com/watch/?v=123")
+
+    def test_only_audited_no_post_preflight_can_be_rechecked_once(self):
+        t=task("repost")
+        for status in ("source_or_permission_unverified","uncertain","accepted","rejected","reserved"):
+            ledger=reserved(t)
+            prior=ledger["actions"][m.key(t)]
+            prior.update(status=status,run_id="41044986946")
+            planned,_=m.build_plan([dict(platform="facebook",post_id="123",owner="11")],actors(),ledger,"201","100",now=NOW)
+            selected=[p for p in planned if m.key(p)==m.key(t)]
+            self.assertEqual(len(selected),int(status=="source_or_permission_unverified"))
+            if selected:
+                self.assertEqual(ledger["actions"][m.key(t)]["source_check_version"],2)
+                ledger["actions"][m.key(t)]["status"]="source_or_permission_unverified"
+                again,_=m.build_plan([dict(platform="facebook",post_id="123",owner="11")],actors(),ledger,"202","100",now=NOW)
+                self.assertFalse(any(m.key(p)==m.key(t) for p in again))
+
+    def test_source_owner_check_is_cached_without_skipping_actor_posts(self):
+        first=task("repost");second=dict(first,actor="55")
+        aa=actors()
+        aa[("facebook","55")]=dict(aa[("facebook","22")],id="55")
+        ledger=reserved(first);ledger["actions"].update(reserved(second)["actions"])
+        with patch.object(m,"verified_media",return_value="https://www.facebook.com/watch/?v=123") as check, \
+             patch.object(m,"perform",return_value={"api_ack":True,"share_post_id":"9"}) as post:
+            m.execute([first,second],aa,ledger,"200",persist=Mock(),sleep=Mock())
+            self.assertEqual(check.call_count,1)
+            self.assertEqual(post.call_count,2)
 
     def test_crash_after_post_is_persisted_uncertain_and_not_retried(self):
         t = task("repost")
