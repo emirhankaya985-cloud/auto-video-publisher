@@ -1,0 +1,106 @@
+name: Meta cross-account engagement
+on:
+  workflow_run:
+    workflows: ['Public link Meta automation']
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: Completed main publisher run from the last 24 hours
+        required: true
+        type: string
+      mode:
+        description: Preview or execute supported API operations
+        required: true
+        default: dry_run
+        type: choice
+        options: [dry_run, apply]
+  pull_request:
+    paths:
+      - 'meta_cross_engagement.py'
+      - 'test_meta_cross_engagement.py'
+      - '.github/workflows/meta_cross_engagement.yml'
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: meta-cross-engagement-ledger
+  cancel-in-progress: false
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: pip install --require-hashes -r requirements.txt
+      - name: Verify identities, unsupported actions, dedupe and crash safety with mocks
+        run: python -m unittest -v test_meta_cross_engagement.py
+  engage:
+    needs: tests
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.head_repository.full_name == github.repository &&
+       github.event.workflow_run.head_branch == 'main' &&
+       (github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_RUN_ID: ${{ inputs.source_run_id || github.event.workflow_run.id }}
+      META_AUTH_JSON: ${{ secrets.META_AUTH_JSON }}
+      META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+      ENABLE_TP_NORMAL_ROUTES: ${{ vars.ENABLE_TP_NORMAL_ROUTES }}
+      ENABLE_GONLE_NORMAL_ROUTES: ${{ vars.ENABLE_GONLE_NORMAL_ROUTES }}
+      ENABLE_GONLE_INSTAGRAM_ROUTES: ${{ vars.ENABLE_GONLE_INSTAGRAM_ROUTES }}
+      ENABLE_DAILY_LAUGH_NORMAL_ROUTES: ${{ vars.ENABLE_DAILY_LAUGH_NORMAL_ROUTES }}
+      ENABLE_DAILY_LAUGH_INSTAGRAM_ROUTES: ${{ vars.ENABLE_DAILY_LAUGH_INSTAGRAM_ROUTES }}
+      ENABLE_FILM_ROUTES: ${{ vars.ENABLE_FILM_ROUTES }}
+      FILM_RIGHTS_APPROVED: ${{ vars.FILM_RIGHTS_APPROVED }}
+      ENABLE_TOONZONE_ROUTES: ${{ vars.ENABLE_TOONZONE_ROUTES }}
+      ENABLE_NEW_META_ROUTES: ${{ vars.ENABLE_NEW_META_ROUTES }}
+      META_NEW_ROUTES_RIGHTS_APPROVED: ${{ vars.META_NEW_ROUTES_RIGHTS_APPROVED }}
+      META_CROSS_ENGAGEMENT_ENABLED: ${{ vars.META_CROSS_ENGAGEMENT_ENABLED || 'false' }}
+      ENGAGEMENT_MODE: ${{ inputs.mode || (vars.META_CROSS_ENGAGEMENT_ENABLED == 'true' && 'apply' || 'dry_run') }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: main
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: pip install --require-hashes -r requirements.txt
+      - name: Read exact source result and verified actor identities; prepare independent ledger
+        run: python meta_cross_engagement.py plan
+      - name: Persist all intents before any engagement POST
+        if: env.META_CROSS_ENGAGEMENT_ENABLED == 'true' && env.ENGAGEMENT_MODE == 'apply'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cross-engagement-intent
+          path: cross-engagement/engagement.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Execute supported operations once; preserve ambiguous results
+        run: python meta_cross_engagement.py execute
+      - name: Preserve independent engagement ledger including partial results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cross-engagement-result
+          path: cross-engagement/engagement.json
+          if-no-files-found: ignore
+          retention-days: 90
+      - name: Preserve operation support and permission report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cross-engagement-report
+          path: |
+            cross-engagement/report.json
+            cross-engagement/plan.json
+          if-no-files-found: warn
+          retention-days: 30

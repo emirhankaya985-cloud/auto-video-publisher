@@ -1,0 +1,435 @@
+"""Official Meta API engagement; independent from video publication.
+
+Facebook/Instagram likes and Facebook link shares only. Unsupported save and
+native Instagram repost requests are reported, never simulated as successes.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import io
+import json
+import os
+import re
+import time
+import zipfile
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from urllib.parse import urlsplit
+
+import requests
+from meta_auth_loader import ALLOWED_NAMES, KNOWN_IDS, load_meta_auth
+from publisher_recovery import read_with_retry
+from publication_safety import route_paused
+
+REPO = "emirhankaya985-cloud/auto-video-publisher"
+VERSION = "v24.0"
+GRAPH = f"https://graph.facebook.com/{VERSION}"
+SOURCE_WORKFLOW = ".github/workflows/public_link_schedule.yml"
+WORKFLOW = ".github/workflows/meta_cross_engagement.yml"
+ROOT = Path("cross-engagement")
+STATE = ROOT / "engagement.json"
+PLAN = ROOT / "plan.json"
+REPORT = ROOT / "report.json"
+ROUTE_NAMES = {
+    "tarladaki": "Tarladaki Fasulye", "penguen": "Beyinsiz Penguen",
+    "gonle": "Gönle Düşen", "daily_laugh": "Daily Laugh Lab",
+    "film": "Film Mağarası", "film_second": "Filmmagrasi", "toonzone": "ToonZone",
+}
+OPERATIONS = ("like", "save", "repost")
+SUPPORTED = {("facebook", "like"), ("instagram", "like"), ("facebook", "repost")}
+ID = re.compile(r"[0-9]+(?:_[0-9]+)?\Z")
+
+
+def stamp(value):
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            raise ValueError()
+        return dt.astimezone(timezone.utc)
+    except (ValueError, AttributeError, TypeError):
+        raise ValueError("invalid timestamp") from None
+
+
+def save(path, value):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_suffix(".tmp")
+    temp.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
+    temp.replace(path)
+
+
+class GraphFailure(RuntimeError):
+    def __init__(self, http=None, code=None, *, definite=False):
+        self.http, self.code, self.definite = http, code, definite
+        super().__init__("Meta request rejected" if definite else "Meta result uncertain")
+
+
+def graph(method, node, token, data=None, *, get=None, post=None):
+    """Fixed host, bounded reads, exactly one write attempt, no provider text."""
+    if not token or not re.fullmatch(r"[A-Za-z0-9_]+(?:/[A-Za-z_]+)?", node):
+        raise ValueError("invalid graph request")
+    try:
+        headers = {"Authorization": f"Bearer {token}"}
+        if method == "GET":
+            response = read_with_retry(
+                get or requests.get, f"{GRAPH}/{node}", params=data or {}, headers=headers,
+                timeout=20, allow_redirects=False, graph_read=True,
+            )
+        elif method == "POST":
+            response = (post or requests.post)(
+                f"{GRAPH}/{node}", data=data or {}, headers=headers,
+                timeout=30, allow_redirects=False,
+            )
+        else:
+            raise ValueError("unsupported HTTP method")
+        try:
+            body = response.json()
+        except ValueError:
+            body = None
+        status = response.status_code
+        response.close()
+    except (requests.RequestException, OSError):
+        raise GraphFailure() from None
+    error = body.get("error") if isinstance(body, dict) else None
+    if not 200 <= status < 300 or not isinstance(body, dict) or error:
+        code = error.get("code") if isinstance(error, dict) else None
+        raise GraphFailure(status, code if type(code) is int else None,
+                           definite=400 <= status < 500 and status != 408
+                           and isinstance(error, dict))
+    return body
+
+
+def rows(node, token, fields=None):
+    params = {"limit": 100}
+    if fields:
+        params["fields"] = fields
+    output, cursors = [], set()
+    for _ in range(30):
+        body = graph("GET", node, token, params)
+        if not isinstance(body.get("data"), list):
+            raise ValueError("invalid Meta list")
+        output.extend(body["data"])
+        paging = body.get("paging") or {}
+        if not isinstance(paging, dict):
+            raise ValueError("invalid pagination")
+        if not paging.get("next"):
+            return output
+        cursor = (paging.get("cursors") or {}).get("after")
+        if not isinstance(cursor, str) or not cursor or cursor in cursors:
+            raise ValueError("invalid pagination")
+        cursors.add(cursor)
+        params["after"] = cursor
+    raise ValueError("pagination limit")
+
+
+def account_enabled(name, platform):
+    route = next((r for r, n in ROUTE_NAMES.items() if n == name), None)
+    if route is None:
+        return False
+    route = "film" if route == "film_second" else route
+    if platform == "instagram" and route in {"gonle", "daily_laugh"}:
+        route = "gonle_ig" if route == "gonle" else "daily_laugh_instagram"
+    return not route_paused(route)
+
+
+def accounts(auth, default_user_token):
+    """Confirm each Page identity and each User token's managed IG accounts.
+
+    User tokens are required for IG likes; never substitute a Page token.
+    Secrets exist only in this process, never in the plan or ledger.
+    """
+    pages = auth.get("pages") if isinstance(auth, dict) else None
+    if not isinstance(pages, list):
+        raise ValueError("invalid Meta account config")
+    result, seen, grants_cache = {}, set(), {}
+    for page in pages:
+        name = str(page.get("page_name", ""))
+        pid = str(page.get("page_id", ""))
+        if name.casefold() not in ALLOWED_NAMES or not pid.isdecimal() or pid in seen:
+            raise ValueError("invalid or duplicate Page identity")
+        if ((pid in KNOWN_IDS and KNOWN_IDS[pid] != name)
+                or (name in KNOWN_IDS.values() and KNOWN_IDS.get(pid) != name)):
+            raise ValueError("pinned Page identity mismatch")
+        seen.add(pid)
+        try:
+            token = page.get("page_token", "")
+            identity = graph("GET", "me", token, {"fields": "id"})
+            if str(identity.get("id")) != pid:
+                raise ValueError("Page token identity mismatch")
+            user_token = page.get("user_token") or default_user_token
+            if user_token not in grants_cache:
+                permissions = rows("me/permissions", user_token)
+                grants = {x["permission"] for x in permissions
+                          if isinstance(x, dict) and x.get("status") == "granted"
+                          and isinstance(x.get("permission"), str)}
+                managed = rows("me/accounts", user_token, "id,instagram_business_account{id}")
+                mapping = {str(x["id"]): str((x.get("instagram_business_account") or {}).get("id", ""))
+                           for x in managed if isinstance(x, dict) and x.get("id")}
+                grants_cache[user_token] = (grants, mapping)
+            grants, mapping = grants_cache[user_token]
+            if pid not in mapping:
+                raise ValueError("Page not managed by authorized User")
+            ig = str(page.get("instagram_id") or "")
+            if ig and (not ig.isdecimal() or mapping[pid] != ig):
+                raise ValueError("Instagram identity mismatch")
+            if account_enabled(name, "facebook"):
+                result[("facebook", pid)] = dict(platform="facebook", id=pid, name=name,
+                    token=token, grants=grants, owner_page=pid)
+            if ig and account_enabled(name, "instagram"):
+                if ("instagram", ig) in result:
+                    raise ValueError("duplicate Instagram identity")
+                result[("instagram", ig)] = dict(platform="instagram", id=ig, name=name,
+                    token=user_token, grants=grants, owner_page=pid)
+        except (GraphFailure, ValueError):
+            # A rejected account cannot supply actors OR source posts.
+            continue
+    return result
+
+
+def source_posts(state, source_run_id, actors):
+    if not isinstance(state, dict) or not isinstance(state.get("entries"), dict):
+        raise ValueError("invalid publisher state")
+    output, seen = [], set()
+    by_name = {(a["platform"], a["name"]): a for a in actors.values()}
+    for row in state["entries"].values():
+        if not isinstance(row, dict):
+            raise ValueError("invalid publisher row")
+        platform, route = row.get("platform"), row.get("route")
+        post_id = str(row.get("post_id") or "")
+        source = by_name.get((platform, ROUTE_NAMES.get(route)))
+        if (row.get("status") != "done" or str(row.get("run_id")) != source_run_id
+                or not source or not ID.fullmatch(post_id)
+                or row.get("duplicate_of_file_id") or row.get("reconciled_in_run_id")
+                or row.get("reconciliation_proof")):
+            continue
+        identity = (platform, post_id)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        output.append(dict(platform=platform, post_id=post_id, owner=source["id"]))
+    return output
+
+
+def key(task):
+    raw = ":".join(task[k] for k in ("platform", "actor", "post_id", "operation"))
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def permission(platform, operation):
+    if platform == "instagram":
+        return {"instagram_basic", "instagram_manage_engagement"}
+    return {"pages_manage_engagement"} if operation == "like" else {"pages_manage_posts"}
+
+
+def build_plan(posts, actors, ledger, run_id, source_run_id, *, now):
+    if ledger.get("schema") != 1 or not isinstance(ledger.get("actions"), dict):
+        raise ValueError("invalid engagement ledger; reset forbidden")
+    # Old source runs cannot be replayed after 24h; retain intent/results 48h.
+    ledger["actions"] = {k: v for k, v in ledger["actions"].items()
+                         if stamp(v["at"]) >= now - timedelta(hours=48)}
+    tasks, report = [], []
+    for source in posts:
+        for actor in actors.values():
+            if actor["platform"] != source["platform"]:
+                continue
+            for operation in OPERATIONS:
+                task = dict(source, actor=actor["id"], operation=operation,
+                            source_run_id=source_run_id)
+                action_key = key(task)
+                if (task["platform"], operation) not in SUPPORTED:
+                    report.append(dict(task, status="unsupported_by_verified_api"))
+                elif operation == "repost" and task["owner"] == task["actor"]:
+                    report.append(dict(task, status="self_share_not_applicable"))
+                elif not permission(task["platform"], operation) <= actor["grants"]:
+                    report.append(dict(task, status="missing_permission"))
+                elif action_key in ledger["actions"]:
+                    report.append(dict(task, status="already_recorded"))
+                else:
+                    # Reserve the ENTIRE batch in a GitHub artifact before POST.
+                    ledger["actions"][action_key] = dict(task, status="reserved",
+                        run_id=run_id, at=now.isoformat())
+                    tasks.append(task)
+    return tasks, report
+
+
+def verified_media(task, actors):
+    source = actors[(task["platform"], task["owner"])]
+    fields = "id,from,permalink_url" if task["platform"] == "facebook" else "id,owner,permalink,media_type"
+    body = graph("GET", task["post_id"], source["token"], {"fields": fields})
+    owner = body.get("from" if task["platform"] == "facebook" else "owner")
+    if (str(body.get("id")) != task["post_id"] or not isinstance(owner, dict)
+            or str(owner.get("id")) != task["owner"]):
+        raise ValueError("source ownership unverified")
+    if task["platform"] == "instagram" and body.get("media_type") not in {"IMAGE", "VIDEO", "CAROUSEL_ALBUM"}:
+        raise ValueError("unsupported Instagram media")
+    if task["operation"] == "repost":
+        link = body.get("permalink_url")
+        parsed = urlsplit(link) if isinstance(link, str) else None
+        if (not parsed or parsed.scheme != "https" or parsed.hostname not in
+                {"www.facebook.com", "facebook.com", "m.facebook.com"}
+                or parsed.username or parsed.password or parsed.fragment):
+            raise ValueError("unverified Facebook permalink")
+        return link
+    return None
+
+
+def perform(task, actor, link):
+    if task["operation"] == "like":
+        node = f"{actor['id']}/likes" if task["platform"] == "instagram" else f"{task['post_id']}/likes"
+        data = {"media_id": task["post_id"]} if task["platform"] == "instagram" else {}
+        body = graph("POST", node, actor["token"], data)
+        if body.get("success") is not True:
+            raise GraphFailure()
+        return {"api_ack": True}
+    if task["operation"] == "repost" and task["platform"] == "facebook":
+        body = graph("POST", f"{actor['id']}/feed", actor["token"], {"link": link})
+        if not ID.fullmatch(str(body.get("id", ""))):
+            raise GraphFailure()
+        return {"api_ack": True, "share_post_id": str(body["id"])}
+    raise ValueError("unsupported operation")
+
+
+def execute(tasks, actors, ledger, run_id, *, persist, sleep=time.sleep):
+    stopped = set()
+    for task in tasks:
+        record = ledger["actions"].get(key(task))
+        if (not record or record.get("status") != "reserved" or record.get("run_id") != run_id
+                or any(record.get(k) != v for k, v in task.items())):
+            continue
+        actor_key = (task["platform"], task["actor"])
+        actor = actors.get(actor_key)
+        if not actor or actor_key in stopped or not account_enabled(actor["name"], task["platform"]):
+            record["status"] = "blocked_actor"
+            persist(ledger)
+            continue
+        try:
+            if (task["platform"], task["operation"]) not in SUPPORTED:
+                raise ValueError("unsupported operation")
+            if not permission(task["platform"], task["operation"]) <= actor["grants"]:
+                raise ValueError("missing permission")
+            link = verified_media(task, actors)
+        except (GraphFailure, ValueError, KeyError):
+            record["status"] = "source_or_permission_unverified"
+            persist(ledger)
+            continue
+        # Crash, malformed acknowledgement, transport/5xx: never repeat a POST.
+        record["status"] = "uncertain"
+        persist(ledger)
+        sleep(1)  # No burst: below the documented IG 50 requests / 5 seconds.
+        try:
+            result = perform(task, actor, link)
+            record.update(status="accepted", **result)
+        except GraphFailure as exc:
+            record.update(status="rejected" if exc.definite else "uncertain",
+                          http_status=exc.http, graph_code=exc.code)
+            if exc.http in {401, 403, 429} or exc.code in {4, 10, 17, 32, 190, 200, 613}:
+                stopped.add(actor_key)
+        persist(ledger)
+    return ledger
+
+
+def github(path):
+    token = os.environ["GH_TOKEN"]
+    try:
+        r = read_with_retry(requests.get, f"https://api.github.com/repos/{REPO}/{path}",
+                            headers={"Authorization": f"Bearer {token}"}, timeout=30,
+                            allow_redirects=False)
+        # Artifact downloads use a GitHub-signed redirect. Never forward the
+        # credential to the storage host; requests strips cross-host auth.
+        if r.status_code in {301, 302, 303, 307, 308} and path.endswith("/zip"):
+            url = r.headers.get("Location", "")
+            host = urlsplit(url).hostname or ""
+            if urlsplit(url).scheme != "https" or not host.endswith((".blob.core.windows.net", ".actions.githubusercontent.com")):
+                raise ValueError("untrusted artifact host")
+            r.close()
+            r = requests.get(url, timeout=30, allow_redirects=False)
+        if r.status_code != 200:
+            raise ValueError("GitHub read failed")
+        return r
+    except requests.RequestException:
+        raise ValueError("GitHub read failed") from None
+
+
+def archive(artifact_id, member):
+    response = github(f"actions/artifacts/{int(artifact_id)}/zip")
+    with zipfile.ZipFile(io.BytesIO(response.content)) as z:
+        if z.namelist() != [member] or z.getinfo(member).file_size > 8_000_000:
+            raise ValueError("invalid state archive")
+        return json.loads(z.read(member))
+
+
+def read_source(source_run_id, *, now):
+    run = github(f"actions/runs/{source_run_id}").json()
+    if (run.get("path") != SOURCE_WORKFLOW or run.get("head_branch") != "main"
+            or run.get("head_repository", {}).get("full_name") != REPO
+            or run.get("status") != "completed" or run.get("conclusion") not in {"success", "failure"}
+            or not now - timedelta(hours=24) <= stamp(run.get("created_at")) <= now):
+        raise ValueError("invalid or stale source run")
+    data = github(f"actions/runs/{source_run_id}/artifacts?per_page=100").json()
+    artifacts = [a for a in data.get("artifacts", []) if a.get("name") == "link-state-result" and not a.get("expired")]
+    if len(artifacts) != 1:
+        raise ValueError("source result unavailable")
+    return archive(artifacts[0]["id"], "state.json")
+
+
+def restore():
+    artifacts = []
+    for name in ("cross-engagement-result", "cross-engagement-intent"):
+        body = github(f"actions/artifacts?per_page=100&name={name}").json()
+        if not isinstance(body.get("artifacts"), list):
+            raise ValueError("invalid artifact list")
+        artifacts.extend(body["artifacts"])
+    if not artifacts:
+        return {"schema": 1, "actions": {}}
+    artifacts.sort(key=lambda a: (int(a["workflow_run"]["id"]), a["name"] == "cross-engagement-result"), reverse=True)
+    newest = artifacts[0]
+    run = github(f"actions/runs/{newest['workflow_run']['id']}").json()
+    if (newest.get("expired") or run.get("path") != WORKFLOW or run.get("head_branch") != "main"
+            or run.get("head_repository", {}).get("full_name") != REPO):
+        raise ValueError("prior engagement state unverified; reset forbidden")
+    return archive(newest["id"], "engagement.json")
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("action", choices=("plan", "execute"))
+    args = parser.parse_args()
+    now = datetime.now(timezone.utc)
+    run_id, source_id = os.environ["GITHUB_RUN_ID"], os.environ["SOURCE_RUN_ID"]
+    if os.getenv("GITHUB_REPOSITORY") != REPO or not run_id.isdigit() or not source_id.isdigit():
+        raise ValueError("invalid workflow identity")
+    live = os.getenv("META_CROSS_ENGAGEMENT_ENABLED") == "true" and os.getenv("ENGAGEMENT_MODE") == "apply"
+    actors = accounts(load_meta_auth(), os.getenv("META_ACCESS_TOKEN", ""))
+    if not actors:
+        raise ValueError("no verified enabled accounts")
+    if args.action == "plan":
+        ledger = restore()
+        tasks, report = build_plan(source_posts(read_source(source_id, now=now), source_id, actors),
+                                   actors, ledger, run_id, source_id, now=now)
+        save(PLAN, tasks)
+        save(REPORT, {"mode": "apply" if live else "dry_run", "planned": len(tasks),
+                      "verified_accounts": len(actors), "blocked": report})
+        if live:
+            save(STATE, ledger)
+        print(json.dumps({"mode": "apply" if live else "dry_run", "planned": len(tasks),
+                          "verified_accounts": len(actors), "blocked": len(report)}))
+    elif live:
+        ledger = json.loads(STATE.read_text())
+        execute(json.loads(PLAN.read_text()), actors, ledger, run_id, persist=lambda x: save(STATE, x))
+        counts = {}
+        for value in ledger["actions"].values():
+            if value.get("run_id") == run_id:
+                status = value["status"]
+                counts[status] = counts.get(status, 0) + 1
+        print(json.dumps({"results": counts, "publication_state_modified": False}))
+    else:
+        print('{"mode":"dry_run","writes":0}')
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as exc:
+        # No raw HTTP/provider/config exception text, which may carry secrets.
+        print(json.dumps({"status": "held", "error_type": type(exc).__name__, "writes_retried": False}))
+        raise SystemExit(1) from None
