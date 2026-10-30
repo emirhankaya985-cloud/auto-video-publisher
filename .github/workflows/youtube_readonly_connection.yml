@@ -4,12 +4,16 @@ on:
   pull_request:
     paths:
       - youtube_readonly_connection.py
+      - youtube_authorize_channel.py
+      - test_youtube_authorize_channel.py
       - test_youtube_readonly_connection.py
       - .github/workflows/youtube_readonly_connection.yml
   push:
     branches: [main]
     paths:
       - youtube_readonly_connection.py
+      - youtube_authorize_channel.py
+      - test_youtube_authorize_channel.py
       - test_youtube_readonly_connection.py
       - .github/workflows/youtube_readonly_connection.yml
   workflow_dispatch:
@@ -37,7 +41,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install --require-hashes -r requirements.txt
-      - run: python -m unittest -v test_youtube_readonly_connection.py
+      - run: python -m unittest -v test_youtube_readonly_connection.py test_youtube_authorize_channel.py
 
   google-readonly:
     if: github.event_name == 'workflow_dispatch'
