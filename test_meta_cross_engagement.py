@@ -36,6 +36,25 @@ class EngagementTests(unittest.TestCase):
         p = patch.object(m, "account_enabled", return_value=True)
         p.start()
         self.addCleanup(p.stop)
+        enabled_for_legacy_repost_tests = patch.dict("os.environ", {"META_CROSS_REPOST_ENABLED": "true"})
+        enabled_for_legacy_repost_tests.start()
+        self.addCleanup(enabled_for_legacy_repost_tests.stop)
+
+    def test_owner_disabled_repost_blocks_plan_execution_and_direct_perform(self):
+        t = task("repost")
+        with patch.dict("os.environ", {"META_CROSS_REPOST_ENABLED": "false"}):
+            ledger = {"schema": 1, "actions": {}}
+            jobs, report = m.build_plan([dict(platform="facebook", post_id="123", owner="11")],
+                                         actors(), ledger, "200", "100", now=NOW)
+            self.assertFalse(any(x["operation"] == "repost" for x in jobs))
+            self.assertTrue(any(x["status"] == "disabled_by_owner" for x in report))
+            state = reserved(t)
+            with patch.object(m, "perform") as post:
+                m.execute([t], actors(), state, "200", persist=Mock(), sleep=Mock())
+                post.assert_not_called()
+            self.assertEqual(state["actions"][m.key(t)]["status"], "disabled_by_owner")
+            with self.assertRaises(ValueError):
+                m.perform(t, actors()[("facebook", "22")], "https://www.facebook.com/watch/?v=123")
 
     def test_plan_all_accounts_and_own_likes_reports_unsupported(self):
         ledger = {"schema": 1, "actions": {}}
