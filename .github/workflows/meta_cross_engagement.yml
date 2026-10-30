@@ -69,10 +69,10 @@ jobs:
       META_CROSS_ENGAGEMENT_ENABLED: ${{ vars.META_CROSS_ENGAGEMENT_ENABLED || 'true' }}
       META_CROSS_REPOST_ENABLED: 'false'
       # Scheduled and push runs are audit-only; explicit workflow_dispatch apply is needed for writes.
-      # One-time manual owner smoke via dedicated push marker, never schedule.
+      # Scheduled and push runs remain read-only; the one-off live test is complete.
       GITHUB_EVENT_NAME: ${{ github.event_name }}
       GITHUB_REF: ${{ github.ref }}
-      ENGAGEMENT_MODE: ${{ inputs.mode || (github.event_name == 'push' && 'single_like' || 'dry_run') }}
+      ENGAGEMENT_MODE: ${{ inputs.mode || 'dry_run' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
