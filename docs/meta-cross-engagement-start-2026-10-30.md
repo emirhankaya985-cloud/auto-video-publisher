@@ -40,3 +40,14 @@ ENGAGEMENT_MODE evaluates to dry_run, so no Meta engagement POST is sent.
 The normal scheduled runs use their own mode and maintain existing API grants,
 provider-hold and no-repeat safety gates. Live like receipts are not inferred
 from this preview. Any Meta 368 restriction must remain respected.
+
+## 31 October 2026 — owner-requested one-like LIVE manual smoke
+
+This exact marker update starts a single main-branch push run. The runner may
+POST **at most one** authorized cross-account like on one provenance-verified,
+currently accessible native Instagram or Facebook media, after an intent artifact
+was persisted. No saves (unsupported), no link shares/reposts, no duplicate
+POST/retries. The 01:00/13:00 daily schedules remain dry-run reports only.
+A prior Meta 368 hold on Facebook repost stays active. Do not interpret one
+API acknowledgement as a growth outcome or authorization for a bulk run.
+Once the trial has finished, restore push default to dry_run.
