@@ -28,3 +28,15 @@ Video ID instead of requesting the PagePost permalink_url field on a Video.
 Only this audited run's no-POST preflight failures may be rechecked once with
 source_check_version=2. Accepted/uncertain/reserved/rejected POST states are
 never reopened. This marker edit starts the corrected initial attempt.
+
+## 31 October 2026 — owner-requested safe manual trial
+
+The owner requested daily 01:00 and 13:00 Europe/Istanbul checks, likes and
+save-support reporting only, and no reposts. PR #42 is merged. The dedicated
+workflow permanently sets META_CROSS_REPOST_ENABLED=false. Save remains an
+unsupported action (no fabricated result). This marker edit intentionally
+triggers the post-merge push workflow only once; for push events the new
+ENGAGEMENT_MODE evaluates to dry_run, so no Meta engagement POST is sent.
+The normal scheduled runs use their own mode and maintain existing API grants,
+provider-hold and no-repeat safety gates. Live like receipts are not inferred
+from this preview. Any Meta 368 restriction must remain respected.
