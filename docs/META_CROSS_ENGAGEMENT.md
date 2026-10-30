@@ -1,7 +1,7 @@
 # Hesaplar arası Meta etkileşim kodu
 
-30 Ekim 2026. Bu sürüm kod ve mock test hazırlığıdır; canlı etkileşim veya
-büyüme kanıtı değildir. Ücretsiz mevcut GitHub Actions/Meta API altyapısını kullanır.
+30 Ekim 2026. Günlük 13:00 TRT çalışması ve ilk manuel batch kullanıcı tarafından onaylanmıştır;
+aktivasyon gerçek etkileşim veya büyüme kanıtı değildir. Ücretsiz mevcut GitHub Actions/Meta API altyapısını kullanır.
 
 | İstek | Kodun davranışı |
 | --- | --- |
@@ -13,11 +13,18 @@ büyüme kanıtı değildir. Ücretsiz mevcut GitHub Actions/Meta API altyapıs�
 
 ## Yapılandırma ve çalışma
 
-`.github/workflows/meta_cross_engagement.yml` yalnız tamamlanan ana Meta yayın
-akışının sonuç artifact'ını okur. Varsayılan `dry_run`: plan ve destek/yetki raporu
-üretir, hiçbir etkileşim POST'u göndermez. Gerçek işlemler için repository variable
-`META_CROSS_ENGAGEMENT_ENABLED=true` ve çalışma modu `apply` birlikte gerekir.
-Bu kod değişikliği değişkeni kendiliğinden açmaz veya yeni yetki vermez.
+`.github/workflows/meta_cross_engagement.yml` her gün `0 10 * * *` UTC ile
+13:00 Türkiye saatinde planlanır; GitHub cron gecikebilir. Yayın tamamlanınca
+çalışan eski workflow_run tetikleyicisi kaldırılmıştır. 30 Ekim başlangıç marker'ı
+birleştiğinde ilk canlı batch başlar; sonraki ilgisiz push'lar bunu çalıştırmaz.
+Kaynak `latest`: en son tamamlanan ana yayın run'ının ledger'ı okunur; son 24
+saatteki bütün native gönderilerin kaynak run'ları tek tek doğrulanır. Yalnız son
+run'ın birkaç videosuyla sınırlı değildir. Geçmiş ledger kayıtları tekrar işlemi önler.
+
+Kullanıcı isteğiyle workflow'un boş variable varsayılanı artık enabled/apply'dır.
+`META_CROSS_ENGAGEMENT_ENABLED=false` bütün canlı işlemleri kapatır. UI manuel
+workflow_dispatch varsayılanı dry_run kalır; apply açıkça seçilebilir. Bu değişiklik
+token yetkisi kazandırmaz. İlk read-only raporda FB/IG beğeni izinleri eksiktir.
 
 Mevcut `META_ACCESS_TOKEN` User tokenı kullanılır. Ayrı User tokenına sahip
 sayfalar `META_AUTH_JSON.pages[]` içinde `user_token` ile yapılandırılabilir;
@@ -26,7 +33,7 @@ Page tokenı `/me` kimliklerini kontrol eder. Mevcut rota duraklatma ve hak onay
 verilmediyse hesap `missing_permission` olur; uygulama yetki onayı gerekiyorsa kod
 bunu aşamaz. Instagram Login tokenı veya Page tokenı User tokenı yerine taklit edilmez.
 
-Her çalışmada yalnız o kaynak run'ın gerçek yeni, native post ID'leri seçilir.
+Her çalışmada son 24 saatte doğrulanmış kaynak run'ların gerçek native post ID'leri seçilir.
 Eski gönderiler, reconciliation/alias kayıtları, başka repo/dal/iş akışı ve 24
 saatten eski run'lar kabul edilmez. Aynı gönderi bir kez seçilir; aynı aktörün aynı
 platform/gönderi/işlem birleşimi kalıcı ledger anahtarıdır. Böylece yeniden
