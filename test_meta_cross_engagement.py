@@ -40,6 +40,39 @@ class EngagementTests(unittest.TestCase):
         enabled_for_legacy_repost_tests.start()
         self.addCleanup(enabled_for_legacy_repost_tests.stop)
 
+    def test_one_like_prefers_instagram_and_never_reserves_repost(self):
+        posts = [dict(platform="facebook", post_id="123", owner="11"),
+                 dict(platform="instagram", post_id="456", owner="33")]
+        ledger = {"schema": 1, "actions": {}}
+        with patch.object(m, "verified_media", return_value=None):
+            tasks, report = m.build_one_like(posts, actors(), ledger, "200", "100", now=NOW)
+        self.assertEqual(len(tasks), 1)
+        self.assertEqual(tasks[0]["operation"], "like")
+        self.assertEqual(tasks[0]["platform"], "instagram")
+        self.assertNotEqual(tasks[0]["actor"], tasks[0]["owner"])
+        self.assertEqual(len(ledger["actions"]), 1)
+        self.assertTrue(all(x["operation"] != "repost" for x in tasks))
+
+    def test_one_like_respects_prior_receipt_and_permission(self):
+        t = task("like", "instagram", "44", "33")
+        ledger = reserved(t)
+        posts = [dict(platform="instagram", post_id="123", owner="33")]
+        with patch.object(m, "verified_media", return_value=None) as check:
+            tasks, report = m.build_one_like(posts, actors(), ledger, "201", "100", now=NOW)
+        self.assertEqual(tasks, [])
+        check.assert_not_called()
+        self.assertEqual(len(ledger["actions"]), 1)
+
+    def test_one_like_requires_preflight_success_and_no_meta_writes(self):
+        posts = [dict(platform="instagram", post_id="123", owner="33")]
+        ledger = {"schema": 1, "actions": {}}
+        with patch.object(m, "verified_media", side_effect=ValueError("bad owner")), \\
+             patch.object(m, "perform") as writer:
+            tasks, report = m.build_one_like(posts, actors(), ledger, "200", "100", now=NOW)
+            writer.assert_not_called()
+        self.assertEqual(tasks, [])
+        self.assertEqual(ledger["actions"], {})
+
     def test_owner_disabled_repost_blocks_plan_execution_and_direct_perform(self):
         t = task("repost")
         with patch.dict("os.environ", {"META_CROSS_REPOST_ENABLED": "false"}):
