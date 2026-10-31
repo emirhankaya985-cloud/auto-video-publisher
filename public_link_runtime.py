@@ -229,6 +229,79 @@ def inventory(folder):
     return result
 
 
+def direct_public_drive(file_id, path, *, get=None):
+    """Read-only alternate path for gdown FileURLRetrievalError; fail closed.
+
+    Downloads only files identified by the existing, verified Drive inventory.
+    Never follows a non-Google final URL, accepts an HTML confirmation page,
+    writes credentials, or touches a Meta upload/publish endpoint.
+    """
+    from urllib.parse import urlsplit
+
+    if (not isinstance(file_id, str)
+            or not re.fullmatch(r"[A-Za-z0-9_-]{20,128}", file_id)
+            or path.suffix.lower() not in {".mp4", ".png", ".txt"}):
+        return None
+    get = get or requests.get
+    partial = path.with_name(path.name + ".partial")
+    response = None
+    try:
+        response = get(
+            "https://drive.usercontent.google.com/download",
+            params={"id": file_id, "export": "download", "confirm": "t"},
+            timeout=(10, 60), allow_redirects=True, stream=True,
+            headers={"Accept": "application/octet-stream"},
+        )
+        final = urlsplit(str(getattr(response, "url", "")))
+        host = (final.hostname or "").lower()
+        if (final.scheme != "https" or
+                host not in {"drive.usercontent.google.com", "drive.google.com"}
+                and not host.endswith(".googleusercontent.com")):
+            raise ValueError("Untrusted Drive redirect")
+        if response.status_code != 200:
+            raise ValueError("Drive response not downloadable")
+        content_type = str(response.headers.get("Content-Type", "")).lower()
+        if any(t in content_type for t in ("text/html", "application/json", "text/xml", "application/xml")):
+            raise ValueError("Drive confirmation or error page")
+        length = response.headers.get("Content-Length")
+        expected = int(length) if length is not None else None
+        if expected is not None and (expected <= 0 or expected > 600_000_000):
+            raise ValueError("Unsafe Drive download length")
+        size = 0
+        head = b""
+        with partial.open("wb") as out:
+            for chunk in response.iter_content(chunk_size=65536):
+                if not chunk:
+                    continue
+                size += len(chunk)
+                if size > 600_000_000:
+                    raise ValueError("Drive download size exceeded")
+                if len(head) < 128:
+                    head = (head + chunk)[:128]
+                out.write(chunk)
+        if not size or (expected is not None and size != expected):
+            raise ValueError("Empty or incomplete Drive download")
+        if head.lstrip().lower().startswith((b"<!doctype html", b"<html", b"<?xml")):
+            raise ValueError("Drive returned an HTML page")
+        if path.suffix.lower() == ".mp4" and head[4:8] != b"ftyp":
+            raise ValueError("Downloaded file is not MP4")
+        if path.suffix.lower() == ".png" and not head.startswith(b"\x89PNG\r\n\x1a\n"):
+            raise ValueError("Downloaded file is not PNG")
+        partial.replace(path)
+        return path
+    except Exception:
+        # No untrusted provider URLs, exception bodies or file IDs in logs.
+        return None
+    finally:
+        if response is not None:
+            try:
+                response.close()
+            except Exception:
+                pass
+        if partial.exists():
+            partial.unlink()
+
+
 def download(file_id, path):
     """Retry transient read-only Drive transfers before touching Meta.
 
@@ -254,6 +327,13 @@ def download(file_id, path):
             path.unlink()
         if attempt < 2:
             time.sleep((2, 8)[attempt])
+    if "FileURLRetrievalError" in failures:
+        # One separate, uncookied public GET; this is a source read only.
+        # A quota response, redirect, HTML page or partial file is rejected.
+        recovered = direct_public_drive(file_id, path)
+        if recovered is not None:
+            return recovered
+        failures.append("direct_public_get_blocked")
     raise RuntimeError(
         "Paylaşılan Drive dosyası 3 denemede indirilemedi "
         f"({','.join(failures)})"
