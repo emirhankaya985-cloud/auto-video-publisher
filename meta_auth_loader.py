@@ -32,8 +32,16 @@ def discover_pages(token, *, get=None):
         if response.status_code != 200 or not isinstance(body, dict) or body.get('error'):
             error = body.get('error', {}) if isinstance(body, dict) else {}
             code = error.get('code') if isinstance(error, dict) else None
-            safe_code = str(code) if isinstance(code, int) else 'unknown'
-            raise RuntimeError(f'Meta hesap erişimi reddedildi (HTTP {response.status_code}, kod {safe_code})')
+            safe_code = str(code) if isinstance(code, int) and 0 <= code <= 999999 else 'unknown'
+            subcode = error.get('error_subcode') if isinstance(error, dict) else None
+            safe_subcode = str(subcode) if isinstance(subcode, int) and 0 <= subcode <= 999999 else 'unknown'
+            # The Graph message, URL and all credential material are untrusted.
+            # Numeric subcodes distinguish expiry from revoked/changed grants;
+            # never try a new upload or label a failed read as published.
+            raise RuntimeError(
+                f'Meta hesap erişimi reddedildi '
+                f'(HTTP {response.status_code}, kod {safe_code}, alt_kod {safe_subcode})'
+            )
         if not isinstance(body.get('data'), list):
             raise RuntimeError('Meta hesap yanıtı geçersiz')
         for row in body['data']:
