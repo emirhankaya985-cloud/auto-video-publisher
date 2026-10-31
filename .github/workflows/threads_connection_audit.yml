@@ -3,11 +3,11 @@ on:
   workflow_dispatch:
     inputs:
       account:
-        description: Verify one Threads account without publishing
+        description: Verify all six or one Threads account without publishing
         required: true
         type: choice
-        default: penguen
-        options: [tarladaki, penguen, gonle, daily_laugh, film, toonzone]
+        default: all
+        options: [all, tarladaki, penguen, gonle, daily_laugh, film, toonzone]
   pull_request:
     paths:
       - 'threads_accounts.py'
