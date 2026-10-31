@@ -68,9 +68,20 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.12'
-      - name: Install verified runtime
+      - name: Install hash-pinned Meta read-only dependencies
+        run: pip install --require-hashes -r requirements.txt
+      - name: Fail early on invalid Meta credentials before any video work
+        env:
+          META_AUTH_JSON: ${{ secrets.META_AUTH_JSON }}
+          META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
         run: |
-          pip install --require-hashes -r requirements.txt
+          if [ -n "$META_AUTH_JSON" ]; then
+            python meta_page_token_health.py
+          else
+            python meta_schedule_preflight.py
+          fi
+      - name: Install media runtime only after Meta preflight passed
+        run: |
           pip install gdown==6.4.2
           command -v ffmpeg && command -v ffprobe || (sudo apt-get update -qq && sudo apt-get install -y ffmpeg)
       - name: Verify one-shot commit authorization without any Meta writes
@@ -81,9 +92,6 @@ jobs:
       - name: Verify state, account and caption safety without API writes
         id: verify
         run: python -m unittest -v test_public_link_runtime.py
-      - name: Read-only verify saved Page tokens and pinned identities
-        if: ${{ env.META_AUTH_JSON != '' }}
-        run: python meta_page_token_health.py
       - name: Check public folders, captions, histories and prepare intent
         id: plan
         env:
