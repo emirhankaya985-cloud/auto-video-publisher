@@ -1,4 +1,4 @@
-"""Meta-only publishing from the owner's shared links, without Drive OAuth.
+"""Meta and paired YouTube publishing from the owner's shared links, without Drive OAuth.
 
 The workflow persists its complete intent before uploading any media. An
 uncertain publication is held for reconciliation, never blindly retried.
@@ -63,6 +63,28 @@ ROUTES = {
     "film_second": ("film", "Filmmagrasi"),
     "toonzone": ("toonzone", "ToonZone"),
 }
+
+
+def paired_youtube_enabled():
+    return os.getenv("YOUTUBE_PUBLISHING_ENABLED", "false").lower() == "true"
+
+
+def add_paired_youtube_plans(plans, state, *, audit=False):
+    if not paired_youtube_enabled():
+        return plans
+    from paired_youtube import plan_paired_youtube
+    return plan_paired_youtube(plans, state, audit=audit)
+
+
+def upload_paired_youtube(item, video, state):
+    if not paired_youtube_enabled() or item.get("route") not in {
+            "tarladaki", "penguen", "gonle", "daily_laugh"}:
+        raise RuntimeError("Paired YouTube publication disabled for this route")
+    from paired_youtube import publish_paired_youtube
+    result = publish_paired_youtube(item, video, state)
+    if not isinstance(result, dict) or not result.get("id"):
+        raise RuntimeError("YouTube publication has no confirmed video ID")
+    return result["id"]
 
 
 def save(path, value):
@@ -824,7 +846,7 @@ def plan(audit=False):
     state = restore()
     apply_verified_migration(state)
     pages = {p["page_name"]: p for p in load_meta_auth()["pages"]}
-    report = [f"# Public link publisher — {day}", "", "YouTube: disabled. Drive OAuth: not used.", ""]
+    report = [f"# Public link publisher — {day}", "", "YouTube: paired with selected Meta videos." if paired_youtube_enabled() else "YouTube: disabled. Drive OAuth: not used.", ""]
     catalogs = {}
     for key, value in FOLDERS.items():
         try:
@@ -1253,6 +1275,8 @@ def plan(audit=False):
                              safe_to_retry=True)
                 alert_days[route] = local_day
     save(STATE, state)
+    plans = add_paired_youtube_plans(plans, state, audit=audit)
+    save(STATE, state)
     save(PLAN, plans)
     summary = "\n".join(report) + "\n"
     (ROOT / "report.md").write_text(summary, encoding="utf-8")
@@ -1287,7 +1311,7 @@ def pending_publication_platforms(item, state):
         raise RuntimeError("Publication plan platform list invalid")
     pending = []
     for platform in platforms:
-        if platform not in {"facebook", "instagram"}:
+        if platform not in {"facebook", "instagram", "youtube"}:
             raise RuntimeError("Publication plan platform invalid")
         key = f"{item['route']}:{platform}:{item['id']}"
         entry = state.get("entries", {}).get(key)
@@ -1304,7 +1328,7 @@ def pending_publication_platforms(item, state):
             raise RuntimeError("Publication caption missing")
         # Older imported intents may lack optional identity fields. New
         # planner entries always persist them; never bypass a present binding.
-        if entry.get("caption_hash") and entry["caption_hash"] != caption_key(caption):
+        if platform != "youtube" and entry.get("caption_hash") and entry["caption_hash"] != caption_key(caption):
             raise RuntimeError("Publication caption differs from persisted intent")
         if entry.get("publish_caption") is not None and entry["publish_caption"] != caption:
             raise RuntimeError("Publication text differs from persisted intent")
@@ -1474,7 +1498,9 @@ def publish():
                     # write. A crash/replayed publish step must reconcile first.
                     state["entries"][key]["status"] = "uncertain"
                     save(STATE, state)
-                    if platform == "facebook":
+                    if platform == "youtube":
+                        post = upload_paired_youtube(item, video, state)
+                    elif platform == "facebook":
                         post = upload_facebook_reel(page, str(video), item["captions"][platform])
                     else:
                         tag_options = ({"user_tags": item["instagram_user_tags"]}
@@ -1492,7 +1518,8 @@ def publish():
                     # Never blindly repeat a Meta POST, including HTTP 400.
                     # A rejected API request and a timed-out *accepted* upload
                     # are indistinguishable without remote reconciliation.
-                    diagnostic = classify_meta_failure(exc)
+                    diagnostic = ({"reason": "youtube_upload_uncertain", "error_type": type(exc).__name__, "safe_to_repost": False}
+                                  if platform == "youtube" else classify_meta_failure(exc))
                     entry = state["entries"][key]
                     previous = entry.get("prepublish_retry_count", 0)
                     if (platform == "instagram" and isinstance(exc, MetaAPIError)

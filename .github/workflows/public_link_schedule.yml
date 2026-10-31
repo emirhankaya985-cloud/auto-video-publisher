@@ -43,8 +43,13 @@ jobs:
       # Prefer saved Page token inventory when the User token is no longer usable.
       # No credential refresh, no token changes. Invalid saved tokens fail closed.
       META_AUTH_JSON: ${{ secrets.META_AUTH_JSON }}
-      YOUTUBE_PUBLISHING_ENABLED: 'false'
-      ENABLE_NEW_YOUTUBE_ROUTES: 'false'
+      # Paired YouTube accounts use the same planned source and slot as Meta.
+      YOUTUBE_PUBLISHING_ENABLED: 'true'
+      ENABLE_NEW_YOUTUBE_ROUTES: 'true'
+      TOKEN_CHANNEL1_JSON: ${{ secrets.TOKEN_CHANNEL1_JSON }}
+      TOKEN_CHANNEL2_JSON: ${{ secrets.TOKEN_CHANNEL2_JSON }}
+      TOKEN_DAILY_LAUGH_LAB_JSON: ${{ secrets.TOKEN_DAILY_LAUGH_LAB_JSON }}
+      TOKEN_GONLE_DUSEN_JSON: ${{ secrets.TOKEN_GONLE_DUSEN_JSON }}
       ENABLE_NEW_META_ROUTES: ${{ vars.ENABLE_NEW_META_ROUTES }}
       META_NEW_ROUTES_RIGHTS_APPROVED: ${{ vars.META_NEW_ROUTES_RIGHTS_APPROVED }}
       ENABLE_DAILY_LAUGH_INSTAGRAM_ROUTES: ${{ vars.ENABLE_DAILY_LAUGH_INSTAGRAM_ROUTES }}
@@ -91,7 +96,7 @@ jobs:
         run: python publisher_one_shot_gate.py
       - name: Verify state, account and caption safety without API writes
         id: verify
-        run: python -m unittest -v test_public_link_runtime.py
+        run: python -m unittest -v test_public_link_runtime.py test_paired_youtube.py
       - name: Check public folders, captions, histories and prepare intent
         id: plan
         env:
@@ -103,7 +108,7 @@ jobs:
           else
             python public_link_runtime.py plan
           fi
-      - name: Persist intent before any Meta upload
+      - name: Persist intent before any Meta or YouTube upload
         if: success() && steps.release_gate.outputs.publish_allowed == 'true'
         uses: actions/upload-artifact@v4
         with:
@@ -111,7 +116,7 @@ jobs:
           path: link-runtime/state.json
           if-no-files-found: error
           retention-days: 90
-      - name: Publish explicitly planned Meta videos
+      - name: Publish explicitly planned Meta and paired YouTube videos
         id: publish
         if: success() && steps.release_gate.outputs.publish_allowed == 'true'
         run: python public_link_runtime.py publish
