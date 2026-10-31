@@ -196,9 +196,12 @@ class TrackedRoutesTests(unittest.TestCase):
         env = "META_AUTH_JSON: " + "${{ secrets.META_AUTH_JSON }}"
         self.assertIn(env, publisher)
         self.assertIn(env, targets)
-        self.assertIn("if: ${{ env.META_AUTH_JSON != '' }}", publisher)
-        self.assertLess(publisher.index("run: python meta_page_token_health.py"),
+        self.assertIn('if [ -n "$META_AUTH_JSON" ]; then', publisher)
+        self.assertLess(publisher.index("python meta_page_token_health.py"),
                         publisher.index("run: python public_link_runtime.py publish"))
+        self.assertIn("python meta_schedule_preflight.py", publisher)
+        self.assertLess(publisher.index("python meta_schedule_preflight.py"),
+                        publisher.index("pip install gdown==6.4.2"))
 
     def test_notification_error_redacts_private_provider_detail(self):
         capture = io.StringIO()
