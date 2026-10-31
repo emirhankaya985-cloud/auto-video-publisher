@@ -1525,5 +1525,75 @@ class LinkRuntimeSafety(unittest.TestCase):
             self.assertEqual(entry["prepublish_retry_count"], 1)
 
 
+
+
+class PairedYouTubeRuntimeIntegration(unittest.TestCase):
+    def test_disabled_pairing_preserves_meta_plan_without_importing_uploader(self):
+        plans = [{"route": "penguen", "platforms": ["facebook"]}]
+        with patch.dict(os.environ, {"YOUTUBE_PUBLISHING_ENABLED": "false"}):
+            self.assertIs(runtime.add_paired_youtube_plans(plans, {}), plans)
+            with self.assertRaises(RuntimeError):
+                runtime.upload_paired_youtube(plans[0], Path("video.mp4"), {})
+
+    def test_pair_planner_receives_same_meta_plan_and_shared_ledger(self):
+        plans, state = [{"id": "same-video", "route": "penguen"}], {"entries": {}}
+        helper = types.ModuleType("paired_youtube")
+        helper.plan_paired_youtube = Mock(return_value=plans)
+        with patch.dict(os.environ, {"YOUTUBE_PUBLISHING_ENABLED": "true"}), patch.dict(sys.modules, {"paired_youtube": helper}):
+            self.assertIs(runtime.add_paired_youtube_plans(plans, state), plans)
+        helper.plan_paired_youtube.assert_called_once_with(plans, state, audit=False)
+
+    def test_persisted_youtube_intent_checks_exact_caption_and_run(self):
+        item = {"route": "penguen", "id": "same-video", "name": "same.mp4",
+                "platforms": ["youtube"], "captions": {"youtube": "Exact caption"}}
+        entry = {"status": "intent", "publish_caption": "Exact caption", "file": "same.mp4", "run_id": "current"}
+        state = {"entries": {"penguen:youtube:same-video": entry}}
+        with patch.dict(os.environ, {"GITHUB_RUN_ID": "current"}):
+            self.assertEqual(runtime.pending_publication_platforms(item, state), ["youtube"])
+            item["captions"]["youtube"] = "Changed caption"
+            with self.assertRaises(RuntimeError):
+                runtime.pending_publication_platforms(item, state)
+
+    def test_paired_publish_persists_uncertainty_before_upload_and_done_after(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            state_path, plan_path = root / "state.json", root / "plan.json"
+            item = {"route": "penguen", "id": "same-video", "name": "same.mp4",
+                    "page": "Beyinsiz Penguen", "platforms": ["facebook", "youtube"],
+                    "captions": {"facebook": "FB caption", "youtube": "YT caption"}}
+            entries = {f"penguen:{p}:same-video": {"status": "intent", "publish_caption": c,
+                        "file": "same.mp4", "run_id": "current"} for p, c in item["captions"].items()}
+            state_path.write_text(json.dumps({"entries": entries}))
+            plan_path.write_text(json.dumps([item]))
+            source = root / "source.mp4"
+            source.write_bytes(b"0000ftypmedia")
+            def upload(item, video, state):
+                persisted = json.loads(state_path.read_text())
+                self.assertEqual(persisted["entries"]["penguen:youtube:same-video"]["status"], "uncertain")
+                self.assertEqual(persisted["entries"]["penguen:facebook:same-video"]["status"], "done")
+                self.assertEqual(video, source)
+                return "youtube-id"
+            with patch.dict(os.environ, {"GITHUB_RUN_ID": "current"}), \
+                 patch.object(runtime, "STATE", state_path), patch.object(runtime, "PLAN", plan_path), \
+                 patch.object(runtime, "load_meta_auth", return_value={"pages": [{"page_name": item["page"]}]}), \
+                 patch.object(runtime, "download", return_value=source), \
+                 patch.object(runtime, "upload_facebook_reel", return_value="fb-id"), \
+                 patch.object(runtime, "upload_paired_youtube", side_effect=upload):
+                runtime.publish()
+            final = json.loads(state_path.read_text())["entries"]
+            self.assertEqual(final["penguen:youtube:same-video"]["status"], "done")
+            self.assertEqual(final["penguen:youtube:same-video"]["post_id"], "youtube-id")
+
+    def test_uploader_requires_confirmed_id_and_limits_to_four_channels(self):
+        helper = types.ModuleType("paired_youtube")
+        helper.publish_paired_youtube = Mock(return_value={"id": "confirmed123"})
+        with patch.dict(os.environ, {"YOUTUBE_PUBLISHING_ENABLED": "true"}), patch.dict(sys.modules, {"paired_youtube": helper}):
+            self.assertEqual(runtime.upload_paired_youtube({"route": "penguen"}, Path("video.mp4"), {}), "confirmed123")
+            with self.assertRaises(RuntimeError):
+                runtime.upload_paired_youtube({"route": "film"}, Path("video.mp4"), {})
+            helper.publish_paired_youtube.return_value = {}
+            with self.assertRaises(RuntimeError):
+                runtime.upload_paired_youtube({"route": "penguen"}, Path("video.mp4"), {})
+
 if __name__ == "__main__":
     unittest.main()

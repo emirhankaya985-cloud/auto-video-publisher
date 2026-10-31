@@ -75,7 +75,7 @@ ROUTE_LABELS = {
     "film_second": "🎞️ Filmmagrasi",
     "toonzone": "📺 ToonZone",
 }
-PLATFORM_LABELS = {"facebook": "Facebook", "instagram": "Instagram"}
+PLATFORM_LABELS = {"facebook": "Facebook", "instagram": "Instagram", "youtube": "YouTube"}
 
 
 def confirmed_posts(state, run_id):
