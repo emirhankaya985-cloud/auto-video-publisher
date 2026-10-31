@@ -33,6 +33,8 @@ jobs:
       CORRELATE_PUBLISHER_ALERTS: true
       TARGET_ROUTE: ${{ inputs.route || (github.event.schedule == '40 10 * * *' && 'toonzone' || 'daily_laugh') }}
       META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+      # Same saved Page token inventory as publisher; counts still require live GETs.
+      META_AUTH_JSON: ${{ secrets.META_AUTH_JSON }}
       ENABLE_TOONZONE_ROUTES: ${{ vars.ENABLE_TOONZONE_ROUTES }}
       ENABLE_NEW_META_ROUTES: ${{ vars.ENABLE_NEW_META_ROUTES }}
       META_NEW_ROUTES_RIGHTS_APPROVED: ${{ vars.META_NEW_ROUTES_RIGHTS_APPROVED }}

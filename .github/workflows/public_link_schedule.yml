@@ -40,6 +40,9 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+      # Prefer saved Page token inventory when the User token is no longer usable.
+      # No credential refresh, no token changes. Invalid saved tokens fail closed.
+      META_AUTH_JSON: ${{ secrets.META_AUTH_JSON }}
       YOUTUBE_PUBLISHING_ENABLED: 'false'
       ENABLE_NEW_YOUTUBE_ROUTES: 'false'
       ENABLE_NEW_META_ROUTES: ${{ vars.ENABLE_NEW_META_ROUTES }}
@@ -78,6 +81,9 @@ jobs:
       - name: Verify state, account and caption safety without API writes
         id: verify
         run: python -m unittest -v test_public_link_runtime.py
+      - name: Read-only verify saved Page tokens and pinned identities
+        if: ${{ env.META_AUTH_JSON != '' }}
+        run: python meta_page_token_health.py
       - name: Check public folders, captions, histories and prepare intent
         id: plan
         env:

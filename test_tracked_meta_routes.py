@@ -170,6 +170,36 @@ class TrackedRoutesTests(unittest.TestCase):
         self.assertIn("instagram: 1 eksik", tg.call_args.args[1])
         self.assertNotIn("private-topic", output.getvalue())
 
+    def test_unknown_meta_read_alert_does_not_claim_eight_missing_videos(self):
+        output = io.StringIO()
+        with (
+            patch.dict(os.environ, {"TARGET_ROUTE": "daily_laugh", "GITHUB_STEP_SUMMARY": "",
+                                     "NTFY_TOPIC": "", "NTFY_TOPIC_URL": ""}),
+            patch.object(watch, "check_route", return_value={
+                "route": "daily_laugh", "status": "unknown", "day": "2026-10-30",
+                "target_per_platform": 8, "reason": "meta_read_failed"}),
+            patch.object(watch, "telegram_configured", return_value=True),
+            patch.object(watch, "send_telegram", return_value=True) as tg,
+            redirect_stdout(output),
+        ):
+            self.assertEqual(watch.main(), 1)
+        sent = tg.call_args.args[1]
+        self.assertIn("Hedefte video eksikliği kanıtlanmadı", sent)
+        self.assertIn("META_ACCESS_TOKEN", sent)
+        self.assertNotIn("8 eksik", sent)
+
+    def test_safe_page_token_fallback_wired_to_read_and_publish(self):
+        from pathlib import Path
+        base = Path(__file__).parent / ".github" / "workflows"
+        publisher = (base / "public_link_schedule.yml").read_text(encoding="utf-8")
+        targets = (base / "tracked_meta_routes.yml").read_text(encoding="utf-8")
+        env = "META_AUTH_JSON: " + "${{ secrets.META_AUTH_JSON }}"
+        self.assertIn(env, publisher)
+        self.assertIn(env, targets)
+        self.assertIn("if: ${{ env.META_AUTH_JSON != '' }}", publisher)
+        self.assertLess(publisher.index("run: python meta_page_token_health.py"),
+                        publisher.index("run: python public_link_runtime.py publish"))
+
     def test_notification_error_redacts_private_provider_detail(self):
         capture = io.StringIO()
         with patch.dict(os.environ, {

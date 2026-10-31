@@ -144,14 +144,24 @@ def main():
     deficits = ", ".join(f"{p}: {n} eksik" for p, n in (missing or {}).items() if n)
     subject = "ToonZone" if route == "toonzone" else "Daily Laugh Lab"
     title = f"⚠️ {subject} günlük yayın kontrolü"
-    message = (
-        f"{subject} — {verdict['day']}: planlanan saatler geçti. "
-        f"Durum: {verdict['status']}. "
-        f"Platform video hedefi: {verdict['target_per_platform']}. "
-        f"{deficits or verdict.get('reason', 'Meta geçmişi doğrulanamadı')}. "
-        "Bu yalnızca okuma/uyarı kontrolüdür; video yeniden gönderilmedi. "
-        f"Kontrol: {WORKFLOW_URL}"
-    )
+    if verdict["status"] == "unknown":
+        title = f"⚠️ {subject} Meta erişim kontrolü"
+        message = (
+            f"{subject} — {verdict['day']}: Meta yayın geçmişi okunamadı "
+            f"({verdict.get('reason', 'read_unavailable')}). "
+            "Hedefte video eksikliği kanıtlanmadı; körlemesine yeniden yayın yapmayın. "
+            "META_ACCESS_TOKEN ve varsa kayıtlı Page tokenlarını salt-okunur doğrulayın. "
+            f"Kontrol: {WORKFLOW_URL}"
+        )
+    else:
+        message = (
+            f"{subject} — {verdict['day']}: planlanan saatler geçti. "
+            f"Durum: {verdict['status']}. "
+            f"Platform video hedefi: {verdict['target_per_platform']}. "
+            f"{deficits or verdict.get('reason', 'Meta geçmişi doğrulanamadı')}. "
+            "Bu yalnızca okuma/uyarı kontrolüdür; video yeniden gönderilmedi. "
+            f"Kontrol: {WORKFLOW_URL}"
+        )
     if os.getenv("NTFY_TOPIC_URL", "").strip() or os.getenv("NTFY_TOPIC", "").strip():
         try:
             send_ntfy(title, message, priority=4, tags=["warning"],
