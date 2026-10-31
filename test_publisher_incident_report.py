@@ -43,6 +43,26 @@ class IncidentReportTests(unittest.TestCase):
         self.assertEqual(result["planning_blocker_counts"]["toonzone_exact_cover_missing"], 1)
         self.assertEqual(result["planning_blocker_counts"]["disabled_route"], 1)
 
+    def test_failed_preflight_is_recorded_without_falsely_claiming_prior_state_clean(self):
+        result = build_incident_report(
+            {"entries": {}}, "41223244923", state_available=False,
+            step_outcomes={"preflight": "failure", "verify": "skipped",
+                           "plan": "skipped", "publish": "skipped"},
+        )
+        self.assertEqual(result["confirmed_new_posts"], 0)
+        self.assertFalse(result["state_available"])
+        self.assertEqual(result["step_outcomes"]["preflight"], "failure")
+        self.assertEqual(result["incidents"][0]["reason"], "meta_preflight_failed")
+        self.assertEqual(result["incidents"][0]["action"], "inspect_redacted_preflight_log_no_meta_post")
+        self.assertNotIn("token", str(result["incidents"]))
+
+    def test_successful_preflight_adds_no_false_incident(self):
+        result = build_incident_report(
+            {"entries": {}}, "300", step_outcomes={"preflight": "success"},
+        )
+        self.assertTrue(result["state_available"])
+        self.assertEqual(result["incidents"], [])
+
     def test_invalid_runid_never_attributes_old_upload_to_new_run(self):
         with self.assertRaises(ValueError):
             build_incident_report({"entries": {}}, "../../oops")
