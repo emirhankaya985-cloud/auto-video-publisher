@@ -52,6 +52,30 @@ class DiscoveryTests(unittest.TestCase):
         self.assertNotIn('secret', str(error.exception))
         self.assertIn('190', str(error.exception))
 
+    def test_auth_190_expired_subcode_is_numeric_only_and_never_leaks_body(self):
+        get = Mock(return_value=reply({
+            'error': {'code': 190, 'error_subcode': 463,
+                      'message': 'USER_SECRET PAGE_SECRET raw-provider-message'}}, 401))
+        with self.assertRaises(RuntimeError) as ctx:
+            discover_pages('USER_SECRET', get=get)
+        result = str(ctx.exception)
+        self.assertIn('HTTP 401', result)
+        self.assertIn('kod 190', result)
+        self.assertIn('alt_kod 463', result)
+        self.assertNotIn('USER_SECRET', result)
+        self.assertNotIn('PAGE_SECRET', result)
+        self.assertNotIn('raw-provider-message', result)
+
+    def test_auth_unknown_subcode_is_not_interpreted_as_expiry(self):
+        get = Mock(return_value=reply({'error': {
+            'code': 190, 'error_subcode': 'not-a-number',
+            'message': 'DO_NOT_PRINT_ME'}}, 401))
+        with self.assertRaises(RuntimeError) as ctx:
+            discover_pages('USER_SECRET', get=get)
+        result = str(ctx.exception)
+        self.assertIn('alt_kod unknown', result)
+        self.assertNotIn('DO_NOT_PRINT_ME', result)
+
     def test_network_exception_does_not_leak_url_or_token(self):
         with self.assertRaises(RuntimeError) as error:
             discover_pages('secret', get=Mock(side_effect=requests.RequestException('secret URL')))
