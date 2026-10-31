@@ -11,6 +11,7 @@ from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import AuthorizedSession
 
 TARGETS = {
+    "gonle_dusen": ("TOKEN_GONLE_DUSEN_JSON", "Gönle Düşen", "UCvSvo5WghuXqsjwLRmIz22g"),
     "channel1": ("TOKEN_CHANNEL1_JSON", "Tarladaki Fasulye", None),
     "channel2": ("TOKEN_CHANNEL2_JSON", "Beyinsiz Penguen", None),
     "daily_laugh": ("TOKEN_DAILY_LAUGH_LAB_JSON", "Daily Laugh Lab", "UCF4KwI3alXzlExviMFmmJAA"),
