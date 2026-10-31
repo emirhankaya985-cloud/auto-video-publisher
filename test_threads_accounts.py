@@ -69,5 +69,42 @@ class ThreadsAccountsTests(unittest.TestCase):
                 main()
 
 
+    @patch("check_threads_connection.validate_threads_identity")
+    def test_all_six_routes_in_single_run_without_publishing(self, validate):
+        from check_threads_connection import main
+        env = {"THREADS_CHECK_ROUTE": "all"}
+        for route, prefix in THREADS_ROUTE_PREFIXES.items():
+            env[f"{prefix}_THREADS_ACCESS_TOKEN"] = f"token-{route}"
+            env[f"{prefix}_THREADS_USERNAME"] = route
+            env[f"{prefix}_THREADS_USER_ID"] = f"id-{route}"
+        validate.side_effect = lambda *, token, expected_username: {
+            "id": f"id-{expected_username}", "username": expected_username,
+        }
+        with patch.dict(os.environ, env, clear=True):
+            main()
+        self.assertEqual(validate.call_count, 6)
+        self.assertEqual(
+            [call.kwargs["expected_username"] for call in validate.call_args_list],
+            list(THREADS_ROUTE_PREFIXES),
+        )
+
+    @patch("check_threads_connection.validate_threads_identity")
+    def test_all_route_audit_reports_failed_identity_and_checks_others(self, validate):
+        from check_threads_connection import main
+        env = {"THREADS_CHECK_ROUTE": "all"}
+        for route, prefix in THREADS_ROUTE_PREFIXES.items():
+            env[f"{prefix}_THREADS_ACCESS_TOKEN"] = f"token-{route}"
+            env[f"{prefix}_THREADS_USERNAME"] = route
+            env[f"{prefix}_THREADS_USER_ID"] = f"id-{route}"
+        def identity(*, token, expected_username):
+            user_id = "wrong-account" if expected_username == "gonle" else f"id-{expected_username}"
+            return {"id": user_id, "username": expected_username}
+        validate.side_effect = identity
+        with patch.dict(os.environ, env, clear=True):
+            with self.assertRaisesRegex(RuntimeError, "gonle"):
+                main()
+        self.assertEqual(validate.call_count, 6)
+
+
 if __name__ == "__main__":
     unittest.main()
