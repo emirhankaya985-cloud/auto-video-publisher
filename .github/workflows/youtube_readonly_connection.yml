@@ -23,6 +23,7 @@ on:
           - channel1
           - channel2
           - daily_laugh
+          - gonle_dusen
 
 permissions:
   contents: read
@@ -53,6 +54,7 @@ jobs:
       - name: Read OAuth token and check YouTube channel identity (no upload)
         env:
           YT_CONNECTION_TARGET: ${{ inputs.channel }}
+          TOKEN_GONLE_DUSEN_JSON: ${{ secrets.TOKEN_GONLE_DUSEN_JSON }}
           TOKEN_CHANNEL1_JSON: ${{ secrets.TOKEN_CHANNEL1_JSON }}
           TOKEN_CHANNEL2_JSON: ${{ secrets.TOKEN_CHANNEL2_JSON }}
           TOKEN_DAILY_LAUGH_LAB_JSON: ${{ secrets.TOKEN_DAILY_LAUGH_LAB_JSON }}
