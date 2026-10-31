@@ -12,6 +12,8 @@ on:
       - 'test_meta_auth_loader.py'
       - 'meta_page_token_health.py'
       - 'test_meta_page_token_health.py'
+      - 'public_link_runtime.py'
+      - 'test_public_link_runtime.py'
   workflow_dispatch:
 
 permissions:
@@ -28,4 +30,4 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install --require-hashes -r requirements.txt
       - name: Check Page identity and unknown alert semantics (no Meta API calls)
-        run: python -m unittest -v test_meta_auth_loader.py test_meta_page_token_health.py test_tracked_meta_routes.py
+        run: python -m unittest -v test_meta_auth_loader.py test_meta_page_token_health.py test_tracked_meta_routes.py test_public_link_runtime.py
