@@ -261,6 +261,72 @@ class LinkRuntimeSafety(unittest.TestCase):
                     runtime.download("id", dest)
             self.assertEqual(fetch.call_count, 3)
 
+    def test_drive_fallback_after_gdown_url_retrieval_failures_is_validated(self):
+        with tempfile.TemporaryDirectory() as root:
+            dest = Path(root) / "source.mp4"
+            data = b"\\x00\\x00\\x00\\x18ftypisom1234"
+            reply = Mock(
+                status_code=200,
+                url="https://drive.usercontent.google.com/download?id=approved",
+                headers={"Content-Type": "application/octet-stream",
+                         "Content-Length": str(len(data))},
+            )
+            reply.iter_content = Mock(return_value=[data[:6], data[6:]])
+            with (
+                patch.object(runtime.gdown, "download", create=True,
+                             side_effect=type("FileURLRetrievalError", (RuntimeError,), {})("provider-private-url")) as gdown_call,
+                patch.object(runtime.requests, "get", create=True, return_value=reply) as direct,
+                patch.object(runtime.time, "sleep"),
+            ):
+                self.assertEqual(runtime.download("1BPDfOdUNl5c0yuaMAYkwLO2_Qu5lfKEc", dest), dest)
+            self.assertEqual(dest.read_bytes(), data)
+            self.assertEqual(gdown_call.call_count, 3)
+            self.assertEqual(direct.call_count, 1)
+            self.assertEqual(direct.call_args.kwargs["params"]["confirm"], "t")
+            self.assertFalse((Path(root) / "source.mp4.partial").exists())
+
+    def test_drive_fallback_never_treats_html_or_truncated_bytes_as_video(self):
+        bad = [
+            ("text/html", b"<html>Google Drive confirmation</html>", None),
+            ("application/octet-stream", b"\\x00\\x00\\x00\\x18ftypisom1234", 100),
+        ]
+        for mime, content, declared in bad:
+            with self.subTest(mime=mime, declared=declared), tempfile.TemporaryDirectory() as root:
+                dest = Path(root) / "source.mp4"
+                reply = Mock(
+                    status_code=200,
+                    url="https://drive.usercontent.google.com/download?id=approved",
+                    headers={"Content-Type": mime,
+                             "Content-Length": str(declared if declared else len(content))},
+                )
+                reply.iter_content = Mock(return_value=[content])
+                with (
+                    patch.object(runtime.gdown, "download", create=True,
+                                 side_effect=type("FileURLRetrievalError", (RuntimeError,), {})("private-url")),
+                    patch.object(runtime.requests, "get", create=True, return_value=reply),
+                    patch.object(runtime.time, "sleep"),
+                ):
+                    with self.assertRaisesRegex(RuntimeError, "direct_public_get_blocked"):
+                        runtime.download("1BPDfOdUNl5c0yuaMAYkwLO2_Qu5lfKEc", dest)
+                self.assertFalse(dest.exists())
+                self.assertFalse((Path(root) / "source.mp4.partial").exists())
+
+    def test_drive_fallback_rejects_untrusted_redirect_or_invalid_file_id(self):
+        with tempfile.TemporaryDirectory() as root:
+            dest = Path(root) / "source.mp4"
+            reply = Mock(
+                status_code=200,
+                url="https://example.org/video.mp4",
+                headers={"Content-Type": "video/mp4", "Content-Length": "16"},
+            )
+            reply.iter_content = Mock(return_value=[b"\\x00\\x00\\x00\\x18ftypisom1234"])
+            with patch.object(runtime.requests, "get", create=True, return_value=reply) as get:
+                self.assertIsNone(runtime.direct_public_drive(
+                    "1BPDfOdUNl5c0yuaMAYkwLO2_Qu5lfKEc", dest))
+                self.assertIsNone(runtime.direct_public_drive("not-an-id", dest))
+            self.assertEqual(get.call_count, 1)
+            self.assertFalse(dest.exists())
+
     def test_caption_dedupe_ignores_store_suffix_and_spacing(self):
         self.assertEqual(runtime.caption_key("A  video\nEtsy: https://www.etsy.com/shop/x"), runtime.caption_key("A video"))
         self.assertNotEqual(runtime.caption_key("Part 2"), runtime.caption_key("Part 3"))
