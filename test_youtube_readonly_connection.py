@@ -38,6 +38,27 @@ class YouTubeReadOnlyCheckTests(unittest.TestCase):
             environ={"TOKEN_CHANNEL1_JSON": '{"installed": {"client_id": "foo"}}'})["status"],
             "not_an_authorized_user_token")
 
+    def test_oauth_client_json_is_diagnosed_without_disclosing_values(self):
+        client = {"installed": {"client_id": "private-client-id",
+                                "client_secret": "private-secret"}}
+        report = check_channel("channel1",
+            environ={"TOKEN_CHANNEL1_JSON": json.dumps(client)})
+        self.assertEqual(report["status"], "not_an_authorized_user_token")
+        self.assertEqual(report["json_kind"], "oauth_client_json")
+        self.assertEqual(report["missing_fields"],
+                         ["client_id", "client_secret", "refresh_token", "token_uri"])
+        self.assertNotIn("private-", json.dumps(report))
+
+    def test_missing_refresh_token_identified_safely(self):
+        partial = dict(AUTH_DATA)
+        partial.pop("refresh_token")
+        report = check_channel("channel2",
+            environ={"TOKEN_CHANNEL2_JSON": json.dumps(partial)})
+        self.assertEqual(report["status"], "not_an_authorized_user_token")
+        self.assertEqual(report["json_kind"], "incomplete_authorized_user_json")
+        self.assertEqual(report["missing_fields"], ["refresh_token"])
+        self.assertNotIn(partial["client_secret"], json.dumps(report))
+
     def test_required_upload_scope(self):
         data = dict(AUTH_DATA, scopes=["https://www.googleapis.com/auth/youtube.readonly"])
         self.assertEqual(check_channel("channel1",
