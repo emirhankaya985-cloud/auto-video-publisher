@@ -5,6 +5,12 @@ permissions:
 
 on:
   workflow_dispatch:
+  # One-shot auth diagnosis after the reviewed safe patch is merged to main.
+  # No Meta POST, video upload, credentials logging or secret mutation.
+  push:
+    branches: [main]
+    paths:
+      - docs/meta-auth-readonly-proof-2026-10-31.md
   pull_request:
     paths:
       - meta_page_token_health.py
@@ -24,7 +30,7 @@ jobs:
 
   audit:
     if: >-
-      github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+      (github.event_name == 'workflow_dispatch' || github.event_name == 'push') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
