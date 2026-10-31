@@ -264,7 +264,7 @@ class LinkRuntimeSafety(unittest.TestCase):
     def test_drive_fallback_after_gdown_url_retrieval_failures_is_validated(self):
         with tempfile.TemporaryDirectory() as root:
             dest = Path(root) / "source.mp4"
-            data = b"\\x00\\x00\\x00\\x18ftypisom1234"
+            data = b"\x00\x00\x00\\x18ftypisom1234"
             reply = Mock(
                 status_code=200,
                 url="https://drive.usercontent.google.com/download?id=approved",
@@ -288,7 +288,7 @@ class LinkRuntimeSafety(unittest.TestCase):
     def test_drive_fallback_never_treats_html_or_truncated_bytes_as_video(self):
         bad = [
             ("text/html", b"<html>Google Drive confirmation</html>", None),
-            ("application/octet-stream", b"\\x00\\x00\\x00\\x18ftypisom1234", 100),
+            ("application/octet-stream", b"\x00\x00\x00\\x18ftypisom1234", 100),
         ]
         for mime, content, declared in bad:
             with self.subTest(mime=mime, declared=declared), tempfile.TemporaryDirectory() as root:
@@ -319,7 +319,7 @@ class LinkRuntimeSafety(unittest.TestCase):
                 url="https://example.org/video.mp4",
                 headers={"Content-Type": "video/mp4", "Content-Length": "16"},
             )
-            reply.iter_content = Mock(return_value=[b"\\x00\\x00\\x00\\x18ftypisom1234"])
+            reply.iter_content = Mock(return_value=[b"\x00\x00\x00\\x18ftypisom1234"])
             with patch.object(runtime.requests, "get", create=True, return_value=reply) as get:
                 self.assertIsNone(runtime.direct_public_drive(
                     "1BPDfOdUNl5c0yuaMAYkwLO2_Qu5lfKEc", dest))
