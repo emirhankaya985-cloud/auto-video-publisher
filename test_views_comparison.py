@@ -136,5 +136,21 @@ class ViewComparisonTests(unittest.TestCase):
         self.assertEqual(transport.post.call_count, 1)
 
 
+class CollectionHealthTests(unittest.TestCase):
+    def test_missing_current_is_failure_even_with_other_platform_present(self):
+        from views_comparison import validate_collection
+        result = validate_collection({"accounts": [{"platforms": [{"total": 12}, {"total": None}]}]})
+        self.assertEqual(result, {"status": "incomplete", "expected_platforms": 2, "available_platforms": 1})
+
+    def test_zero_is_valid_without_baseline(self):
+        from views_comparison import validate_collection
+        self.assertEqual(validate_collection({"accounts": [{"platforms": [{"total": 0}]}]})["status"], "complete")
+
+    def test_empty_and_invalid_counters_fail(self):
+        from views_comparison import validate_collection
+        for parts in ([], [{"total": True}], [{"total": -1}]):
+            self.assertEqual(validate_collection({"accounts": [{"platforms": parts}]})["status"], "incomplete")
+
+
 if __name__ == "__main__":
     unittest.main()

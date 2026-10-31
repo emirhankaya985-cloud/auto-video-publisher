@@ -150,6 +150,9 @@ def telegram_tables(data):
              + "\n" + legend + "\n\n<b>Genel toplam:</b> " + number(data["total"])
              + "\n<b>Toplam günlük artış:</b> " + number(data["daily"]["delta"]) + " (" + percentage(data["daily"]["percent"]) + ")"
              + "\nYüzde = toplam video sayacının taban tarihe göre büyümesi; günlük izlenme hızının yüzdesi değildir.")
+    errors = data.get("collection_errors", [])
+    if errors:
+        first += "\n\n<b>API hata nedeni:</b>\n" + "\n".join(html.escape(e) for e in list(dict.fromkeys(errors))[:2])
     daily_missing = [f"{i}: {html.escape(r['daily']['reason'])}" for i, r in enumerate(rows, 1)
                      if r["daily"]["baseline"] is None]
     if daily_missing:
@@ -187,3 +190,11 @@ def telegram_tables(data):
     if any(len((title + body).encode("utf-16-le")) // 2 > 3800 for title, body in messages):
         raise ValueError("Detailed Telegram report exceeds bounded message size")
     return messages
+
+
+def validate_collection(data):
+    """Missing baselines are normal; missing current platform counters are failures."""
+    parts = [part for row in data.get("accounts", []) for part in row.get("platforms", [])]
+    missing = [part for part in parts if _count(part.get("total")) is None]
+    return {"status": "complete" if parts and not missing else "incomplete",
+            "expected_platforms": len(parts), "available_platforms": len(parts) - len(missing)}

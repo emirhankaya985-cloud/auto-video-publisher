@@ -25,7 +25,7 @@ from ntfy_notifications import send_ntfy
 from telegram_notifications import send_telegram, telegram_configured
 from ntfy_phone_report import compact_phone_report
 from publisher_recovery import read_with_retry
-from views_comparison import ViewReport, build_comparison, load_history, telegram_tables
+from views_comparison import ViewReport, build_comparison, load_history, telegram_tables, validate_collection
 
 
 TZ = ZoneInfo("Europe/Istanbul")
@@ -707,6 +707,8 @@ def build_report(now=None):
             {account: list(value[2]) for account, value in report_accounts.items()},
             report_day, now.isoformat(timespec="seconds"), delayed=delayed,
         )
+        comparison["collection"] = validate_collection(comparison)
+        comparison["collection_errors"] = collection_errors
         return ViewReport("\n".join(rows), comparison)
 
 
@@ -782,4 +784,8 @@ if __name__ == "__main__":
     write_step_summary(report)
     notify(report)
     from nvidia_assistant import send_daily_summary
-    send_daily_summary(report.comparison)
+    if report.comparison["collection"]["status"] == "complete":
+        send_daily_summary(report.comparison)
+    else:
+        print("::error::Meta görüntülenme verisi eksik; bildirim teslimi veri toplama başarısı değildir.", flush=True)
+        raise SystemExit(1)
