@@ -54,3 +54,15 @@ After the branch is merged, run the no-post account check for all six accounts a
 - Each real account read-only check succeeds with the correct account ID.
 - Token values and private URLs never enter logs, source, chat, or issue bodies.
 - New publishing remains OFF until explicit activation and separate live post IDs plus duplicate-avoidance verification.
+
+## 31 October 2026 live failure diagnosis (no upload)
+
+Two actual manual runs failed after GitHub runner tests passed:
+- Channel test: https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/41195920953
+- Channel test: https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/41195981538
+
+Both `google-readonly` jobs returned `{"status":"not_an_authorized_user_token"}` BEFORE an authenticated YouTube API request. This **does not prove** an expired token or an invalid channel; it means the JSON in the selected Actions secret is not a complete authorized-user token. The screenshot confirmed the two names were present, not the secret values. Do not delete or regenerate credentials blindly.
+
+Owner recovery: inspect the **local** JSON type without pasting any content into chat. An OAuth client download usually contains a top-level `installed` or `web` object, and is **not** the expected token. An authorized-user token must contain top-level `client_id`, `client_secret`, `refresh_token` and `token_uri` values; it must authorize YouTube upload. If an existing matching `token_channel1.json` / `token_channel2.json` contains these fields, use that entire JSON as the matching GitHub secret. If it does not, use `youtube_authorize_channel.py` from this branch on a trusted computer to generate an authorized-user token, confirm the exact channel identity, and copy the resulting JSON into the matching GitHub Actions Secret (not source code, not chat). Keep production publishing disabled.
+
+The checked-in read-only diagnostic now safely identifies the missing fixed field *names* and whether the input looks like OAuth client JSON, without ever exposing values. Re-run the manual no-upload check for `channel1` and `channel2` after correcting their secret values. Only `status=verified` with the expected channel identity is acceptable; a green isolated unit test is not sufficient. No video was uploaded in these failed checks.
