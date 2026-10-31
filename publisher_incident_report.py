@@ -19,7 +19,7 @@ _SAFE_REASONS = {
 _SAFE_STATUSES = {"done", "ready", "uncertain", "intent"}
 
 
-def build_incident_report(state, run_id, *, plan_text="", errors=None, step_outcomes=None):
+def build_incident_report(state, run_id, *, plan_text="", errors=None, step_outcomes=None, state_available=True):
     if not str(run_id).isdigit():
         raise ValueError("GitHub run ID invalid")
     if not isinstance(state, dict) or not isinstance(state.get("entries"), dict):
@@ -74,8 +74,16 @@ def build_incident_report(state, run_id, *, plan_text="", errors=None, step_outc
     # Never persist raw provider responses or secret-bearing tracebacks.
     events = [event for event in (errors or []) if event.get("run_id") == run_id]
     outcomes = {k: v for k, v in (step_outcomes or {}).items()
-                if k in ("verify", "plan", "publish", "notify")
+                if k in ("preflight", "verify", "plan", "publish", "notify")
                 and v in ("success", "failure", "skipped", "cancelled")}
+    # An early credential gate can fail before any ledger exists. Never present
+    # an empty incident list as proof of a healthy publication run.
+    if outcomes.get("preflight") == "failure":
+        incidents.append({
+            "route": "all", "platform": "unknown", "status": "blocked",
+            "reason": "meta_preflight_failed",
+            "action": "inspect_redacted_preflight_log_no_meta_post",
+        })
     # Preserve visibility of earlier uncertain publish attempts. Counts scoped
     # only to the current run otherwise misreport a held queue as fully healthy.
     previous_held = [
@@ -92,6 +100,7 @@ def build_incident_report(state, run_id, *, plan_text="", errors=None, step_outc
     ))
     return {
         "schema": 2, "run_id": run_id,
+        "state_available": bool(state_available),
         "created_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "confirmed_new_posts": counts["done"],
         "unverified_done_entries": counts["unverified_done"],
@@ -117,17 +126,19 @@ def main():
     report_path = ROOT / "report.md"
     plan_text = report_path.read_text(encoding="utf-8") if report_path.is_file() else ""
     outcomes = {key: os.getenv("OUTCOME_" + key.upper(), "")
-                for key in ("verify", "plan", "publish", "notify")}
+                for key in ("preflight", "verify", "plan", "publish", "notify")}
     summary = build_incident_report(
         state, run_id, plan_text=plan_text,
         errors=read_errors(run_id=run_id), step_outcomes=outcomes,
+        state_available=state_path.is_file(),
     )
     ROOT.mkdir(parents=True, exist_ok=True)
     (ROOT / "incidents.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({key: summary[key] for key in ("run_id", "confirmed_new_posts",
                       "unverified_done_entries", "safe_pre_upload_retries", "uncertain_pending_reconciliation",
                       "previous_unreconciled_intents", "previous_unreconciled_by_route",
-                      "planning_blocker_counts", "error_event_count", "step_outcomes")},
+                      "planning_blocker_counts", "error_event_count", "step_outcomes",
+                      "state_available")},
                      ensure_ascii=False), flush=True)
     # Do not let an apparently green workflow conceal a completed entry with
     # no verifiable platform post ID. Artifact upload steps use always().
