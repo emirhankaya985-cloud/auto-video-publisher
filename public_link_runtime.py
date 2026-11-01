@@ -1395,13 +1395,60 @@ def pending_publication_platforms(item, state):
     return pending
 
 
+def ordered_predecessors_confirmed(plans, index, item, state):
+    """Do not POST a later serial part until earlier planned parts have IDs."""
+    if item.get("route") not in {"film", "film_second", "toonzone"}:
+        return True
+    for prior in plans[:index]:
+        if prior.get("route") != item["route"]:
+            continue
+        if not prior.get("platforms") or not prior.get("id") or not prior.get("name"):
+            return False
+        for platform in prior["platforms"]:
+            if platform not in {"facebook", "instagram"}:
+                return False
+            row = state.get("entries", {}).get(
+                f"{prior['route']}:{platform}:{prior['id']}")
+            if (not isinstance(row, dict) or row.get("status") != "done"
+                    or not str(row.get("post_id") or "").strip()
+                    or row.get("file") != prior["name"]):
+                return False
+    return True
+
+
+def hold_unattempted_ordered_successor(item, state):
+    """Release only this run's intact, never-POSTed intents to safe planning."""
+    for platform in item.get("platforms", []):
+        if platform not in {"facebook", "instagram"}:
+            continue
+        row = state.get("entries", {}).get(
+            f"{item.get('route')}:{platform}:{item.get('id')}")
+        caption = item.get("captions", {}).get(platform)
+        if (isinstance(row, dict) and isinstance(caption, str)
+                and row.get("status") == "intent"
+                and row.get("run_id") == os.getenv("GITHUB_RUN_ID")
+                and row.get("file") == item.get("name")
+                and row.get("caption_hash") == caption_key(caption)):
+            row.update(status="ready", failure={
+                "reason": "ordered_predecessor_unconfirmed",
+                "safe_to_repost": True, "external_post_attempted": False})
+
+
 def publish():
     state = json.loads(STATE.read_text())
     plans = json.loads(PLAN.read_text())
     pages = {p["page_name"]: p for p in load_meta_auth()["pages"]}
     failures = []
-    for original_item in plans:
+    for index, original_item in enumerate(plans):
         item = dict(original_item)
+        if not ordered_predecessors_confirmed(plans, index, item, state):
+            # An earlier serial part failed or is unconfirmed. Never begin
+            # this part's download or Meta POST, and preserve prior evidence.
+            hold_unattempted_ordered_successor(item, state)
+            save(STATE, state)
+            failures.append(str(item.get("route", "unknown"))
+                            + ": later ordered part held; predecessor unconfirmed")
+            continue
         try:
             item["platforms"] = pending_publication_platforms(item, state)
         except (RuntimeError, KeyError, TypeError) as exc:
