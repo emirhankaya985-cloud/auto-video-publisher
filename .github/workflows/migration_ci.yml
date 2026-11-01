@@ -89,22 +89,22 @@ jobs:
               rows.append(f"| {name} | {'Configured' if os.environ.get(name) else 'Missing'} |")
           rows.append(f"Meta-only publisher enabled: {os.environ.get('LINK_AUTOMATION_ENABLED') == 'true'}")
           rows.append(f"Legacy OAuth publisher enabled: {os.environ.get('AUTOMATION_ENABLED') == 'true'}")
-          rows.append("Meta-only publication uses LINK_AUTOMATION_ENABLED and META_ACCESS_TOKEN. Disabled legacy workflows may lack optional Drive/YouTube secrets.")
+          rows.append("Meta-only publication requires enabled route gates and live valid Page identity. A configured secret does not prove provider access.")
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as output:
               output.write('\n'.join(rows) + '\n')
           def status(enabled):
               return 'READY' if enabled else 'NOT READY'
 
           telegram_ready = bool(os.environ.get('TELEGRAM_BOT_TOKEN') and os.environ.get('TELEGRAM_CHAT_ID'))
-          meta_ready = (os.environ.get('LINK_AUTOMATION_ENABLED') == 'true'
-                        and bool(os.environ.get('META_ACCESS_TOKEN')))
+          meta_configured = (os.environ.get('LINK_AUTOMATION_ENABLED') == 'true'
+                             and bool(os.environ.get('META_AUTH_JSON') or os.environ.get('META_ACCESS_TOKEN')))
           ntfy_ready = bool(os.environ.get('NTFY_TOPIC') or os.environ.get('NTFY_TOPIC_URL'))
           legacy_on = os.environ.get('AUTOMATION_ENABLED') == 'true'
           drive_ready = bool(os.environ.get('DRIVE_TOKEN_JSON'))
           rows = [
               "",
               "### Operational readiness — separate publishing paths",
-              f"- Meta public-link publisher configured: **{status(meta_ready)}** (LINK_AUTOMATION_ENABLED + META_ACCESS_TOKEN).",
+              f"- Meta public-link credential fields: **{'PRESENT' if meta_configured else 'MISSING'}** (not a live Meta API check; valid saved Page JSON or User token required).",
               f"- Telegram notification channel configured: **{status(telegram_ready)}**; actual delivery needs a separate smoke test.",
               f"- ntfy additional notification channel: **{status(ntfy_ready)}** (optional while Telegram is working).",
               f"- Legacy Drive/YouTube publisher: **{'ON' if legacy_on else 'OFF'}** (AUTOMATION_ENABLED).",
@@ -117,5 +117,5 @@ jobs:
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as output:
               output.write('\\n'.join(rows) + '\\n')
           print(f"Configured secret names: {sum(bool(os.environ.get(n)) for n in names)}/{len(names)}")
-          print(f"Readiness: telegram={status(telegram_ready)}; public_meta={status(meta_ready)}; ntfy_optional={status(ntfy_ready)}; legacy_enabled={legacy_on}; drive_present={drive_ready}")
+          print(f"Readiness: telegram={status(telegram_ready)}; public_meta_credentials={'PRESENT' if meta_configured else 'MISSING'} (live API unverified); ntfy_optional={status(ntfy_ready)}; legacy_enabled={legacy_on}; drive_present={drive_ready}")
           PYCODE
