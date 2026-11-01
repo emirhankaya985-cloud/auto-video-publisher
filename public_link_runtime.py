@@ -683,6 +683,36 @@ def proven_film_ig_source_alias(item, entry, route, platform,
     )
 
 
+def confirmed_existing_film_post_amid_caption_reuse(entry, route, platform, history):
+    """The exact already-done ID outranks a non-unique description.
+
+    This protects a real post during planning, NOT an unverified new source.
+    Previous weak caption-only reconciliations never gain this privilege.
+    """
+    if not (
+        route == "film" and platform in {"facebook", "instagram"}
+        and entry.get("status") == "done" and entry.get("post_id")
+        and entry.get("day") and entry.get("caption_hash")
+        and entry.get("reconciliation_proof") != "unique_platform_history_caption"
+    ):
+        return False
+    matches = [row for row in history
+               if str(row.get("id") or "") == str(entry["post_id"])]
+    if len(matches) != 1:
+        return False
+    row = matches[0]
+    caption = row.get("description") or row.get("caption")
+    if not isinstance(caption, str):
+        return False
+    try:
+        actual_id, actual_day = history_publication_match(route, row)
+    except RuntimeError:
+        return False
+    return (str(actual_id) == str(entry["post_id"]) and
+            actual_day == entry["day"] and
+            caption_key(caption) == entry["caption_hash"])
+
+
 def film_canonical_part(name):
     return re.sub(r" \([0-9]+\)$", "", Path(name).stem).casefold()
 
@@ -1228,6 +1258,16 @@ def plan(audit=False):
                         report.append(f"DUPLICATE VERIFIED: {item['name']} {p}; existing post_id={duplicate['post_id']}; no new upload.")
                         continue
                 if cap_hash in ambiguous_captions[p]:
+                    if (source == "film" and
+                            confirmed_existing_film_post_amid_caption_reuse(
+                                existing, route, p, histories[p])):
+                        # Part 13 has two real post IDs using one caption.
+                        # They must not halt the ordered sequence or become
+                        # candidates for another upload.
+                        report.append(
+                            "EXISTING VERIFIED: exact Film post ID, remote "
+                            "timestamp and caption match; no new upload.")
+                        continue
                     if source in {"humor", "gonle", "daily_laugh"} and not existing:
                         # Several real posts use this caption, but none proves
                         # which Drive file was sent. Never republish or invent
