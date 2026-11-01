@@ -1,4 +1,4 @@
-name: Meta Page credential fallback no-publish CI
+name: Meta user-token-only no-publish CI
 
 on:
   pull_request:

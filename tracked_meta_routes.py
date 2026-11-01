@@ -150,7 +150,7 @@ def main():
             f"{subject} — {verdict['day']}: Meta yayın geçmişi okunamadı "
             f"({verdict.get('reason', 'read_unavailable')}). "
             "Hedefte video eksikliği kanıtlanmadı; körlemesine yeniden yayın yapmayın. "
-            "META_ACCESS_TOKEN ve varsa kayıtlı Page tokenlarını salt-okunur doğrulayın. "
+            "META_ACCESS_TOKEN üzerinden keşfedilen Page erişimini salt-okunur doğrulayın. "
             f"Kontrol: {WORKFLOW_URL}"
         )
     else:
