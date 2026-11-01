@@ -296,7 +296,6 @@ jobs:
           TOONZONE_PART: ${{ inputs.toonzone_part }}
           TOONZONE_RESUME_PART1_IG: 'false'
           CONTROLLED_IG_RECOVERY: ${{ inputs.controlled_ig_recovery }}
-          META_AUTH_JSON: ${{ secrets.META_AUTH_JSON }}
           META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
           NTFY_TOPIC_URL: ${{ secrets.NTFY_TOPIC_URL }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
