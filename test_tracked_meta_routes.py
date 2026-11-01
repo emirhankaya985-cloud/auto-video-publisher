@@ -188,15 +188,16 @@ class TrackedRoutesTests(unittest.TestCase):
         self.assertIn("META_ACCESS_TOKEN", sent)
         self.assertNotIn("8 eksik", sent)
 
-    def test_safe_page_token_fallback_wired_to_read_and_publish(self):
+    def test_user_token_only_wired_to_read_and_publish(self):
         from pathlib import Path
         base = Path(__file__).parent / ".github" / "workflows"
         publisher = (base / "public_link_schedule.yml").read_text(encoding="utf-8")
         targets = (base / "tracked_meta_routes.yml").read_text(encoding="utf-8")
-        env = "META_AUTH_JSON: " + "${{ secrets.META_AUTH_JSON }}"
+        env = "META_ACCESS_TOKEN: " + "${{ secrets.META_ACCESS_TOKEN }}"
         self.assertIn(env, publisher)
         self.assertIn(env, targets)
-        self.assertNotIn('if [ -n "$META_AUTH_JSON" ]; then', publisher)
+        self.assertNotIn("META_AUTH_JSON", publisher)
+        self.assertNotIn("META_AUTH_JSON", targets)
         self.assertIn("run: python meta_page_token_health.py", publisher)
         self.assertLess(publisher.index("run: python meta_page_token_health.py"),
                         publisher.index("run: python public_link_runtime.py publish"))
