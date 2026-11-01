@@ -37,6 +37,26 @@ class ErrorJournalTests(unittest.TestCase):
         self.assertNotIn("access_token", json.dumps(items))
         self.assertNotIn("secret", json.dumps(items))
 
+    def test_real_publisher_meta_and_youtube_errors_are_registered(self):
+        # Each pair below occurs in production code; an unknown journal label
+        # must not replace the original error with an unexpected ValueError.
+        pairs = [
+            ("publication_preflight", "intent_validation_failed", "facebook"),
+            ("instagram_publish", "existing_container_reconciliation_failed", "instagram"),
+            ("youtube_prepare", "missing_secret", "youtube"),
+            ("youtube_publish", "youtube_publication_unverified", "youtube"),
+        ]
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"GITHUB_RUN_ID": "9321"}):
+            path = Path(tmp) / "events.jsonl"
+            for stage, reason, platform in pairs:
+                record_error(stage, reason, route="penguen", platform=platform,
+                             error=RuntimeError("private-token-goes-here"), path=path)
+            events = read_errors(path, run_id="9321")
+        self.assertEqual(len(events), len(pairs))
+        self.assertEqual([(x["stage"], x["reason"], x["platform"]) for x in events], pairs)
+        self.assertTrue(all(x["retry_policy"] == "never_blindly_retry_meta_post" for x in events))
+        self.assertNotIn("private-token-goes-here", json.dumps(events))
+
     def test_rejects_paths_urls_in_identifiers_and_unsafe_reason(self):
         with patch.dict(os.environ, {"GITHUB_RUN_ID": "915"}):
             event = error_event("txt_caption", "txt_unavailable",

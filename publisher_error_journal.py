@@ -19,6 +19,7 @@ _ALLOWED_STAGE = {
     "facebook_publish", "instagram_publish", "workflow_verify", "workflow_plan",
     "workflow_publish", "telegram_notification", "ntfy_notification",
     "state_restore", "previous_intent_hold", "planning_queue", "other",
+    "publication_preflight", "youtube_prepare", "youtube_publish",
 }
 _ALLOWED_REASON = {
     "drive_unavailable", "meta_account_missing", "meta_history_unavailable",
@@ -28,6 +29,8 @@ _ALLOWED_REASON = {
     "unclassified_upload_result", "workflow_step_failed",
     "notification_delivery_failed", "state_restore_failed",
     "unreconciled_previous_intent", "no_eligible_content", "other",
+    "intent_validation_failed", "existing_container_reconciliation_failed",
+    "missing_secret", "youtube_publication_unverified",
 }
 
 
@@ -49,7 +52,7 @@ def error_event(stage, reason, *, route="", platform="", video="",
         "run_id": safe_label(os.getenv("GITHUB_RUN_ID", ""), 35),
         "stage": stage, "reason": reason,
         "route": safe_label(route, 45),
-        "platform": platform if platform in ("facebook", "instagram") else "unknown",
+        "platform": platform if platform in ("facebook", "instagram", "youtube") else "unknown",
         "video": safe_label(video, 125),
         "outcome": "held" if status != "uncertain" else "uncertain",
         "retry_policy": ("pre_upload_only" if safe_to_retry
