@@ -462,3 +462,10 @@ izlenir; bu inceleme test amaçlı gerçek yayın tetiklemedi.
 - Her upload öncesi kanal uploads geçmişi okunur; source marker uzlaştırılır, aynı başlık belirsizliği upload'u durdurur. API ID sonrası kanal/status GET kontrolü yapılır. Public istense de sağlayıcı uygulama doğrulaması nedeniyle private kalabilir; dönen privacyStatus loglanır. Public + processed olmayan kabul accepted olarak tutulur; sonraki koşum yalnız GET ile uzlaştırır, yeni insert yapmaz.
 - Kill switch: YOUTUBE_PUBLISHING_ENABLED=false. Normal Meta schedule/konkürensi kullanılır. Özel IG rescue ve audit upload yapmaz. YouTube hatası mevcut Meta POST'larını geri almaz; sonuç arşivi her durumda korunur.
 - Geri alma: entegrasyon commitini revert et veya kill switch'i kapat; youtube_entries ve artifact'ları silme. Testler canlı upload/yayın kabulü değildir; gerçek video ID ve public status ayrıca doğrulanır.
+
+### 1 Kasım 12:50 TRT — Bozuk JSON yedeği User tokenını gölgeliyor
+
+- Page health #41294851275 job124813428489: META_AUTH_JSON artık dolu/maskeli; loader invalid_meta_configuration ile duruyor. Önceki başarılı rapor ve publisher'da JSON boştu. Bu yeni hata eski HTTP401/190/463 ile aynı değildir. Secret içeriği okunmadı.
+- Loader artık documented pages şemasını doğrular ve tek ekstra JSON string katmanını açar. Sözdizimi/şema hatasında ayrı META_ACCESS_TOKEN mevcutsa yalnız güvenli GET keşfine geçer; yoksa redakte açık hata verir. Geçerli kayıtlı JSON önceliği korunur; canlı hesap uyuşmazlığı fallback ile aşılmaz.
+- Fallback kendi başına süresi geçmiş User tokenını yenilemez. Canlı kabul, Page Health aynı yeni SHA ile başarılı olduğunda yapılır; mock test yeşili credential başarısı değildir.
+- Geri alma: loader değişikliğini revert et; secret/state/artifact silme.

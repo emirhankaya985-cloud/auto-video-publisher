@@ -14,3 +14,5 @@ konfigürasyon JSON'u hiçbir zaman dosyaya ya da loga yazılmaz.
 Kimlik doğrulama başarısızsa kod fail-closed kalır; hiçbir eski video
 yeniden yüklenmez, belirsiz Instagram container temizlenmez ve
 100/100 kabul verilmez. Çalıştırma yalnız kimlik okuma GET yapar.
+
+1 Kasım: malformed saved JSON fallback regression fixed; rerun GET-only identity audit on this merge. No media POST, secret mutation or publication.
