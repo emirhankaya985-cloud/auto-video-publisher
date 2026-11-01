@@ -1,0 +1,70 @@
+name: YouTube accepted upload status (read-only)
+
+on:
+  schedule:
+    # Independent of Meta token health and the publisher's upload lock.
+    # Every three hours; does not upload or retry any video.
+    - cron: '43 */3 * * *'
+  push:
+    branches: [main]
+    paths:
+      - youtube_accepted_audit.py
+      - test_youtube_accepted_audit.py
+      - .github/workflows/youtube_accepted_audit.yml
+  pull_request:
+    paths:
+      - youtube_accepted_audit.py
+      - test_youtube_accepted_audit.py
+      - .github/workflows/youtube_accepted_audit.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: youtube-accepted-readonly-audit
+  cancel-in-progress: false
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: pip install --require-hashes -r requirements.txt
+      - name: Verify no-write state and YouTube API safety
+        run: python -m unittest -v test_youtube_accepted_audit.py test_youtube_main_bridge.py
+
+  google-readonly:
+    needs: tests
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TOKEN_CHANNEL1_JSON: ${{ secrets.TOKEN_CHANNEL1_JSON }}
+      TOKEN_CHANNEL2_JSON: ${{ secrets.TOKEN_CHANNEL2_JSON }}
+      TOKEN_DAILY_LAUGH_LAB_JSON: ${{ secrets.TOKEN_DAILY_LAUGH_LAB_JSON }}
+      TOKEN_GONLE_DUSEN_JSON: ${{ secrets.TOKEN_GONLE_DUSEN_JSON }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: |
+          pip install --require-hashes -r requirements.txt
+          pip install gdown==6.4.2
+      - name: Read archived accepted video IDs and check existing public status
+        run: python youtube_accepted_audit.py
+      - name: Preserve actual read-only verification result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: youtube-accepted-verification
+          path: youtube-accepted-verification.json
+          if-no-files-found: warn
+          retention-days: 30
