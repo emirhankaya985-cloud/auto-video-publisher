@@ -34,8 +34,15 @@ def check_channel(target, *, environ=None, session_factory=AuthorizedSession):
     if not isinstance(data, dict):
         return {"status": "invalid_authorized_user_json"}
     required = ("client_id", "client_secret", "refresh_token", "token_uri")
-    if any(not isinstance(data.get(key), str) or not data[key] for key in required):
-        return {"status": "not_an_authorized_user_token"}
+    # Report *only fixed field names* and a recognized JSON type. Never
+    # return the secret's field values, raw JSON, token or OAuth URI.
+    missing = [key for key in required
+               if not isinstance(data.get(key), str) or not data[key]]
+    if missing:
+        kind = ("oauth_client_json" if "installed" in data or "web" in data
+                else "incomplete_authorized_user_json")
+        return {"status": "not_an_authorized_user_token",
+                "json_kind": kind, "missing_fields": missing}
     scopes = data.get("scopes")
     if isinstance(scopes, (list, tuple)) and YOUTUBE_UPLOAD_SCOPE not in scopes:
         return {"status": "youtube_upload_scope_missing"}
