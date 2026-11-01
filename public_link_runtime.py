@@ -655,6 +655,38 @@ def verified_film_duplicate(item, route, platform, files, entries, history, fing
                 duplicate_verified_in_run_id=os.getenv("GITHUB_RUN_ID", ""))
 
 
+def proven_film_ig_source_alias(item, entry, route, platform,
+                                files, entries, history, fingerprints):
+    """A source collision can be skipped only with exact bytes AND a real post.
+
+    Never turn the stale/uncertain intent into a second done result; a distinct
+    Drive ID with the same video bytes is not a new published Instagram post.
+    """
+    if not (
+        route == "film" and platform == "instagram"
+        and entry.get("route") == route and entry.get("platform") == platform
+        and entry.get("status") == "uncertain"
+        and entry.get("file") == item["name"]
+        and entry.get("reconciliation_conflict") == "post_id_belongs_to_other_source"
+        and entry.get("source_collision_post_id")
+        and entry.get("resume_no_publish_confirmed") is True
+        and not entry.get("container_publish_attempted")
+    ):
+        return False
+    proof = verified_film_duplicate(
+        item, route, platform, files, entries, history, fingerprints)
+    return bool(
+        proof and proof.get("reconciliation_proof") ==
+        "identical_source_bytes_and_exact_remote_post"
+        and str(proof.get("post_id")) == str(entry["source_collision_post_id"])
+        and proof.get("duplicate_of_file_id") != item["id"]
+    )
+
+
+def film_canonical_part(name):
+    return re.sub(r" \([0-9]+\)$", "", Path(name).stem).casefold()
+
+
 def route_enabled(route):
     return not route_paused("film" if route == "film_second" else route)
 
@@ -1111,6 +1143,7 @@ def plan(audit=False):
         selected = None
         route_selected = 0
         blocked_platforms = set()
+        planned_film_parts = set()
         for item in videos:
             available = [p for p in platforms if p not in blocked_platforms]
             if not available or all(counts[p] + planned_counts.get((route, p), 0) >= target_count(route, now) for p in available):
@@ -1159,6 +1192,24 @@ def plan(audit=False):
                 key = f"{route}:{p}:{item['id']}"
                 existing = state["entries"].get(key, {})
                 cap_hash = caption_key(captions[p])
+                if (route == "film" and p == "instagram" and existing
+                        and existing.get("status") == "uncertain"
+                        and existing.get("reconciliation_conflict") == "post_id_belongs_to_other_source"):
+                    try:
+                        identical_alias = proven_film_ig_source_alias(
+                            item, existing, route, p, files, state["entries"],
+                            histories[p], duplicate_fingerprints)
+                    except RuntimeError as exc:
+                        report.append("HELD film source identity: " + str(exc))
+                        held = True
+                        continue
+                    if identical_alias:
+                        # Retain old container/intent and the original real
+                        # post owner. Never count, reassign or re-upload alias.
+                        report.append(
+                            "SOURCE ALIAS VERIFIED: identical film bytes belong "
+                            "to an existing real Instagram post; old intent held.")
+                        continue
                 if not existing and source == "film":
                     try:
                         duplicate = verified_film_duplicate(
@@ -1311,6 +1362,12 @@ def plan(audit=False):
                 # A tick catches up one item per account; no all-night busy polling.
                 if today_count + planned_counts.get((route, p), 0) >= target:
                     continue
+                if (route == "film" and
+                        (p, film_canonical_part(item["name"])) in planned_film_parts):
+                    # Only one unproven same-part source may enter this batch;
+                    # two differently named Drive copies are not two safe slots.
+                    report.append("HELD: film part already planned for this platform in this run.")
+                    continue
                 pending.append(p)
             if held:
                 break
@@ -1379,6 +1436,8 @@ def plan(audit=False):
                 plans.append(selected)
                 for p in pending:
                     planned_counts[(route, p)] = planned_counts.get((route, p), 0) + 1
+                    if route == "film":
+                        planned_film_parts.add((p, film_canonical_part(item["name"])))
                 if (route in _AUDITED_IG_V3_FILES and
                         item["name"] == _AUDITED_IG_V3_FILES[route] and
                         "instagram" in pending and
