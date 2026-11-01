@@ -12,7 +12,23 @@ from googleapiclient.discovery import build
 from youtube_uploader import upload_video
 from publisher_error_journal import record_error
 from youtube_readonly_connection import check_channel
-from public_link_runtime import STATE, PLAN, save, download, verify_source_video
+STATE = Path('link-runtime/state.json')
+PLAN = Path('link-runtime/plan.json')
+
+
+def save(path, value):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding='utf-8')
+
+
+def download(source, path):
+    from public_link_runtime import download as source_download
+    return source_download(source, path)
+
+
+def verify_source_video(path):
+    from public_link_runtime import verify_source_video as verify
+    return verify(path)
 
 ROUTES = {
     'tarladaki': ('channel1', 'TOKEN_CHANNEL1_JSON', 'UCrUF3mT4oF26JNBLcyKPcGQ'),
