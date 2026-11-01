@@ -27,6 +27,7 @@ on:
           - channel1
           - channel2
           - daily_laugh
+          - gonle_dusen
 
 permissions:
   contents: read
@@ -60,4 +61,5 @@ jobs:
           TOKEN_CHANNEL1_JSON: ${{ secrets.TOKEN_CHANNEL1_JSON }}
           TOKEN_CHANNEL2_JSON: ${{ secrets.TOKEN_CHANNEL2_JSON }}
           TOKEN_DAILY_LAUGH_LAB_JSON: ${{ secrets.TOKEN_DAILY_LAUGH_LAB_JSON }}
+          TOKEN_GONLE_DUSEN_JSON: ${{ secrets.TOKEN_GONLE_DUSEN_JSON }}
         run: python youtube_readonly_connection.py "$YT_CONNECTION_TARGET"

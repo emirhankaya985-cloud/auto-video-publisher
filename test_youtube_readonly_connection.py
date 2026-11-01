@@ -120,9 +120,27 @@ class YouTubeReadOnlyCheckTests(unittest.TestCase):
         self.assertEqual(verdict["status"], "authorization_or_connection_failed")
         self.assertNotIn(AUTH_DATA["refresh_token"], json.dumps(verdict))
 
+    def test_gonle_dusen_secret_and_exact_channel_id(self):
+        self.assertEqual(check_channel("gonle_dusen", environ={})["secret_name"],
+                         "TOKEN_GONLE_DUSEN_JSON")
+        for channel, expected_status in (
+            ("UCvSvo5WghuXqsjwLRmIz22g", "verified"),
+            ("different-channel", "wrong_channel"),
+        ):
+            with self.subTest(channel=channel):
+                factory, session = session_for("Gönle Düşen", channel)
+                with patch("youtube_readonly_connection.Credentials.from_authorized_user_info"):
+                    verdict = check_channel(
+                        "gonle_dusen",
+                        environ={"TOKEN_GONLE_DUSEN_JSON": json.dumps(AUTH_DATA)},
+                        session_factory=factory,
+                    )
+                self.assertEqual(verdict["status"], expected_status)
+                session.post.assert_not_called()
+
     def test_invalid_target(self):
         self.assertEqual(check_channel("other")["status"], "invalid_target")
-        self.assertEqual(set(TARGETS), {"channel1", "channel2", "daily_laugh"})
+        self.assertEqual(set(TARGETS), {"channel1", "channel2", "daily_laugh", "gonle_dusen"})
 
 
 if __name__ == "__main__":

@@ -14,6 +14,7 @@ TARGETS = {
     "channel1": ("TOKEN_CHANNEL1_JSON", "Tarladaki Fasulye", None),
     "channel2": ("TOKEN_CHANNEL2_JSON", "Beyinsiz Penguen", None),
     "daily_laugh": ("TOKEN_DAILY_LAUGH_LAB_JSON", "Daily Laugh Lab", "UCF4KwI3alXzlExviMFmmJAA"),
+    "gonle_dusen": ("TOKEN_GONLE_DUSEN_JSON", "Gönle Düşen", "UCvSvo5WghuXqsjwLRmIz22g"),
 }
 YOUTUBE_UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
 CHANNELS_URL = "https://www.googleapis.com/youtube/v3/channels"
