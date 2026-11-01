@@ -4,6 +4,7 @@ No network, token, Meta POST or filesystem state mutation beyond GITHUB_OUTPUT.
 """
 import os
 import subprocess
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 MARKER = "docs/publisher-one-shot-v2-2026-10-25.md"
@@ -12,6 +13,25 @@ IG_RESCUE_MARKER = "docs/ig-v3-rescue-once-2026-10-26.md"
 IG_RESCUE_SUBJECT = "ops: authorized-once-exact-two-ig-v3-2026-10-26"
 IG_V4_MARKER = "docs/ig-v4-compact-publish-once-2026-10-26.md"
 IG_V4_SUBJECT = "ops: authorized-once-exact-two-ig-v4-compact-2026-10-26"
+OWNER_CATCHUP_MARKER = "docs/owner-authorized-catchup-2026-11-01.md"
+OWNER_CATCHUP_SUBJECT = "ops: owner-authorized-catchup-2026-11-01"
+OWNER_CATCHUP_DATE = "2026-11-01"
+
+
+def is_owner_catchup_push(event, ref, subject, added_paths, *, today=None, run_attempt=None):
+    """One day, one commit, first attempt only; never publish on CI PR or rerun."""
+    if today is None:
+        today = datetime.now(timezone(timedelta(hours=3))).date().isoformat()
+    if run_attempt is None:
+        run_attempt = os.getenv("GITHUB_RUN_ATTEMPT", "1")
+    return (
+        event == "push" and ref == "refs/heads/main"
+        and subject == OWNER_CATCHUP_SUBJECT
+        and OWNER_CATCHUP_MARKER in added_paths
+        and today == OWNER_CATCHUP_DATE
+        and str(run_attempt) == "1"
+    )
+
 
 
 def is_v4_recovery_push(event, ref, subject, added_paths):
@@ -36,7 +56,8 @@ def determine_mode(event, ref, subject="", added_paths=(), requested_mode="audit
         normal = ref == "refs/heads/main" and subject == SUBJECT and MARKER in added_paths
         rescue = is_ig_rescue_push(event, ref, subject, added_paths)
         v4 = is_v4_recovery_push(event, ref, subject, added_paths)
-        return "publish" if normal or rescue or v4 else "audit"
+        catchup = is_owner_catchup_push(event, ref, subject, added_paths)
+        return "publish" if normal or rescue or v4 or catchup else "audit"
     return "audit"
 
 
