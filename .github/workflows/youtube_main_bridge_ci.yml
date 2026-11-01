@@ -1,0 +1,21 @@
+name: YouTube main publisher safety (no upload)
+on:
+  pull_request:
+    paths:
+      - youtube_main_bridge.py
+      - test_youtube_main_bridge.py
+      - .github/workflows/public_link_schedule.yml
+      - .github/workflows/youtube_main_bridge_ci.yml
+permissions:
+  contents: read
+jobs:
+  no-upload-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: pip install --require-hashes -r requirements.txt
+      - run: pip install gdown==6.4.2
+      - run: python -m unittest -v test_youtube_main_bridge.py test_youtube_readonly_connection.py test_public_link_runtime.py

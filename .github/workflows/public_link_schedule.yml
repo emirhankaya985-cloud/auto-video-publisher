@@ -43,7 +43,10 @@ jobs:
       # Prefer saved Page token inventory when the User token is no longer usable.
       # No credential refresh, no token changes. Invalid saved tokens fail closed.
       META_AUTH_JSON: ${{ secrets.META_AUTH_JSON }}
-      YOUTUBE_PUBLISHING_ENABLED: 'false'
+      YOUTUBE_PUBLISHING_ENABLED: ${{ vars.YOUTUBE_PUBLISHING_ENABLED != 'false' && 'true' || 'false' }}
+      TOKEN_CHANNEL1_JSON: ${{ secrets.TOKEN_CHANNEL1_JSON }}
+      TOKEN_CHANNEL2_JSON: ${{ secrets.TOKEN_CHANNEL2_JSON }}
+      TOKEN_DAILY_LAUGH_LAB_JSON: ${{ secrets.TOKEN_DAILY_LAUGH_LAB_JSON }}
       ENABLE_NEW_YOUTUBE_ROUTES: 'false'
       ENABLE_NEW_META_ROUTES: ${{ vars.ENABLE_NEW_META_ROUTES }}
       META_NEW_ROUTES_RIGHTS_APPROVED: ${{ vars.META_NEW_ROUTES_RIGHTS_APPROVED }}
@@ -104,7 +107,13 @@ jobs:
           else
             python public_link_runtime.py plan
           fi
+      - name: Prepare verified YouTube channel intents for current plans
+        id: youtube_prepare
+        if: success() && steps.release_gate.outputs.publish_allowed == 'true' && steps.release_gate.outputs.recovery_only != 'true' && env.YOUTUBE_PUBLISHING_ENABLED == 'true'
+        continue-on-error: true
+        run: python youtube_main_bridge.py prepare
       - name: Persist intent before any Meta upload
+        id: intent_archive
         if: success() && steps.release_gate.outputs.publish_allowed == 'true'
         uses: actions/upload-artifact@v4
         with:
@@ -116,6 +125,12 @@ jobs:
         id: publish
         if: success() && steps.release_gate.outputs.publish_allowed == 'true'
         run: python public_link_runtime.py publish
+      - name: Publish planned YouTube videos with archived intent
+        id: youtube_publish
+        if: always() && steps.youtube_prepare.outcome == 'success' && steps.intent_archive.outcome == 'success' && steps.release_gate.outputs.publish_allowed == 'true'
+        env:
+          YOUTUBE_INTENT_ARCHIVED: 'true'
+        run: python youtube_main_bridge.py publish
       - name: Preserve all results, including partial failures
         if: always()
         uses: actions/upload-artifact@v4
@@ -213,3 +228,7 @@ jobs:
           path: link-runtime/errors.jsonl
           if-no-files-found: ignore
           retention-days: 90
+
+      - name: Fail visibly when YouTube preparation failed
+        if: always() && steps.youtube_prepare.outcome == 'failure'
+        run: exit 1
