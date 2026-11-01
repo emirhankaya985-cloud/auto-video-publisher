@@ -1,8 +1,6 @@
 """Read-only Meta discovery; credentials remain in process memory."""
-import json
 import os
 import time
-from pathlib import Path
 import requests
 from publisher_recovery import read_with_retry
 
@@ -77,34 +75,11 @@ def discover_pages(token, *, get=None):
     raise RuntimeError('Meta hesap listesi sınırı aşıldı')
 
 
-def _saved_auth(raw):
-    """Accept the documented JSON shape; never expose invalid credential text."""
-    auth = json.loads(raw)
-    # A pasted JSON string may contain one extra serialization layer.
-    if isinstance(auth, str):
-        auth = json.loads(auth)
-    if not isinstance(auth, dict) or not isinstance(auth.get('pages'), list):
-        raise ValueError('invalid_saved_auth_shape')
-    if any(not isinstance(p, dict) or not str(p.get('page_id') or '').isdecimal()
-           or not isinstance(p.get('page_token'), str) or not p['page_token'].strip()
-           or not isinstance(p.get('page_name'), str) or not p['page_name'].strip()
-           for p in auth['pages']):
-        raise ValueError('invalid_saved_page')
-    return auth
-
 
 def load_meta_auth():
-    raw = os.getenv('META_AUTH_JSON', '').strip()
-    path = Path(__file__).with_name('meta_auth.json')
-    if not raw and path.exists():
-        raw = path.read_text(encoding='utf-8')
-    if raw:
-        try:
-            return _saved_auth(raw)
-        except (ValueError, TypeError):
-            # A malformed backup must not shadow a separately supplied User token.
-            # Do not fallback after a live identity/permission mismatch.
-            if not os.getenv('META_ACCESS_TOKEN', '').strip():
-                raise RuntimeError('Meta kayıtlı JSON geçersiz; User token yedeği yok') from None
-            print('Meta credential source: user_token_fallback_invalid_saved_json', flush=True)
+    """Discover Meta Page credentials from META_ACCESS_TOKEN only.
+
+    Legacy saved Page-token files and secret bundles are intentionally ignored.
+    A failed discovery must block publication; never substitute stale credentials.
+    """
     return discover_pages(os.getenv('META_ACCESS_TOKEN', ''))

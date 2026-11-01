@@ -82,7 +82,7 @@ class PageHealthTests(unittest.TestCase):
         self.assertEqual(result["accounts"][1]["reason"], "duplicate_configuration")
 
     def test_missing_config(self):
-        self.assertEqual(audit(None)["reason"], "missing_or_invalid_META_AUTH_JSON")
+        self.assertEqual(audit(None)["reason"], "invalid_discovered_page_configuration")
 
     def test_partial_accounts_are_not_all_green(self):
         resp = self.response(id="12345", name="Tarladaki Fasulye",
@@ -103,7 +103,6 @@ class UserTokenOnlyHealthTests(unittest.TestCase):
         pages = {"pages": [{"page_id": "123", "page_name": "ToonZone", "page_token": "test-only"}]}
         result = {"status": "identity_verified", "publishing_tested": False}
         with patch.dict(os.environ, {"META_ACCESS_TOKEN": "test-user-token", "META_AUTH_JSON": ""}, clear=True), \
-             patch("meta_auth_loader.Path.exists", return_value=False), \
              patch("meta_auth_loader.discover_pages", return_value=pages) as discover, \
              patch("meta_page_token_health.audit", return_value=result) as audit, \
              redirect_stdout(io.StringIO()) as stdout:

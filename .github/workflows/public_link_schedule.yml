@@ -40,9 +40,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
-      # Prefer saved Page token inventory when the User token is no longer usable.
-      # No credential refresh, no token changes. Invalid saved tokens fail closed.
-      META_AUTH_JSON: ${{ secrets.META_AUTH_JSON }}
+      # Only User token can discover verified Page tokens; invalid/expired token fails closed.
       YOUTUBE_PUBLISHING_ENABLED: ${{ vars.YOUTUBE_PUBLISHING_ENABLED != 'false' && 'true' || 'false' }}
       TOKEN_CHANNEL1_JSON: ${{ secrets.TOKEN_CHANNEL1_JSON }}
       TOKEN_CHANNEL2_JSON: ${{ secrets.TOKEN_CHANNEL2_JSON }}
@@ -76,11 +74,8 @@ jobs:
       - name: Fail early on invalid Meta credentials before any video work
         id: meta_preflight
         env:
-          META_AUTH_JSON: ${{ secrets.META_AUTH_JSON }}
           META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
-        # Whether META_AUTH_JSON is absent, malformed, or valid, check all
-        # expected Pages using read-only GETs before any media preparation.
-        # load_meta_auth() can discover Page tokens from META_ACCESS_TOKEN.
+        # Verify all expected Pages with User token and GETs before media preparation.
         run: python meta_page_token_health.py
       - name: Preserve rejected Meta preflight in structured incident journal
         # Do not retry Meta calls or turn a credential failure into a publish.
