@@ -87,7 +87,7 @@ def check_page(page, get=requests.get):
 
 def audit(auth, get=requests.get):
     if not isinstance(auth, dict) or not isinstance(auth.get("pages"), list):
-        return {"status": "blocked", "reason": "missing_or_invalid_META_AUTH_JSON", "accounts": []}
+        return {"status": "blocked", "reason": "invalid_discovered_page_configuration", "accounts": []}
     rows, names, ids = [], set(), set()
     for page in auth["pages"]:
         if not isinstance(page, dict):

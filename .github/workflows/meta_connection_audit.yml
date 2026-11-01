@@ -42,13 +42,11 @@ jobs:
         if: ${{ !inputs.film_claim_audit && !inputs.film_publication_audit }}
         continue-on-error: true
         env:
-          META_AUTH_JSON: ${{ secrets.META_AUTH_JSON }}
           META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
         run: python meta_page_token_health.py
       - name: Verify exact Meta identities and permissions without publishing
         env:
           META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
-          META_AUTH_JSON: ${{ secrets.META_AUTH_JSON }}
           DRIVE_TOKEN_JSON: ${{ secrets.DRIVE_TOKEN_JSON }}
           TOKEN_FILM_YOUTUBE_JSON: ${{ secrets.TOKEN_FILM_YOUTUBE_JSON }}
           FILM_CLAIM_AUDIT_FILE_ID: 1dhKwAI9LPpUEniIfqNuWKrY8EQuM67xZ

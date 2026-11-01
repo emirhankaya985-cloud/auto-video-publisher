@@ -29,7 +29,6 @@ GitHub Settings → Secrets and variables → Actions. Değerleri yalnız GitHub
 - `META_ACCESS_TOKEN`
 - `META_APP_ID`
 - `META_APP_SECRET`
-- `META_AUTH_JSON`
 - `NTFY_TOPIC`
 - `NTFY_TOPIC_URL`
 - `PENGUEN_THREADS_VIDEO_URL_TEMPLATE`
@@ -55,7 +54,7 @@ AFK deposundaki 19 Actions değişkeni 985 deposuna aynı değerlerle aktarıld�
 
 ## Kullanıcı tokenı ile Meta bağlantısı
 
-`META_AUTH_JSON` isteğe bağlıdır. JSON veya yerel dosya yoksa `META_ACCESS_TOKEN` ile `/me/accounts` salt-okunur sorgulanır. Yalnız tanımlı hesap adları ve mevcut sabit sayfa kimlikleri kabul edilir. Sayfa tokenları bellekte tutulur; dosyaya veya loga yazılmaz. Read-only Meta Page Token Health yayın kilidi kapalıyken main dalından manuel çalıştırılabilir.
+Meta bağlantısında tek secret `META_ACCESS_TOKEN` kullanılır; kayıtlı JSON veya yerel Page-token dosyası kullanılmaz. Bu token ile `/me/accounts` salt-okunur sorgulanır. Yalnız tanımlı hesap adları ve mevcut sabit sayfa kimlikleri kabul edilir. Sayfa tokenları bellekte tutulur; dosyaya veya loga yazılmaz. Read-only Meta Page Token Health yayın kilidi kapalıyken main dalından manuel çalıştırılabilir.
 
 ## Public runner ve Meta-only yayın
 

@@ -32,7 +32,7 @@ jobs:
       - name: Read only prior failed containers without uploads
         if: github.event_name != 'pull_request'
         env:
-          META_AUTH_JSON: ${{ secrets.META_AUTH_JSON }}
+
           META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
         run: python ig_container_status_diagnostic.py
       - name: Preserve redacted result

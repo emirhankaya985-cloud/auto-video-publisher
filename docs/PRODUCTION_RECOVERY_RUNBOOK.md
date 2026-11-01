@@ -486,6 +486,14 @@ izlenir; bu inceleme test amaçlı gerçek yayın tetiklemedi.
 - Önceden workflow JSON varsa 7 sayfa GET, yoksa daha zayıf keşif kontrolü yapıyordu. Şimdi her durumda aynı `meta_page_token_health.py` salt-okunur 7 sayfa denetimini yapar; video/POST, state sıfırlama, OAuth yenileme yoktur.
 - Test: kullanıcı tokenı-only yoluyla read-only main kabulü ve workflow'un medya hazırlığından önce sabit denetimi; gerçek kodun CI'sı ayrıca görülmeli. Token gelecekte süresi dolarsa kod bunu otomatik aşamaz.
 
+### 1 Kasım 2026 — Kullanıcı kararı: yalnız META_ACCESS_TOKEN, JSON yedeği kaldırıldı
+
+- Kök neden: Önceki loader geçerli saved JSON'u User token'ın önüne alıyor, bozuk JSON'da da geri dönüş mantığı çalıştırıyordu. Ayrı secret'lar üretimde tutarsızlık yaratabiliyordu. Kullanıcı JSON girişi ve tekrar tekrar JSON düzeltme istemediğini açıkça belirtti.
+- [13:40 TRT planlı yayın #41298523959](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/41298523959) Meta GET ön kontrolünde 401 / 190 / 463 ile durdu; yeni yayın/POST yok. [Read-only Page Health #41295291756](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/41295291756) güncellenen User token'ın 7/7 sayfa kimliğinde başarılı olduğunu gösterdi; farklı çalışma zamanı ve kimlik doğrulaması yayın izninin veya yeni planlı gönderinin kanıtı değildir.
+- Yeni güvenlik kuralı: `META_ACCESS_TOKEN` tek kaynak, `/me/accounts` ile sayfa tokenlarını bellekte keşfet. `META_AUTH_JSON` secret'ını veya `meta_auth.json` yerel dosyasını **okuma veya önceliklendirme**. Eski secret GitHub'da kalsa bile işleyişi etkileyemez.
+- Token yoksa, süresi dolmuşsa veya kimlik eşleşmiyorsa, medya hazırlığından önce dur; hata jurnalini sakla. Meta POST otomatik tekrar yok. Diğer YouTube/Drive/Threads OAuth ayarlarına dokunma.
+- Kod kabulü: token-only ve eski JSON yok sayma regresyonları + secret'sız PR CI. Canlı kabul ayrı: güncel main SHA üzerinde planlı publisher, gerçek platform post ID ve dedupe state eşleşmesi.
+
 ### 1 Kasım 2026 — Ana YouTube yolunda gerçek hata günlüğü ve Gönle Düşen eşleştirmesi
 
 - `publisher_error_journal.py` aşama/sebep allowlist'i ile `youtube_main_bridge.py` çağrıları uyuşmuyordu: `youtube_prepare/missing_secret`, `youtube_publish/youtube_publication_unverified`. Benzer biçimde `public_link_runtime.py` içindeki `publication_preflight/intent_validation_failed` ve `instagram_publish/existing_container_reconciliation_failed` kayıtları reddediliyordu. Bu, asıl hata sonrası ikinci bir `ValueError` üretebilirdi. Sadece sabit etiketler kabul edilir; özel token/sağlayıcı metni/journal sızıntısı yok, bilinmeyen etiketler hâlâ reddedilir.

@@ -17,7 +17,6 @@ class DiscoveryTests(unittest.TestCase):
     def test_user_token_without_json_resolves_known_page(self):
         get = Mock(return_value=reply({'data': [page()]}))
         with patch.dict('os.environ', {'META_ACCESS_TOKEN': 'user-secret'}, clear=True), \
-             patch('meta_auth_loader.Path.exists', return_value=False), \
              patch('meta_auth_loader.requests.get', get):
             result = load_meta_auth()
         self.assertEqual(result['pages'][0]['page_token'], 'page-secret')
@@ -81,38 +80,39 @@ class DiscoveryTests(unittest.TestCase):
             discover_pages('secret', get=Mock(side_effect=requests.RequestException('secret URL')))
         self.assertNotIn('secret', str(error.exception))
 
-    def test_json_remains_supported_without_network(self):
-        with patch.dict('os.environ', {'META_AUTH_JSON': '{"pages": []}'}, clear=True), \
-             patch('meta_auth_loader.requests.get') as get:
-            self.assertEqual(load_meta_auth(), {'pages': []})
-            get.assert_not_called()
-
-
-class SavedAuthFallbackTests(unittest.TestCase):
-    def test_bad_json_uses_existing_user_token_without_leaking(self):
-        from contextlib import redirect_stdout
-        import io
-        output = io.StringIO()
-        with patch.dict('os.environ', {'META_AUTH_JSON': 'broken-secret-json', 'META_ACCESS_TOKEN': 'user-secret'}, clear=True), patch('meta_auth_loader.discover_pages', return_value={'pages': []}) as discover, redirect_stdout(output):
-            load_meta_auth()
+    def test_user_token_takes_priority_over_legacy_bundle(self):
+        pages = {'pages': [page()]}
+        with patch.dict('os.environ', {
+            'META_ACCESS_TOKEN': 'user-secret',
+            'META_AUTH_JSON': '{"pages": []}',
+        }, clear=True), patch('meta_auth_loader.discover_pages', return_value=pages) as discover:
+            self.assertEqual(load_meta_auth(), pages)
         discover.assert_called_once_with('user-secret')
-        self.assertNotIn('broken-secret-json', output.getvalue())
-        self.assertNotIn('user-secret', output.getvalue())
 
-    def test_bad_json_without_fallback_fails_redacted(self):
-        with patch.dict('os.environ', {'META_AUTH_JSON': 'secret-content'}, clear=True):
-            with self.assertRaisesRegex(RuntimeError, 'User token'):
+    def test_malformed_legacy_bundle_is_ignored_without_logging_it(self):
+        pages = {'pages': [page()]}
+        with patch.dict('os.environ', {
+            'META_ACCESS_TOKEN': 'user-secret',
+            'META_AUTH_JSON': 'malformed-secret-content',
+        }, clear=True), patch('meta_auth_loader.discover_pages', return_value=pages) as discover:
+            self.assertEqual(load_meta_auth(), pages)
+        discover.assert_called_once_with('user-secret')
+
+    def test_no_user_token_fails_closed_even_if_legacy_bundle_is_present(self):
+        with patch.dict('os.environ', {'META_AUTH_JSON': '{"pages": []}'}, clear=True):
+            with self.assertRaisesRegex(RuntimeError, 'META_ACCESS_TOKEN eksik'):
                 load_meta_auth()
 
-    def test_double_encoded_json_is_accepted_without_discovery(self):
-        import json
-        auth = {'pages': [{'page_id': '123', 'page_name': 'name', 'page_token': 'secret'}]}
-        with patch.dict('os.environ', {'META_AUTH_JSON': json.dumps(json.dumps(auth))}, clear=True), patch('meta_auth_loader.discover_pages') as discover:
-            self.assertEqual(load_meta_auth(), auth)
-            discover.assert_not_called()
+    def test_user_token_discovery_failure_never_uses_legacy_bundle(self):
+        with patch.dict('os.environ', {
+            'META_ACCESS_TOKEN': 'expired-secret',
+            'META_AUTH_JSON': '{"pages": []}',
+        }, clear=True), patch('meta_auth_loader.discover_pages',
+                            side_effect=RuntimeError('Meta hesap erişimi reddedildi (HTTP 401, kod 190, alt_kod 463)')) as discover:
+            with self.assertRaisesRegex(RuntimeError, 'HTTP 401, kod 190, alt_kod 463'):
+                load_meta_auth()
+        discover.assert_called_once_with('expired-secret')
 
-    def test_wrong_shape_uses_user_but_valid_saved_json_keeps_priority(self):
-        import json
-        with patch.dict('os.environ', {'META_AUTH_JSON': '{}', 'META_ACCESS_TOKEN': 'user'}, clear=True), patch('meta_auth_loader.discover_pages', return_value={'pages': []}) as discover:
-            load_meta_auth()
-            discover.assert_called_once_with('user')
+
+if __name__ == '__main__':
+    unittest.main()
