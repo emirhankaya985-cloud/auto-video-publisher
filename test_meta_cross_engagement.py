@@ -32,6 +32,17 @@ def reserved(t):
 
 
 class EngagementTests(unittest.TestCase):
+    def test_known_meta_token_expiry_has_safe_distinct_reason(self):
+        reason = m.safe_hold_reason(RuntimeError(
+            "Meta hesap erişimi reddedildi (HTTP 401, kod 190, alt_kod 463)"))
+        self.assertEqual(reason, "meta_user_token_expired")
+        # Do not misdiagnose revoked or transient API failures as expiry.
+        self.assertEqual(m.safe_hold_reason(RuntimeError(
+            "Meta hesap erişimi reddedildi (HTTP 401, kod 190, alt_kod 458)")),
+            "read_or_runtime_failure")
+        self.assertEqual(m.safe_hold_reason(RuntimeError(
+            "token-value confidential secret: abcdef")), "read_or_runtime_failure")
+
     def test_failed_plan_preserves_redacted_audit_without_any_post(self):
         with tempfile.TemporaryDirectory() as tmp:
             destination = Path(tmp) / "report.json"
