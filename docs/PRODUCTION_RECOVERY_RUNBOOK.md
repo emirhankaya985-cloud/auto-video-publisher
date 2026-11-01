@@ -477,3 +477,11 @@ izlenir; bu inceleme test amaçlı gerçek yayın tetiklemedi.
 - Güvenli düzeltme: Workflow preflight başarısız olursa `workflow_verify/workflow_step_failed` adlı sabit, sansürlenmiş olay `errors.jsonl` dosyasına yazılır; her zaman çalışan önceki artifact adımları kaydı saklar. Hatalı token, sağlayıcı mesajı ve ham JSON asla bu dosyaya yazılmaz. Meta POST tekrar denenmez; yayın kanıtı yokken "yayınlandı" denmez.
 - Test: `test_meta_preflight_journal.py` olay yazımını, redaksiyonu ve workflow adım sırasını doğrular. Canlı 401/190/463 kaldırılmadı; yalnız Meta'dan geçerli Page yetkisi/kimliği sağlandığında GET-only denetimi geçebilir.
 - Geri alma: bu workflow kayıt adımını revert et; yayıncı intent, claim, state, secret ve eski artefaktlara dokunma.
+
+
+### 1 Kasım 2026 — JSON secret isteğe bağlı; sayfa sağlığı denetimi sabit
+
+- [Meta Page Health #41295291756 (3. deneme)](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/41295291756): Güncellenen `META_ACCESS_TOKEN` ile User token keşfi ve 7/7 sayfanın read-only kimlik GET'i başarılıdır. `META_AUTH_JSON` ise hâlâ bozuk biçimdeydi; loader'ın tanımlı fallback yolu kullanıldı. Başarılı kimlik GET'i **gerçek paylaşım veya publish izni doğrulaması değildir**.
+- `META_AUTH_JSON` zorunlu değildir ve eski/bozuk secret GitHub'dan kaldırılabilir. `META_ACCESS_TOKEN` korunmalıdır. Kayıtlı Page JSON biçimiyle destek gelecekte isteğe bağlı yedek olarak kodda kalır.
+- Önceden workflow JSON varsa 7 sayfa GET, yoksa daha zayıf keşif kontrolü yapıyordu. Şimdi her durumda aynı `meta_page_token_health.py` salt-okunur 7 sayfa denetimini yapar; video/POST, state sıfırlama, OAuth yenileme yoktur.
+- Test: kullanıcı tokenı-only yoluyla read-only main kabulü ve workflow'un medya hazırlığından önce sabit denetimi; gerçek kodun CI'sı ayrıca görülmeli. Token gelecekte süresi dolarsa kod bunu otomatik aşamaz.

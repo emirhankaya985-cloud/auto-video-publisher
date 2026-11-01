@@ -78,12 +78,10 @@ jobs:
         env:
           META_AUTH_JSON: ${{ secrets.META_AUTH_JSON }}
           META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
-        run: |
-          if [ -n "$META_AUTH_JSON" ]; then
-            python meta_page_token_health.py
-          else
-            python meta_schedule_preflight.py
-          fi
+        # Whether META_AUTH_JSON is absent, malformed, or valid, check all
+        # expected Pages using read-only GETs before any media preparation.
+        # load_meta_auth() can discover Page tokens from META_ACCESS_TOKEN.
+        run: python meta_page_token_health.py
       - name: Preserve rejected Meta preflight in structured incident journal
         # Do not retry Meta calls or turn a credential failure into a publish.
         # A sanitised event ensures link-error-journal exists when preflight fails.

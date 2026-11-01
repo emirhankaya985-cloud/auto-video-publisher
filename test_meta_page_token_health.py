@@ -92,5 +92,29 @@ class PageHealthTests(unittest.TestCase):
         self.assertIn("ToonZone", result["missing_page_names"])
 
 
+class UserTokenOnlyHealthTests(unittest.TestCase):
+    def test_main_uses_user_token_when_json_secret_is_absent(self):
+        import io
+        import os
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+        from meta_page_token_health import main
+
+        pages = {"pages": [{"page_id": "123", "page_name": "ToonZone", "page_token": "test-only"}]}
+        result = {"status": "identity_verified", "publishing_tested": False}
+        with patch.dict(os.environ, {"META_ACCESS_TOKEN": "test-user-token", "META_AUTH_JSON": ""}, clear=True), \
+             patch("meta_auth_loader.Path.exists", return_value=False), \
+             patch("meta_auth_loader.discover_pages", return_value=pages) as discover, \
+             patch("meta_page_token_health.audit", return_value=result) as audit, \
+             redirect_stdout(io.StringIO()) as stdout:
+            code = main()
+        self.assertEqual(code, 0)
+        discover.assert_called_once_with("test-user-token")
+        audit.assert_called_once_with(pages)
+        self.assertIn("identity_verified", stdout.getvalue())
+        self.assertNotIn("test-user-token", stdout.getvalue())
+        self.assertNotIn("test-only", stdout.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()

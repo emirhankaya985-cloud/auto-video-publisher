@@ -37,12 +37,12 @@ class PreflightTests(unittest.TestCase):
     def test_workflow_checks_credentials_before_installing_media_dependencies(self):
         from pathlib import Path
         yml = (Path(__file__).with_name(".github") / "workflows" / "public_link_schedule.yml").read_text()
-        self.assertIn('if [ -n "$META_AUTH_JSON" ]; then', yml)
-        self.assertIn("python meta_schedule_preflight.py", yml)
-        self.assertIn("python meta_page_token_health.py", yml)
-        self.assertLess(yml.index("python meta_schedule_preflight.py"),
+        self.assertIn("run: python meta_page_token_health.py", yml)
+        self.assertNotIn('if [ -n "$META_AUTH_JSON" ]; then', yml)
+        self.assertNotIn("python meta_schedule_preflight.py", yml)
+        self.assertLess(yml.index("run: python meta_page_token_health.py"),
                         yml.index("pip install gdown==6.4.2"))
-        self.assertLess(yml.index("python meta_schedule_preflight.py"),
+        self.assertLess(yml.index("run: python meta_page_token_health.py"),
                         yml.index("run: python public_link_runtime.py publish"))
 
 
