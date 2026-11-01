@@ -108,6 +108,23 @@ class LinkRuntimeSafety(unittest.TestCase):
             self.assertIn("#CR7", captions["instagram"])
             self.assertNotIn("@cristiano", captions["facebook"])
 
+    def test_matching_txt_scraped_comment_ui_is_held_before_any_upload(self):
+        # Observed in scheduled 41302732095: Gönle Düşen 144.mp4
+        # TXT carried copied \"View all 245 comments\" UI boilerplate.
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "144.txt"
+            source.write_text("Video description\nView all 245 comments\nOther text", encoding="utf-8")
+            with patch.object(runtime, "download", return_value=source):
+                with self.assertRaisesRegex(RuntimeError, "arayüz metni"):
+                    runtime.copies("gonle", {"name": "144.mp4"},
+                                   {"144.txt": {"id": "test"}}, Path(tmp))
+            source.write_text("Video description\nOther text", encoding="utf-8")
+            with patch.object(runtime, "download", return_value=source):
+                captions, origin = runtime.copies("gonle", {"name": "144.mp4"},
+                                                   {"144.txt": {"id": "test"}}, Path(tmp))
+            self.assertEqual(origin, "matching-txt")
+            self.assertEqual(captions["facebook"], "FB from TXT")
+
     def legacy_container_fixture(self):
         route, source = "toonzone", "1rdn35OLH8Sh4IAxSMTkErVxHLb2MX9Ic"
         proof = list(runtime._LEGACY_IG_CONTAINERS[(route, source)])
