@@ -86,3 +86,33 @@ class DiscoveryTests(unittest.TestCase):
              patch('meta_auth_loader.requests.get') as get:
             self.assertEqual(load_meta_auth(), {'pages': []})
             get.assert_not_called()
+
+
+class SavedAuthFallbackTests(unittest.TestCase):
+    def test_bad_json_uses_existing_user_token_without_leaking(self):
+        from contextlib import redirect_stdout
+        import io
+        output = io.StringIO()
+        with patch.dict('os.environ', {'META_AUTH_JSON': 'broken-secret-json', 'META_ACCESS_TOKEN': 'user-secret'}, clear=True), patch('meta_auth_loader.discover_pages', return_value={'pages': []}) as discover, redirect_stdout(output):
+            load_meta_auth()
+        discover.assert_called_once_with('user-secret')
+        self.assertNotIn('broken-secret-json', output.getvalue())
+        self.assertNotIn('user-secret', output.getvalue())
+
+    def test_bad_json_without_fallback_fails_redacted(self):
+        with patch.dict('os.environ', {'META_AUTH_JSON': 'secret-content'}, clear=True):
+            with self.assertRaisesRegex(RuntimeError, 'User token'):
+                load_meta_auth()
+
+    def test_double_encoded_json_is_accepted_without_discovery(self):
+        import json
+        auth = {'pages': [{'page_id': '123', 'page_name': 'name', 'page_token': 'secret'}]}
+        with patch.dict('os.environ', {'META_AUTH_JSON': json.dumps(json.dumps(auth))}, clear=True), patch('meta_auth_loader.discover_pages') as discover:
+            self.assertEqual(load_meta_auth(), auth)
+            discover.assert_not_called()
+
+    def test_wrong_shape_uses_user_but_valid_saved_json_keeps_priority(self):
+        import json
+        with patch.dict('os.environ', {'META_AUTH_JSON': '{}', 'META_ACCESS_TOKEN': 'user'}, clear=True), patch('meta_auth_loader.discover_pages', return_value={'pages': []}) as discover:
+            load_meta_auth()
+            discover.assert_called_once_with('user')
