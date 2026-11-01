@@ -194,26 +194,22 @@ class LinkRuntimeSafety(unittest.TestCase):
             self.assertIn("#CR7", captions["instagram"])
             self.assertNotIn("@cristiano", captions["facebook"])
 
-    def test_matching_txt_scraped_comment_ui_is_removed_without_inventing_copy(self):
-        # Observed in scheduled 41302732095: Gönle Düşen 144.mp4
-        # TXT carried copied \"View all 245 comments\" UI boilerplate.
+    def test_matching_txt_scraped_comment_ui_is_held_before_intent(self):
+        # Scheduled 41325257469: Gönle Düşen 155.mp4 had unnumbered
+        # "View all comments" alongside unrelated copied article text.
+        # Scheduled 41302732095: 144.mp4 had a numbered comment UI line.
         with tempfile.TemporaryDirectory() as tmp:
-            source = Path(tmp) / "144.txt"
-            source.write_text("Video description\nView all 245 comments\nOther text", encoding="utf-8")
+            source = Path(tmp) / "155.txt"
+            item = {"name": "155.mp4"}
+            files = {"155.txt": {"id": "test"}}
+            for ui in ("View all comments", "View all 245 comments"):
+                source.write_text("Unrelated article\n" + ui + "\nOther text", encoding="utf-8")
+                with patch.object(runtime, "download", return_value=source):
+                    with self.assertRaisesRegex(RuntimeError, "arayüz metni"):
+                        runtime.copies("gonle", item, files, Path(tmp))
+            source.write_text("Actual video description\nOther text", encoding="utf-8")
             with patch.object(runtime, "download", return_value=source):
-                runtime.copies("gonle", {"name": "144.mp4"},
-                               {"144.txt": {"id": "test"}}, Path(tmp))
-                self.assertEqual(runtime.platform_content_from_txt.call_args.args[0],
-                                 "Video description\n\nOther text")
-            source.write_text("View all 245 comments", encoding="utf-8")
-            with patch.object(runtime, "download", return_value=source):
-                with self.assertRaisesRegex(RuntimeError, "arayüz metni"):
-                    runtime.copies("gonle", {"name": "144.mp4"},
-                                   {"144.txt": {"id": "test"}}, Path(tmp))
-            source.write_text("Video description\nOther text", encoding="utf-8")
-            with patch.object(runtime, "download", return_value=source):
-                captions, origin = runtime.copies("gonle", {"name": "144.mp4"},
-                                                   {"144.txt": {"id": "test"}}, Path(tmp))
+                captions, origin = runtime.copies("gonle", item, files, Path(tmp))
             self.assertEqual(origin, "matching-txt")
             self.assertEqual(captions["facebook"], "FB from TXT")
 
