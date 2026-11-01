@@ -501,3 +501,14 @@ izlenir; bu inceleme test amaçlı gerçek yayın tetiklemedi.
 - Bu değişiklik canlı OAuth yetki geçerliliği veya başarılı public video iddiası değildir. Gerçek kabul, sıradaki normal schedule koşumunda her kanal için `post_id`, `privacy_status=public`, `upload_status=processed` ve ilgili ledger kaydıyla yapılır. Önceki belirsiz upload/intent asla körlemesine yeniden gönderilmez.
 - Regresyon: uydurma tokenla hiç dış yükleme yapmadan doğru/yanlış kanal kontrolü, eksik secret hold, Meta ve YouTube olaylarının güvenli kaydı.
 - Geri alma: köprü/allowlist/workflow değişikliğini revert et veya `YOUTUBE_PUBLISHING_ENABLED=false` ile YouTube'u duraklat; saklanan intent/state/artifact kayıtlarını silme. Açık ve eski alternatif YouTube PR #56 kodunu bu ana yolun üzerine körlemesine birleştirme.
+
+
+### 1 Kasım 2026 — Sahip onaylı toplu telafi ve kuyruk engelleri
+
+- Kullanıcı bugün hedeflenen tüm videoların tamamlanmasını ve çoklu ajanla düzeltme yapılmasını açıkça istedi. Planlı yayın #41325257469 ikinci denemesinde erişim GET başarılı; 5 yeni Meta post ID doğrulandı. Yayın öncesinde eski deneme hiçbir upload yapmamıştı. Sonraki işlem geçmiş/intent uzlaştırması olmadan kör yeniden yükleme yapmaz.
+- Gönle Düşen ve Daily Laugh yeni YouTube videoları, read-only #41325268149 job124917325053 ile public/processed doğrulandı; yeni insert yapılmadı.
+- Canlı GET tanısı #41330068602 job124918096649: Tarladaki192 ve Penguen193 IN_PROGRESS; eski aynı kaynak/container yeniden yüklenmez. Film Avanak Apti Part10 EXPIRED; ToonZone S01E07Part3 PUBLISHED, tekrar yükleme yasak.
+- Kanıtlanan planlama sorunları: tek IG belirsizliği bağımsız FB kuyruğunu kilitliyordu; Gönle TXT içindeki bağımsız yorum sayacı satırı gerçek metni de bloke ediyordu; ToonZone tamamlanmış bölümün son partından sonraki bölüme günlük kota içinde geçemiyordu. Yeni geçiş sadece önceki bölümün dört kaynak partının iki platformda da gerçek ID ile tamamlandığı ve açık intent bulunmadığı durumda mümkündür. Yalnız tanınan bağımsız arayüz satırı çıkarılır; gerçek metin korunur, boş/arayıüzden ibaret TXT bekler.
+- Tam gün telafisi yalnız 2026-11-01 için etkinleştirilecek; ikinci Film sayfasının eski 23 Ekim geçişine ait fazladan partı bugünün 5 hedefini 6 yapamaz. Normal cron, hak anahtarları, kaynak sırası, günlük kota, mevcut done/uncertain kayıtları korunur. Bir video farklı platformda paylaşılmışsa platform başına ayrı sayılır.
+- Film kurtarması genel kilit temizliği değildir: sadece tam source ID, caption hash, origin run, hiç media_publish çağrılmadığı kayıt ve canlı EXPIRED GET eşleşirse; uzak geçmişte tekil/belirsiz eşleşme yoksa bir sınırlı yeni hazırlık mümkündür. Eski container delili ve tüketilmiş deneme kalıcı state'te korunur.
+- Test/CI başarısı yeni yayın başarısı değildir. Sonraki telafi için post ID, caption/source eşleşmesi ve kalan engeller ayrıca raporlanır. Geri alma: ilgili kod commitini revert et veya yayın anahtarını kapat; state/artifact/claim silme.

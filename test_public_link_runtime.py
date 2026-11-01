@@ -69,6 +69,92 @@ runtime.record_error = Mock()
 
 
 class LinkRuntimeSafety(unittest.TestCase):
+    def test_unordered_ig_quarantine_requires_exact_prepublish_source_proof(self):
+        row = {"route": "tarladaki", "platform": "instagram", "file": "192.mp4",
+               "caption_hash": "hash", "status": "uncertain",
+               "failure": {"stage": "Instagram ikili video aktarımı", "http_status": 400}}
+        item = {"name": "192.mp4"}
+        self.assertTrue(runtime.quarantine_unordered_ig_source("tarladaki", "instagram", item, row, "hash"))
+        for changed in (dict(row, caption_hash="other"), dict(row, file="193.mp4"),
+                        dict(row, container_publish_attempted=True),
+                        dict(row, failure={"stage": "Instagram yayınlama", "http_status": 400})):
+            self.assertFalse(runtime.quarantine_unordered_ig_source("tarladaki", "instagram", item, changed, "hash"))
+        self.assertFalse(runtime.quarantine_unordered_ig_source("film", "instagram", item, row, "hash"))
+
+    def test_humor_planner_quarantines_old_ig_source_and_plans_next_unique_clip(self):
+        from contextlib import ExitStack
+        for route, page in (("tarladaki", "Tarladaki Fasulye"), ("penguen", "Beyinsiz Penguen")):
+            with self.subTest(route=route), tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
+                root = Path(tmp)
+                old = {"route": route, "platform": "instagram", "file": "192.mp4",
+                       "caption_hash": runtime.caption_key("old caption"), "publish_caption": "old caption",
+                       "status": "uncertain", "hold_alerted_at": datetime.now(ZoneInfo("Europe/Istanbul")).isoformat(),
+                       "failure": {"stage": "Instagram ikili video aktarımı", "http_status": 400, "container_status": "IN_PROGRESS"}}
+                state = {"schema": 1, "entries": {f"{route}:instagram:old": dict(old)}, "episode_days": {}}
+                source = {"192.mp4": {"id": "old", "name": "192.mp4"},
+                          "194.mp4": {"id": "new", "name": "194.mp4"}}
+                pages = [{"page_name": n, "instagram_id": "ig"} for n in ("Tarladaki Fasulye", "Beyinsiz Penguen")]
+                replacements = {"ROOT": root, "STATE": root / "state.json", "PLAN": root / "plan.json",
+                                "ROUTES": {route: ("humor", page), "penguen" if route == "tarladaki" else "tarladaki": ("humor", "Beyinsiz Penguen" if route == "tarladaki" else "Tarladaki Fasulye")},
+                                "FOLDERS": {"humor": "folder"}}
+                for key, val in replacements.items(): stack.enter_context(patch.object(runtime, key, val))
+                stack.enter_context(patch.dict(os.environ, {"GITHUB_RUN_ID": "456", "GITHUB_STEP_SUMMARY": str(root / "summary.md")}))
+                stack.enter_context(patch.object(runtime, "restore", return_value=state))
+                stack.enter_context(patch.object(runtime, "apply_verified_migration"))
+                stack.enter_context(patch.object(runtime, "load_meta_auth", return_value={"pages": pages}))
+                stack.enter_context(patch.object(runtime, "inventory", return_value=source))
+                stack.enter_context(patch.object(runtime, "graph_rows", return_value=[]))
+                stack.enter_context(patch.object(runtime, "target_count", return_value=5))
+                stack.enter_context(patch.object(runtime, "seed_done", return_value=False))
+                def captions(_route, item, _files, _tmp):
+                    body = "old caption" if item["id"] == "old" else "new unique caption"
+                    return {"facebook": body, "instagram": body}, "matching-txt"
+                stack.enter_context(patch.object(runtime, "copies", side_effect=captions))
+                runtime.plan()
+                plans = json.loads((root / "plan.json").read_text())
+                self.assertEqual([p["id"] for p in plans], ["new"])
+                self.assertEqual(set(plans[0]["platforms"]), {"facebook", "instagram"})
+                self.assertEqual(state["entries"][f"{route}:instagram:old"], old)
+                self.assertNotIn(f"{route}:facebook:old", state["entries"])
+
+    def test_owner_full_day_keeps_normal_targets_without_legacy_film_bonus(self):
+        now = datetime(2026, 11, 1, 9, 0, tzinfo=ZoneInfo("Europe/Istanbul"))
+        with patch.dict(os.environ, {"COMPLETE_DAY_DATE": "2026-11-01"}):
+            expected = {"tarladaki": 5, "penguen": 5, "gonle": 5,
+                        "daily_laugh": 8, "film": 5, "film_second": 5, "toonzone": 4}
+            self.assertEqual({r: runtime.target_count(r, now) for r in expected}, expected)
+
+    def test_humor_uncertain_ig_does_not_block_independent_facebook_or_clear_intent(self):
+        for route in ("tarladaki", "penguen"):
+            row = {"status": "uncertain", "failure": {"container_status": "IN_PROGRESS"}}
+            original = json.dumps(row, sort_keys=True)
+            self.assertTrue(runtime.facebook_can_continue_past_ig_rejection(route, "instagram", row))
+            self.assertFalse(runtime.facebook_can_continue_past_ig_rejection(route, "facebook", row))
+            self.assertEqual(json.dumps(row, sort_keys=True), original)
+
+    def test_toonzone_rollover_requires_complete_exact_four_part_episode_on_both_platforms(self):
+        def parse(stem, _parser):
+            m = re.fullmatch(r"S(\d+)E(\d+)_(.+)_Part(\d+)", stem)
+            return (int(m[1]), int(m[2]), int(m[4]), m[3]) if m else None
+        videos = [{"id": str(p), "name": f"S01E08_Title_Part{p}.mp4"} for p in range(1, 5)]
+        state = {"entries": {}}
+        for v in videos:
+            for platform in ("facebook", "instagram"):
+                state["entries"][f"toonzone:{platform}:{v['id']}"] = {
+                    "route": "toonzone", "file": v["name"], "status": "done", "post_id": v["id"] + "00"}
+        with patch.object(runtime, "parse_order", side_effect=parse):
+            self.assertTrue(runtime.toonzone_episode_confirmed(state, videos, [1, 8]))
+            self.assertFalse(runtime.toonzone_episode_confirmed(state, videos[:-1], [1, 8]))
+            row = state["entries"]["toonzone:instagram:4"]
+            row["status"] = "uncertain"
+            self.assertFalse(runtime.toonzone_episode_confirmed(state, videos, [1, 8]))
+            row["status"] = "done"
+            row["post_id"] = ""
+            self.assertFalse(runtime.toonzone_episode_confirmed(state, videos, [1, 8]))
+            row["post_id"] = "400"
+            state["entries"]["old_alias"] = {"route": "toonzone", "file": videos[0]["name"], "status": "intent"}
+            self.assertFalse(runtime.toonzone_episode_confirmed(state, videos, [1, 8]))
+
     def test_unresolved_publish_hold_alerts_once_each_istanbul_day(self):
         tr = ZoneInfo("Europe/Istanbul")
         utc = ZoneInfo("UTC")
@@ -108,12 +194,18 @@ class LinkRuntimeSafety(unittest.TestCase):
             self.assertIn("#CR7", captions["instagram"])
             self.assertNotIn("@cristiano", captions["facebook"])
 
-    def test_matching_txt_scraped_comment_ui_is_held_before_any_upload(self):
+    def test_matching_txt_scraped_comment_ui_is_removed_without_inventing_copy(self):
         # Observed in scheduled 41302732095: Gönle Düşen 144.mp4
         # TXT carried copied \"View all 245 comments\" UI boilerplate.
         with tempfile.TemporaryDirectory() as tmp:
             source = Path(tmp) / "144.txt"
             source.write_text("Video description\nView all 245 comments\nOther text", encoding="utf-8")
+            with patch.object(runtime, "download", return_value=source):
+                runtime.copies("gonle", {"name": "144.mp4"},
+                               {"144.txt": {"id": "test"}}, Path(tmp))
+                self.assertEqual(runtime.platform_content_from_txt.call_args.args[0],
+                                 "Video description\n\nOther text")
+            source.write_text("View all 245 comments", encoding="utf-8")
             with patch.object(runtime, "download", return_value=source):
                 with self.assertRaisesRegex(RuntimeError, "arayüz metni"):
                     runtime.copies("gonle", {"name": "144.mp4"},
@@ -1542,5 +1634,14 @@ class LinkRuntimeSafety(unittest.TestCase):
             self.assertEqual(entry["prepublish_retry_count"], 1)
 
 
+class MalformedQuarantineProofTests(unittest.TestCase):
+    def test_missing_or_malformed_failure_never_grants_quarantine(self):
+        for failure in (None, "invalid", [], 400):
+            self.assertFalse(runtime.quarantine_unordered_ig_source(
+                "tarladaki", "instagram", {"name": "192.mp4"},
+                {"failure": failure}, "hash"))
+
+
 if __name__ == "__main__":
     unittest.main()
+

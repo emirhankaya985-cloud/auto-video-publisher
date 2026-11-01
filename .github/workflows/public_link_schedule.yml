@@ -63,7 +63,7 @@ jobs:
       TOONZONE_AUTO_COVER_ENABLED: ${{ vars.TOONZONE_AUTO_COVER_ENABLED || 'true' }}
       # Owner explicitly requested today's catch-up before the evening check.
       # Subsequent dates automatically return to the existing per-route times.
-      COMPLETE_DAY_DATE: '2026-10-23'
+      COMPLETE_DAY_DATE: '2026-11-01'
       CATCHUP_BATCH_DATE: '2026-11-01'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262

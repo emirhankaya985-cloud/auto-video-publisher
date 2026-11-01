@@ -31,6 +31,7 @@ from toonzone_cover_fallback import generate_part_cover
 from content_hashtags import prepare_caption
 from instagram_tagging import enhance_instagram_caption
 from publisher_error_journal import record_error
+from expired_ig_container_recovery import authorize_exact_expired_recovery, terminal_recovery_reserved
 from meta_auth_loader import load_meta_auth
 from ordered_channels import TOONZONE_ETSY_LINK, parse_order, toonzone_metadata
 from publication_safety import route_paused
@@ -91,6 +92,8 @@ _LEGACY_IG_CONTAINERS = {
 
 
 def bind_legacy_ig_container(route, platform, item, entry, page, *, allow_reserved=False):
+    if terminal_recovery_reserved(route, platform, item, entry):
+        return None
     proof = _LEGACY_IG_CONTAINERS.get((route, item["id"]))
     if platform != "instagram" or not proof or entry.get("status") == "done":
         return None
@@ -526,6 +529,15 @@ def generate_daily_laugh_txts(files, output_dir):
     return generated, invalid
 
 
+def clean_caption_ui(raw):
+    """Remove only a recognized standalone UI line; never invent video copy."""
+    pattern = r"(?im)^[ \t]*view[ \t]+all[ \t]+[\d,]+[ \t]+comments?[ \t]*$"
+    cleaned = re.sub(pattern, "", raw).strip()
+    if cleaned != raw.strip() and not re.search(r"[^\W\d_]", cleaned, re.UNICODE):
+        raise RuntimeError("TXT yalnızca sosyal medya arayüz metni içeriyor")
+    return cleaned
+
+
 def copies(route, item, files, temp, use_txt=True):
     stem = Path(item["name"]).stem
     text = files.get(stem + ".txt") if use_txt else None
@@ -553,9 +565,9 @@ def copies(route, item, files, temp, use_txt=True):
     if text and not raw and route != "toonzone":
         raise RuntimeError(f"Eşleşen TXT boş: {route}/{item['name']}")
     if raw:
-        # Copied social-media UI is not a video caption. Hold before intent/POST.
-        if re.search(r"(?im)^[ \t]*view[ \t]+all[ \t]+[\d,]+[ \t]+comments?[ \t]*$", raw):
-            raise RuntimeError("Eşleşen TXT sosyal medya arayüz metni içeriyor; yayın durduruldu")
+        # Preserve actual source copy and remove only a recognized standalone
+        # comment-count UI line. UI-only sources remain blocked before intent.
+        raw = clean_caption_ui(raw)
         _, _, fb, ig, _ = platform_content_from_txt(raw, stem, route.removesuffix("_second"))
     elif route == "toonzone":
         generated = ROOT / "toonzone_txt" / (stem + ".txt")
@@ -738,13 +750,35 @@ def audited_avanak_part10_recovery_eligible(route, platform, item, entry):
             and failure.get("graph_subcode") is None)
 
 
+def quarantine_unordered_ig_source(route, platform, item, entry, cap_hash):
+    """Skip a proven pre-publish source, never retry it or erase its intent."""
+    failure = entry.get("failure")
+    if not isinstance(failure, dict):
+        return False
+    return (route in {"tarladaki", "penguen"} and platform == "instagram"
+            and entry.get("route") == route and entry.get("platform") == platform
+            and entry.get("file") == item["name"]
+            and entry.get("caption_hash") == cap_hash
+            and entry.get("status") == "uncertain"
+            and not entry.get("container_publish_attempted")
+            and failure.get("stage") == "Instagram ikili video aktarımı"
+            and failure.get("http_status") == 400)
+
+
 def facebook_can_continue_past_ig_rejection(route, platform, entry):
-    """Only an exhausted, proven pre-media_publish IG 400 can hold IG alone.
+    """Hold IG independently while preserving its source and dedupe ledger.
 
     This does not clear the uncertain intent, grant an Instagram retry, or skip
     Film/ToonZone parts on Instagram. Facebook has a separate dedupe ledger.
     """
-    if route not in {"film", "toonzone"} or platform != "instagram":
+    if platform != "instagram":
+        return False
+    if route in {"tarladaki", "penguen"}:
+        # Humor routes are unordered and Facebook has an independent intent.
+        # Keep the exact uncertain IG source and all later IG uploads held;
+        # allow only independently deduped Facebook work to continue.
+        return entry.get("status") in {"intent", "uncertain"}
+    if route not in {"film", "toonzone"}:
         return False
     if entry.get("status") != "uncertain" or entry.get("prepublish_retry_count") not in (1, 2, 3):
         return False
@@ -787,7 +821,7 @@ def target_count(route, now):
         slots = [(h, 30 if route == "penguen" else 15 if route == "gonle" else 0) for h in hours[route]]
     if os.getenv("COMPLETE_DAY_DATE") == now.date().isoformat():
         # The second Film page still lacked the already-confirmed Part 6 at cutover.
-        return len(slots) + (1 if route == "film_second" else 0)
+        return len(slots) + (1 if route == "film_second" and now.date().isoformat() == "2026-10-23" else 0)
     return sum((h, m) <= (clock.hour, clock.minute) for h, m in slots)
 
 
@@ -819,6 +853,33 @@ def toonzone_cover_coverage(videos, covers):
     stems = [Path(name).stem for name in videos if name.lower().endswith(".mp4")]
     matched = sum(stem + ".png" in covers for stem in stems)
     return matched, len(stems) - matched
+
+
+def toonzone_episode_confirmed(state, videos, episode):
+    """A rollover requires all four source parts done on FB and IG with IDs."""
+    for row in state["entries"].values():
+        if row.get("route") != "toonzone":
+            continue
+        order = parse_order(Path(row.get("file", "")).stem, "cartoon")
+        if (order and list(order[:2]) == list(episode)
+                and row.get("status") != "done"):
+            return False
+    parts = {}
+    for video in videos:
+        order = parse_order(Path(video["name"]).stem, "cartoon")
+        if order and list(order[:2]) == list(episode):
+            if order[2] in parts:
+                return False
+            parts[order[2]] = video
+    if set(parts) != {1, 2, 3, 4}:
+        return False
+    for video in parts.values():
+        for platform in ("facebook", "instagram"):
+            row = state["entries"].get(f"toonzone:{platform}:{video['id']}", {})
+            if (row.get("status") != "done" or row.get("file") != video["name"]
+                    or not str(row.get("post_id") or "").strip()):
+                return False
+    return True
 
 
 def plan(audit=False):
@@ -994,7 +1055,11 @@ def plan(audit=False):
                 ep = list(parse_order(Path(item["name"]).stem, "cartoon")[:2])
                 today_episode = state["episode_days"].get(day)
                 if today_episode and today_episode != ep:
-                    break
+                    if (ep < today_episode or
+                            not toonzone_episode_confirmed(state, videos, today_episode)):
+                        report.append("HELD: previous ToonZone episode lacks four confirmed parts on both platforms.")
+                        break
+                    report.append("ROLLOVER: completed ToonZone episode; continue in order within the remaining daily quota.")
             try:
                 with tempfile.TemporaryDirectory() as tmp:
                     captions, origin = copies(route, item, files, Path(tmp))
@@ -1078,6 +1143,8 @@ def plan(audit=False):
                                 held = True
                     continue
                 if not audit:
+                    if authorize_exact_expired_recovery(route, p, item, existing, page, history_reconciled=True):
+                        report.append("RECOVERY: exact never-published Film container expired; one fresh upload reserved.")
                     bind_legacy_ig_container(route, p, item, existing, page)
                 # Historical compact IG uploads that failed *before*
                 # media_publish were incorrectly treated as uncertain forever.
@@ -1138,7 +1205,13 @@ def plan(audit=False):
                                      route=route, platform=p, video=item["name"],
                                      status="uncertain")
                         existing["hold_alerted_at"] = now.isoformat()
-                    if facebook_can_continue_past_ig_rejection(route, p, existing):
+                    if quarantine_unordered_ig_source(route, p, item, existing, cap_hash):
+                        # Unordered humor may use another unique clip while the
+                        # exact binary-rejected source stays quarantined on
+                        # both platforms. No retry, resume or intent deletion.
+                        skip_unproven_candidate = True
+                        report.append("QUARANTINE: exact unresolved humor source; look for another unique clip.")
+                    elif facebook_can_continue_past_ig_rejection(route, p, existing):
                         # After a proven failed binary upload with its one safe
                         # IG retry consumed, keep IG in its original blocked
                         # position. Later Facebook-only parts may proceed.
@@ -1210,6 +1283,7 @@ def plan(audit=False):
                     key = f"{route}:{p}:{item['id']}"
                     old_resume = state["entries"].get(key, {}).get("container_resume")
                     old_attempts = state["entries"].get(key, {}).get("prepublish_retry_count", 0)
+                    old_expired = state["entries"].get(key, {}).get("expired_container_recovery")
                     state["entries"][key] = {
                         "route": route, "platform": p, "status": "intent",
                         "caption_hash": caption_key(captions[p]), "file": item["name"],
@@ -1219,6 +1293,8 @@ def plan(audit=False):
                     }
                     if p == "instagram" and old_resume:
                         state["entries"][key]["container_resume"] = old_resume
+                    if p == "instagram" and old_expired:
+                        state["entries"][key]["expired_container_recovery"] = old_expired
                 plans.append(selected)
                 for p in pending:
                     planned_counts[(route, p)] = planned_counts.get((route, p), 0) + 1
@@ -1535,3 +1611,4 @@ if __name__ == "__main__":
         publish()
     else:
         plan(audit=action == "audit")
+
