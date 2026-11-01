@@ -469,3 +469,11 @@ izlenir; bu inceleme test amaçlı gerçek yayın tetiklemedi.
 - Loader artık documented pages şemasını doğrular ve tek ekstra JSON string katmanını açar. Sözdizimi/şema hatasında ayrı META_ACCESS_TOKEN mevcutsa yalnız güvenli GET keşfine geçer; yoksa redakte açık hata verir. Geçerli kayıtlı JSON önceliği korunur; canlı hesap uyuşmazlığı fallback ile aşılmaz.
 - Fallback kendi başına süresi geçmiş User tokenını yenilemez. Canlı kabul, Page Health aynı yeni SHA ile başarılı olduğunda yapılır; mock test yeşili credential başarısı değildir.
 - Geri alma: loader değişikliğini revert et; secret/state/artifact silme.
+
+### 1 Kasım 2026 — Preflight başarısızken link-error-journal boş kalıyordu
+
+- Kanıt: [planlı yayın #41294422455](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/41294422455) Meta GET ön kontrolünde HTTP 401 / Graph 190 / alt kod 463 ile fail-closed durdu; `link-error-journal` için `No files were found` görüldü. Buna karşın `link-incident-report` arızayı kaydetti. Bu bir **olay kayıt açığıdır**, token çözümü değildir.
+- [JSON loader yaması PR #58](https://github.com/emirhankaya985-cloud/auto-video-publisher/pull/58) sonrası [salt-okunur denetim #41295291756](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/41295291756) geçersiz kayıtlı JSON'dan bağımsız User tokena yöneldi; User token da HTTP 401 / 190 / 463 ile reddedildi. Gerçek erişim düzelmedi.
+- Güvenli düzeltme: Workflow preflight başarısız olursa `workflow_verify/workflow_step_failed` adlı sabit, sansürlenmiş olay `errors.jsonl` dosyasına yazılır; her zaman çalışan önceki artifact adımları kaydı saklar. Hatalı token, sağlayıcı mesajı ve ham JSON asla bu dosyaya yazılmaz. Meta POST tekrar denenmez; yayın kanıtı yokken "yayınlandı" denmez.
+- Test: `test_meta_preflight_journal.py` olay yazımını, redaksiyonu ve workflow adım sırasını doğrular. Canlı 401/190/463 kaldırılmadı; yalnız Meta'dan geçerli Page yetkisi/kimliği sağlandığında GET-only denetimi geçebilir.
+- Geri alma: bu workflow kayıt adımını revert et; yayıncı intent, claim, state, secret ve eski artefaktlara dokunma.
