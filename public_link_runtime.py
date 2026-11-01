@@ -554,7 +554,7 @@ def copies(route, item, files, temp, use_txt=True):
         raise RuntimeError(f"Eşleşen TXT boş: {route}/{item['name']}")
     if raw:
         # Copied social-media UI is not a video caption. Hold before intent/POST.
-        if re.search(r"(?im)^[ \\t]*view[ \\t]+all[ \\t]+[\\d,]+[ \\t]+comments?[ \\t]*$", raw):
+        if re.search(r"(?im)^[ \t]*view[ \t]+all[ \t]+[\d,]+[ \t]+comments?[ \t]*$", raw):
             raise RuntimeError("Eşleşen TXT sosyal medya arayüz metni içeriyor; yayın durduruldu")
         _, _, fb, ig, _ = platform_content_from_txt(raw, stem, route.removesuffix("_second"))
     elif route == "toonzone":
