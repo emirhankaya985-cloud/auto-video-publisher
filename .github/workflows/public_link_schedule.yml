@@ -84,6 +84,12 @@ jobs:
           else
             python meta_schedule_preflight.py
           fi
+      - name: Preserve rejected Meta preflight in structured incident journal
+        # Do not retry Meta calls or turn a credential failure into a publish.
+        # A sanitised event ensures link-error-journal exists when preflight fails.
+        if: ${{ always() && steps.meta_preflight.outcome == 'failure' }}
+        run: |
+          python -c "from publisher_error_journal import record_error; record_error('workflow_verify', 'workflow_step_failed')"
       - name: Install media runtime only after Meta preflight passed
         run: |
           pip install gdown==6.4.2
