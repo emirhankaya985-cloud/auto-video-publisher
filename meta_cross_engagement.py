@@ -667,6 +667,12 @@ _HOLD_REASON_CODES = {
 
 
 def safe_hold_reason(exc):
+    # A known Graph 190/463 denial is an expired User token, not a code,
+    # source-content or scheduled-post failure. Return only a fixed label.
+    # Never persist or print provider text or credential material.
+    if type(exc) is RuntimeError and str(exc).startswith(
+            "Meta hesap erişimi reddedildi (HTTP 401, kod 190, alt_kod 463)"):
+        return "meta_user_token_expired"
     if type(exc) is ValueError:
         return _HOLD_REASON_CODES.get(str(exc), "preflight_validation_failed")
     return "read_or_runtime_failure"
