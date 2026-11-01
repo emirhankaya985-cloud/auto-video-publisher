@@ -882,11 +882,44 @@ def toonzone_episode_confirmed(state, videos, episode):
     return True
 
 
+def conflicting_done_post_source(entries, key, route, platform, post_id):
+    """A caption match is not a Drive source-ID match.
+
+    A different verified row already owning the remote post forbids treating an
+    uncertain source as published. Exact content duplicates use their separate
+    verified fingerprint path, not this weak caption-only reconciliation.
+    """
+    if not str(post_id or "").strip():
+        return False
+    return any(
+        other_key != key and isinstance(row, dict)
+        and row.get("route") == route and row.get("platform") == platform
+        and row.get("status") == "done"
+        and str(row.get("post_id") or "") == str(post_id)
+        for other_key, row in entries.items()
+    )
+
+
+def quarantine_weak_caption_aliases(state):
+    """Repair only weak caption-based duplicates, retaining forensic evidence."""
+    entries = state["entries"]
+    for key, entry in entries.items():
+        if (entry.get("status") == "done"
+                and entry.get("reconciliation_proof") == "unique_platform_history_caption"
+                and conflicting_done_post_source(
+                    entries, key, entry["route"], entry["platform"], entry.get("post_id"))):
+            old_post = entry.pop("post_id")
+            entry["status"] = "uncertain"
+            entry["source_collision_post_id"] = old_post
+            entry["reconciliation_conflict"] = "post_id_belongs_to_other_source"
+
+
 def plan(audit=False):
     now = datetime.now(TR)
     day = now.date().isoformat()
     state = restore()
     apply_verified_migration(state)
+    quarantine_weak_caption_aliases(state)
     pages = {p["page_name"]: p for p in load_meta_auth()["pages"]}
     report = [f"# Public link publisher — {day}", "", "YouTube: disabled. Drive OAuth: not used.", ""]
     catalogs = {}
@@ -984,6 +1017,10 @@ def plan(audit=False):
                     confirmed_id, confirmed_day = history_publication_match(route, match)
                 except RuntimeError:
                     report.append("HELD: previous intent matched a post with invalid ID or timestamp.")
+                    continue
+                if conflicting_done_post_source(
+                        state["entries"], key, route, entry["platform"], confirmed_id):
+                    report.append("HELD: caption matches an existing post from a different source ID.")
                     continue
                 entry.update(
                     status="done", post_id=confirmed_id, day=confirmed_day,
@@ -1116,6 +1153,15 @@ def plan(audit=False):
                         held = True
                     continue
                 match = remote[p].get(cap_hash)
+                if (match and existing.get("status") in {"uncertain", "intent"}
+                        and conflicting_done_post_source(
+                            state["entries"], key, route, p, str(match.get("id") or ""))):
+                    report.append("HELD: remote post ID already belongs to another source; no caption-only reconciliation.")
+                    if source in {"film", "toonzone"}:
+                        held = True
+                    else:
+                        skip_unproven_candidate = True
+                    continue
                 if existing.get("status") == "done" or seed_done(route, p, item["name"]) or match:
                     if match:
                         try:
