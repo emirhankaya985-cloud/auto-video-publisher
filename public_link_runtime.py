@@ -684,7 +684,7 @@ def proven_film_ig_source_alias(item, entry, route, platform,
 
 
 def film_canonical_part(name):
-    return re.sub(r" \\([0-9]+\\)$", "", Path(name).stem).casefold()
+    return re.sub(r" \([0-9]+\)$", "", Path(name).stem).casefold()
 
 
 def route_enabled(route):
