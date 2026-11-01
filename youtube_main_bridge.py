@@ -34,6 +34,7 @@ ROUTES = {
     'tarladaki': ('channel1', 'TOKEN_CHANNEL1_JSON', 'UCrUF3mT4oF26JNBLcyKPcGQ'),
     'penguen': ('channel2', 'TOKEN_CHANNEL2_JSON', 'UCUG-NSyXpEt9PLt5RS4iumw'),
     'daily_laugh': ('daily_laugh', 'TOKEN_DAILY_LAUGH_LAB_JSON', 'UCF4KwI3alXzlExviMFmmJAA'),
+    'gonle': ('gonle_dusen', 'TOKEN_GONLE_DUSEN_JSON', 'UCvSvo5WghuXqsjwLRmIz22g'),
 }
 
 
