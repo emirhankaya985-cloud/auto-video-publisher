@@ -32,6 +32,29 @@ def reserved(t):
 
 
 class EngagementTests(unittest.TestCase):
+    def test_failed_plan_preserves_redacted_audit_without_any_post(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            destination = Path(tmp) / "report.json"
+            with patch.object(m, "REPORT", destination):
+                reason = m.preserve_failed_audit(ValueError("no verified enabled accounts"))
+                report = json.loads(destination.read_text(encoding="utf-8"))
+                self.assertEqual(reason, "no_verified_enabled_accounts")
+                self.assertEqual(report["runtime_status"], "held")
+                self.assertFalse(report["writes_retried"])
+                self.assertEqual(report["runtime_reason_code"], reason)
+                self.assertFalse(m.STATE.exists() and m.STATE == destination)
+
+    def test_unknown_exception_text_not_leaked_to_failure_artifact(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            destination = Path(tmp) / "report.json"
+            destination.write_text('{"planned": 0}', encoding="utf-8")
+            with patch.object(m, "REPORT", destination):
+                reason = m.preserve_failed_audit(ValueError("private access token in provider message"))
+                report_text = destination.read_text(encoding="utf-8")
+                self.assertEqual(reason, "preflight_validation_failed")
+                self.assertNotIn("private access token", report_text)
+                self.assertEqual(json.loads(report_text)["planned"], 0)
+
     def setUp(self):
         p = patch.object(m, "account_enabled", return_value=True)
         p.start()

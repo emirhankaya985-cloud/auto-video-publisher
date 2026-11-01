@@ -651,10 +651,54 @@ def main():
         print('{"mode":"dry_run","writes":0}')
 
 
+# Only allow known, fixed diagnostic labels. Never print provider messages,
+# exceptions or credential data in logs or artifacts.
+_HOLD_REASON_CODES = {
+    "no verified enabled accounts": "no_verified_enabled_accounts",
+    "no recent completed publisher run": "no_recent_completed_publisher_run",
+    "invalid publisher run list": "publisher_run_list_invalid",
+    "invalid or stale source run": "source_run_not_verified",
+    "source result unavailable": "source_result_artifact_missing",
+    "invalid publisher state": "publisher_state_invalid",
+    "invalid engagement ledger; reset forbidden": "engagement_ledger_invalid",
+    "invalid artifact list": "artifact_inventory_invalid",
+    "invalid workflow identity": "workflow_identity_invalid",
+}
+
+
+def safe_hold_reason(exc):
+    if type(exc) is ValueError:
+        return _HOLD_REASON_CODES.get(str(exc), "preflight_validation_failed")
+    return "read_or_runtime_failure"
+
+
+def preserve_failed_audit(exc):
+    """Keep an actionable, redacted report even when planning fails early.
+
+    Preserve nonzero exit and never create engagement intents or perform API
+    writes as part of failure reporting.
+    """
+    reason = safe_hold_reason(exc)
+    report = {}
+    try:
+        if REPORT.exists():
+            prior = json.loads(REPORT.read_text(encoding="utf-8"))
+            if isinstance(prior, dict):
+                report = prior
+    except (OSError, ValueError):
+        report = {}
+    report.update(runtime_status="held", runtime_reason_code=reason,
+                  writes_retried=False)
+    save(REPORT, report)
+    return reason
+
+
 if __name__ == "__main__":
     try:
         main()
     except Exception as exc:
-        # No raw HTTP/provider/config exception text, which may carry secrets.
-        print(json.dumps({"status": "held", "error_type": type(exc).__name__, "writes_retried": False}))
+        # Keep a redacted audit artifact; do not convert any failure to success.
+        reason = preserve_failed_audit(exc)
+        print(json.dumps({"status": "held", "reason_code": reason,
+                          "error_type": type(exc).__name__, "writes_retried": False}))
         raise SystemExit(1) from None
