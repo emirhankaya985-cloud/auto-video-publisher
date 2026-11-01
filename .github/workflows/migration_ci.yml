@@ -26,6 +26,8 @@ on:
       - 'test_film_duplicate_identity.py'
       - 'test_public_link_runtime.py'
       - 'test_publisher_recovery.py'
+      - 'publisher_one_shot_gate.py'
+      - 'test_owner_catchup_gate.py'
       - 'migration_985_tests.py'
       - '.github/workflows/migration_ci.yml'
   workflow_dispatch:

@@ -9,6 +9,8 @@ on:
       - 'docs/publisher-one-shot-v2-2026-10-25.md'
       - 'docs/ig-v3-rescue-once-2026-10-26.md'
       - 'docs/ig-v4-compact-publish-once-2026-10-26.md'
+      # One date-bound, owner-authorized catch-up; re-running never republishes.
+      - 'docs/owner-authorized-catchup-2026-11-01.md'
   schedule:
     # Normal checks every half hour; GitHub schedules may start late.
     - cron: '7,37 * * * *'
