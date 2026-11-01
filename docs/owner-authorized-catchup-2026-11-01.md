@@ -9,3 +9,8 @@ Bu bir toplu arşiv yükleme talimatı değildir. Mevcut yayıncı yalnız gün�
 Yayın başarısı için `link-state-result` artefaktında ilgili gerçek `post_id` ve sağlayıcının uzak geçmişi; YouTube için `public`/`processed` sonucu aranacaktır. Başarısız/atlanan çalışma asla başarı diye bildirilmez.
 
 Secret, token, kaynak video, eski state, claim ve GitHub geçmişi silinmez. Normal cron değiştirilmez; başka yayıncı açılmaz. Yeni ücretli servis kullanılmaz.
+
+
+## 1 Kasım ikinci güvenli telafi tetiklemesi
+
+Önceki canlı schedule devam ederken PR #68 kapsamında seri parçalar için öncül-post-ID doğrulama koruması 2424ad8a7746558d8234f8e3d25353f9bb97d704 commit'iyle ana dala alındı. Sahip talebi değişmedi: kalan ve gerçekten yayımlanmamış günlük hedefleri güvenli şekilde tamamla. Önceki çalışma sonlanmadan ikinci yayıncı aynı anda çalışmaz; workflow concurrency, uzak tarihçe uzlaştırması, intent/uncertain/done geçmişi, günlük kota ve geçerli tek META_ACCESS_TOKEN yolu korunur. Aynı kaynak için doğrulanamayan önceki girişler yeniden gönderilmez.
