@@ -914,6 +914,35 @@ def quarantine_weak_caption_aliases(state):
             entry["reconciliation_conflict"] = "post_id_belongs_to_other_source"
 
 
+def quarantined_unordered_local_failure(route, item, state, platforms, day):
+    """Skip an already proven pre-upload-broken clip, never an uncertain POST.
+
+    Limit this to unordered shared-humor sources on the same publication day.
+    Every active platform must have an exact prior source, file and local-only
+    failure record. Do not alter those records or release any old intents.
+    """
+    if route not in {"tarladaki", "penguen"} or not platforms:
+        return False
+    for platform in platforms:
+        if platform not in {"facebook", "instagram"}:
+            return False
+        entry = state.get("entries", {}).get(
+            f"{route}:{platform}:{item['id']}", {})
+        failure = entry.get("failure") or {}
+        if not (
+            entry.get("route") == route and entry.get("platform") == platform
+            and entry.get("file") == item["name"] and entry.get("day") == day
+            and entry.get("status") == "ready"
+            and isinstance(failure, dict)
+            and failure.get("reason") == "source_or_cover_preparation_failed"
+            and failure.get("safe_to_repost") is True
+            and str(entry.get("run_id") or "") != str(os.getenv("GITHUB_RUN_ID", ""))
+            and str(entry.get("run_id") or "").isdecimal()
+        ):
+            return False
+    return True
+
+
 def plan(audit=False):
     now = datetime.now(TR)
     day = now.date().isoformat()
@@ -1087,6 +1116,12 @@ def plan(audit=False):
             if not available or all(counts[p] + planned_counts.get((route, p), 0) >= target_count(route, now) for p in available):
                 break
             if all(seed_done(route, p, item["name"]) or state["entries"].get(f"{route}:{p}:{item['id']}", {}).get("status") == "done" for p in available):
+                continue
+            if quarantined_unordered_local_failure(
+                    route, item, state, available, clock.date().isoformat()):
+                # Verified earlier local ffprobe failure: no Meta POST occurred.
+                # A different clean clip may fill the daily slot instead.
+                report.append("QUARANTINE: exact source failed local MP4 preparation in a prior run; no blind media retry.")
                 continue
             if source == "toonzone":
                 ep = list(parse_order(Path(item["name"]).stem, "cartoon")[:2])
