@@ -32,3 +32,9 @@ yeni bir işte silme veya göz ardı etme.
 - Kullanıcı NTFY, eski Drive/YouTube OAuth ve eski yayıncı yetkilendirmesini
   başka sohbette yürütüyor. ToonZone sezon 2 kapakları da kullanıcıya ait;
   bu alanlarda kullanıcıya aynı soruları tekrar sorma.
+
+## Kullanıcının 1 Kasım 2026 Meta bağlantı tercihi
+
+- Kullanıcı Meta bağlantısını yalnız `META_ACCESS_TOKEN` ile yönetmek istiyor. Kullanıcıdan Page-token JSON oluşturmasını, kopyalamasını veya `META_AUTH_JSON` secret'ı eklemesini tekrar isteme.
+- Token tabanlı keşif ve kimlik denetimini kullan. Kullanıcı bu tercihi açıkça değiştirmedikçe JSON yedeğini zorunlu kurulum veya kurtarma adımı yapma.
+- Bu tercih kaydı canlı erişimin düzeldiği anlamına gelmez; kimlik GET ve normal schedule yayın kanıtını ayrı doğrula.
