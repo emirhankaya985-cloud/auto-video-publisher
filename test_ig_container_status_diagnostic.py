@@ -37,6 +37,35 @@ class ReadOnlyIGTests(unittest.TestCase):
         self.assertIn("if: github.event_name != 'pull_request'", workflow)
         self.assertNotIn("python public_link_runtime.py publish", workflow)
 
+    def test_exact_named_containers_verify_live_page_before_read(self):
+        for key, (name, cid) in diag.NAMED_PINNED.items():
+            with self.subTest(key=key):
+                page = {"page_name": name, "page_id": "12345", "instagram_id": "67890", "page_token": "SECRET"}
+                identity = Mock(ok=True, status_code=200)
+                identity.json.return_value = {"id": "12345", "name": name, "instagram_business_account": {"id": "67890"}}
+                status = Mock(status_code=200)
+                status.json.return_value = {"id": cid, "status_code": "EXPIRED", "status": "SECRET"}
+                get = Mock(side_effect=[identity, status])
+                result = diag.inspect_named([page], key, get=get)
+                self.assertEqual(result["status"], "EXPIRED")
+                self.assertEqual(result["posts_sent"], 0)
+                self.assertEqual(get.call_count, 2)
+                self.assertTrue(get.call_args_list[0].args[0].endswith("/12345"))
+                self.assertTrue(get.call_args_list[1].args[0].endswith("/" + cid))
+                self.assertNotIn("SECRET", str(result))
+
+    def test_wrong_named_page_identity_never_reads_container(self):
+        key = "tarladaki_192_nov01"
+        name, cid = diag.NAMED_PINNED[key]
+        page = {"page_name": name, "page_id": "12345", "instagram_id": "67890", "page_token": "SECRET"}
+        response = Mock(ok=True, status_code=200)
+        response.json.return_value = {"id": "WRONG", "name": name}
+        get = Mock(return_value=response)
+        result = diag.inspect_named([page], key, get=get)
+        self.assertEqual(result["status"], "BLOCKED")
+        self.assertEqual(get.call_count, 1)
+        self.assertNotIn("SECRET", str(result))
+
     def test_source_has_no_write_functions(self):
         from pathlib import Path
         src = Path(diag.__file__).read_text()

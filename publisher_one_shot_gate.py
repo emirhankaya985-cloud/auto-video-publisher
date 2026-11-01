@@ -74,6 +74,12 @@ def main():
         subject = _git("log", "-1", "--format=%s")
         added = tuple(filter(None, _git("diff", "--name-only",
                                          "--diff-filter=A", "HEAD^", "HEAD").splitlines()))
+        # The owner can authorize another catch-up after replacing expired
+        # credentials on the same day. Only this dated marker may be modified;
+        # historical rescue markers still have to be newly added.
+        modified = _git("diff", "--name-only", "--diff-filter=M", "HEAD^", "HEAD").splitlines()
+        if OWNER_CATCHUP_MARKER in modified:
+            added += (OWNER_CATCHUP_MARKER,)
     mode = determine_mode(
         event, os.getenv("GITHUB_REF", ""), subject, added,
         os.getenv("REQUESTED_MODE", "audit"))
@@ -91,3 +97,4 @@ def main():
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

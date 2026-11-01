@@ -1,6 +1,8 @@
 """Owner-authorized one-day catch-up must never become a recurring upload bypass."""
 import os
 import unittest
+import tempfile
+from pathlib import Path
 from unittest.mock import patch
 
 from publisher_one_shot_gate import (
@@ -10,6 +12,24 @@ from publisher_one_shot_gate import (
 
 
 class OwnerCatchupGateTests(unittest.TestCase):
+    def test_only_dated_catchup_modified_marker_can_authorize_another_commit(self):
+        from publisher_one_shot_gate import main, MARKER
+        for modified, subject, attempt, expected in (
+            (OWNER_CATCHUP_MARKER, OWNER_CATCHUP_SUBJECT, '1', 'true'),
+            (OWNER_CATCHUP_MARKER, 'unrelated commit', '1', 'false'),
+            (OWNER_CATCHUP_MARKER, OWNER_CATCHUP_SUBJECT, '2', 'false'),
+            (MARKER, 'ops: authorized-once-meta-publish-2026-10-25-v2', '1', 'false'),
+        ):
+            with self.subTest(modified=modified, subject=subject, attempt=attempt), tempfile.TemporaryDirectory() as tmp:
+                output = Path(tmp) / 'output'
+                with patch.dict(os.environ, {'GITHUB_EVENT_NAME': 'push', 'GITHUB_REF': 'refs/heads/main',
+                                             'GITHUB_RUN_ATTEMPT': attempt, 'GITHUB_OUTPUT': str(output)}), \
+                     patch('publisher_one_shot_gate._git', side_effect=[subject, '', modified]), \
+                     patch('publisher_one_shot_gate.datetime') as clock:
+                    clock.now.return_value.date.return_value.isoformat.return_value = '2026-11-01'
+                    self.assertEqual(main(), 0)
+                self.assertIn('publish_allowed=' + expected + '\n', output.read_text())
+
     def test_exact_first_attempt_on_owner_day_allows_existing_publish_pipeline(self):
         self.assertTrue(is_owner_catchup_push(
             "push", "refs/heads/main", OWNER_CATCHUP_SUBJECT,
@@ -62,3 +82,4 @@ class OwnerCatchupGateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

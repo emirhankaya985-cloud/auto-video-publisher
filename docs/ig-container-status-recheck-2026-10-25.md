@@ -25,3 +25,7 @@ Recheck the existing exact IG container IDs before the one-time 720p/96kbps resc
 ToonZone S01E07 Part 3 containers, alongside the two old pinned containers.
 No upload, media_publish, token change or queue edit. Output only fixed
 classification labels and numeric error codes, never raw provider status text.
+
+## 1 November 2026 owner-requested diagnosis
+
+Read only the exact Tarladaki 192 and Penguen 193 prior containers after live Page and linked Instagram identity verification, alongside Film Part10. Do not upload, publish, clear intents, or log credential/provider text. This diagnostic does not grant any retry.
