@@ -44,6 +44,8 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
       MEDIA_QUALITY_ENABLED: ${{ vars.MEDIA_QUALITY_ENABLED != 'false' && 'true' || 'false' }}
+      # Opt-in only after offline CI and live hold acceptance; never auto-post on match.
+      ADVANCED_DEDUPE_ENABLED: ${{ vars.ADVANCED_DEDUPE_ENABLED == 'true' && 'true' || 'false' }}
       # Only User token can discover verified Page tokens; invalid/expired token fails closed.
       YOUTUBE_PUBLISHING_ENABLED: ${{ vars.YOUTUBE_PUBLISHING_ENABLED != 'false' && 'true' || 'false' }}
       TOKEN_CHANNEL1_JSON: ${{ secrets.TOKEN_CHANNEL1_JSON }}
