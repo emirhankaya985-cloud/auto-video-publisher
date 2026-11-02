@@ -37,7 +37,8 @@ jobs:
       - run: pip install --require-hashes -r requirements.txt
       - run: python -m unittest -v test_threads_accounts.py test_threads_publisher.py test_threads_audit_secret_contract.py
   readonly-api:
-    if: github.event_name == 'workflow_dispatch'
+    # PRs only run offline tests; trusted main updates perform GET /me checks.
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     needs: mock-tests
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -49,7 +50,7 @@ jobs:
       - run: pip install --require-hashes -r requirements.txt
       - name: Compare selected token to Threads identity (GET only)
         env:
-          THREADS_CHECK_ROUTE: ${{ inputs.account }}
+          THREADS_CHECK_ROUTE: ${{ inputs.account || 'all' }}
           THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
           TARLADAKI_THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_TARLADAKI_FASULYE_ACCESS_TOKEN || secrets.TARLADAKI_THREADS_ACCESS_TOKEN }}
           PENGUEN_THREADS_ACCESS_TOKEN: ${{ secrets.PENGUEN_THREADS_ACCESS_TOKEN }}
