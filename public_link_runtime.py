@@ -1535,8 +1535,9 @@ def verify_source_video(path):
     except subprocess.CalledProcessError as exc:
         # ffprobe stderr/command may contain local paths or provider metadata.
         # Preserve only its numeric exit status for safe source diagnosis.
+        exit_code = exc.returncode if type(exc.returncode) is int else "unknown"
         raise RuntimeError(
-            f"MP4 medya doğrulaması çalıştırılamadı: ffprobe_exit={exc.returncode}"
+            f"MP4 medya doğrulaması çalıştırılamadı: ffprobe_exit={exit_code}"
         ) from None
     except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
         raise RuntimeError("MP4 medya ön doğrulaması başarısız: " + type(exc).__name__) from None
