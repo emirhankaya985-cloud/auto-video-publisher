@@ -32,7 +32,7 @@ _ALLOWED_REASON = {
     "unreconciled_previous_intent", "no_eligible_content", "other",
     "intent_validation_failed", "existing_container_reconciliation_failed",
     "missing_secret", "youtube_publication_unverified",
-    "visual_duplicate_review",
+    "visual_duplicate_review", "source_content_changed",
 }
 
 
