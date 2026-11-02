@@ -117,6 +117,14 @@ class LinkRuntimeSafety(unittest.TestCase):
                 self.assertEqual(state["entries"][f"{route}:instagram:old"], old)
                 self.assertNotIn(f"{route}:facebook:old", state["entries"])
 
+    def test_nov2_catchup_prioritizes_film_and_toonzone_without_other_day_reordering(self):
+        with patch.dict(os.environ, {"CATCHUP_BATCH_DATE": "2026-11-02"}):
+            today = [key for key, _ in runtime.prioritized_route_items("2026-11-02")]
+            tomorrow = [key for key, _ in runtime.prioritized_route_items("2026-11-03")]
+        self.assertEqual(today[:3], ["film", "film_second", "toonzone"])
+        self.assertCountEqual(today, list(runtime.ROUTES))
+        self.assertEqual(tomorrow, list(runtime.ROUTES))
+
     def test_owner_full_day_keeps_normal_targets_without_legacy_film_bonus(self):
         now = datetime(2026, 11, 1, 9, 0, tzinfo=ZoneInfo("Europe/Istanbul"))
         with patch.dict(os.environ, {"COMPLETE_DAY_DATE": "2026-11-01"}):
