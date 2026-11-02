@@ -117,6 +117,61 @@ class LinkRuntimeSafety(unittest.TestCase):
                 self.assertEqual(state["entries"][f"{route}:instagram:old"], old)
                 self.assertNotIn(f"{route}:facebook:old", state["entries"])
 
+    def test_film_second_batch_holds_same_caption_from_different_drive_ids(self):
+        # Production evidence: Bickin_Part_1.mp4 and Bickin_Part_1 (1).mp4
+        # received separate Facebook IDs despite the same caption hash.
+        # This test uses no credentials, network or production POST.
+        from contextlib import ExitStack
+        today = datetime.now(runtime.TR).date().isoformat()
+        source = {
+            "Bickin_Part_1 (1).mp4": {"id": "alias-one", "name": "Bickin_Part_1 (1).mp4"},
+            "Bickin_Part_1.mp4": {"id": "alias-two", "name": "Bickin_Part_1.mp4"},
+        }
+        for same_caption in (True, False):
+            with self.subTest(same_caption=same_caption), tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
+                root = Path(tmp)
+                state = {"schema": 1, "entries": {}, "episode_days": {}}
+                replacements = {
+                    "ROOT": root, "STATE": root / "state.json", "PLAN": root / "plan.json",
+                    "FOLDERS": {"film": "folder"},
+                    "ROUTES": {"film_second": ("film", "Filmmagrasi")},
+                }
+                for key, value in replacements.items():
+                    stack.enter_context(patch.object(runtime, key, value))
+                stack.enter_context(patch.dict(os.environ, {
+                    "GITHUB_RUN_ID": "offline-test",
+                    "CATCHUP_BATCH_DATE": today,
+                    "GITHUB_STEP_SUMMARY": str(root / "summary.md"),
+                }))
+                stack.enter_context(patch.object(runtime, "restore", return_value=state))
+                stack.enter_context(patch.object(runtime, "apply_verified_migration"))
+                stack.enter_context(patch.object(runtime, "quarantine_weak_caption_aliases"))
+                stack.enter_context(patch.object(runtime, "load_meta_auth",
+                                                 return_value={"pages": [{"page_name": "Filmmagrasi"}]}))
+                stack.enter_context(patch.object(runtime, "inventory", return_value=source))
+                stack.enter_context(patch.object(runtime, "graph_rows", return_value=[]))
+                stack.enter_context(patch.object(runtime, "route_enabled", return_value=True))
+                stack.enter_context(patch.object(runtime, "target_count", return_value=5))
+                stack.enter_context(patch.object(runtime, "seed_done", return_value=False))
+                stack.enter_context(patch.object(runtime, "verified_film_duplicate", return_value=None))
+                stack.enter_context(patch.object(runtime, "prepare_caption", side_effect=lambda c, *args: c))
+                def captions(_route, item, _files, _tmp):
+                    body = "Same verified caption" if same_caption else "Unique " + item["id"]
+                    return {"facebook": body, "instagram": body}, "matching-txt"
+                stack.enter_context(patch.object(runtime, "copies", side_effect=captions))
+                runtime.plan()
+                plans = json.loads((root / "plan.json").read_text())
+                expected = ["alias-one"] if same_caption else ["alias-one", "alias-two"]
+                self.assertEqual([p["id"] for p in plans], expected)
+                self.assertEqual(
+                    set(state["entries"]),
+                    {f"film_second:facebook:{file_id}" for file_id in expected},
+                )
+                self.assertTrue(all(e["status"] == "intent" for e in state["entries"].values()))
+                if same_caption:
+                    self.assertIn("identical caption already reserved",
+                                  (root / "summary.md").read_text())
+
     def test_nov2_catchup_prioritizes_film_and_toonzone_without_other_day_reordering(self):
         with patch.dict(os.environ, {"CATCHUP_BATCH_DATE": "2026-11-02"}):
             today = [key for key, _ in runtime.prioritized_route_items("2026-11-02")]
