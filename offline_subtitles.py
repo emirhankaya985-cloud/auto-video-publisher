@@ -35,7 +35,7 @@ def build_srt(segments, *, max_segments=10000):
             continue
         if not (isinstance(start, (int, float)) and isinstance(end, (int, float))
                 and math.isfinite(start) and math.isfinite(end) and
-                0 <= end_prior - 0.05 <= start <= end <= 10800):
+                0 <= start <= end <= 10800 and start + 0.05 >= end_prior):
             raise ValueError("overlapping or invalid subtitle timestamps")
         output.append(f"{len(output)+1}\n{_timestamp(start)} --> {_timestamp(end)}\n{text}\n")
         end_prior = end
