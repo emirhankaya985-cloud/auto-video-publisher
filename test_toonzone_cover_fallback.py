@@ -16,6 +16,14 @@ def valid_header():
 
 
 class ToonZoneCoverFallbackTests(unittest.TestCase):
+    def setUp(self):
+        # Old publisher simulations use placeholder MP4s and deliberately
+        # sparse intent rows. Source integrity is exercised with real bytes
+        # in test_operational_enhancements.py; do not dilute its prod gate.
+        integrity = patch("operational_enhancements.bind_source_integrity", return_value=True)
+        integrity.start()
+        self.addCleanup(integrity.stop)
+
     def test_cover_uses_own_clip_and_part_identity(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
