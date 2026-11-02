@@ -35,7 +35,7 @@ class PreviewTests(unittest.TestCase):
         )
 
     def test_two_episodes_four_ordered_parts_each(self):
-        plan = self.plan()
+        plan = self.plan(days=2)
         self.assertEqual(plan["status"], "preview")
         self.assertEqual(plan["preview_parts"], 12)
         self.assertEqual(plan["potential_platform_posts"], 24)
