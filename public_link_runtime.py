@@ -1668,6 +1668,7 @@ def publish():
             continue
         with tempfile.TemporaryDirectory() as tmp:
             temp = Path(tmp)
+            source_fingerprint = None
             try:
                 video = download(item["id"], temp / "source.mp4")
                 with video.open("rb") as source:
@@ -1689,6 +1690,9 @@ def publish():
                     checksum = hashlib.md5(video.read_bytes()).hexdigest()
                     if checksum != item["approved_md5"]:
                         raise RuntimeError("Human-approved content checksum mismatch")
+                if os.getenv("ADVANCED_DEDUPE_ENABLED", "false").lower() == "true":
+                    from media_similarity import visual_fingerprint
+                    source_fingerprint = visual_fingerprint(video)
                 if item.get("cover_id"):
                     cover = download(item["cover_id"], temp / "cover.png")
                     video = create_instagram_cover_video(video, cover, temp / "covered.mp4")
@@ -1719,6 +1723,20 @@ def publish():
                                  video=item["name"], error=exc, safe_to_retry=True)
                 save(STATE, state)
                 continue
+            if source_fingerprint is not None:
+                from media_similarity import hold_visual_duplicate
+                if hold_visual_duplicate(item, state, source_fingerprint):
+                    # A potentially duplicated source is held for human review,
+                    # never retried automatically. Preserve every prior post.
+                    failures.append(item["page"] + ": visual duplicate held for review")
+                    record_error("source_video", "visual_duplicate_review",
+                                 route=item["route"], video=item["name"],
+                                 safe_to_retry=False)
+                    save(STATE, state)
+                    continue
+                # Persist the fingerprint alongside each existing archived
+                # intent before any external upload attempt.
+                save(STATE, state)
             # Instagram transcoding is local preparation, not a Meta API
             # upload. If it fails, mark only Instagram ready to try the next
             # safe scheduled run. Facebook can still publish independently.
