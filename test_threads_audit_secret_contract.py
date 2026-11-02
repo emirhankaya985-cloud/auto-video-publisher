@@ -50,7 +50,8 @@ class ThreadsAuditWorkflowContractTests(unittest.TestCase):
                 self.assertIn(f"'{username}'", line.group(1))
 
     def test_manual_api_check_is_readonly(self):
-        self.assertIn("if: github.event_name == 'workflow_dispatch'", self.workflow)
+        self.assertIn("if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')", self.workflow)
+        self.assertIn("THREADS_CHECK_ROUTE: ${{ inputs.account || 'all' }}", self.workflow)
         self.assertIn("run: python check_threads_connection.py", self.workflow)
         self.assertNotIn("python scheduled_multi_publisher.py", self.workflow)
         self.assertNotIn("python public_link_runtime.py publish", self.workflow)
