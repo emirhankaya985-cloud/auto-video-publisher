@@ -43,6 +43,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+      MEDIA_QUALITY_ENABLED: ${{ vars.MEDIA_QUALITY_ENABLED != 'false' && 'true' || 'false' }}
       # Only User token can discover verified Page tokens; invalid/expired token fails closed.
       YOUTUBE_PUBLISHING_ENABLED: ${{ vars.YOUTUBE_PUBLISHING_ENABLED != 'false' && 'true' || 'false' }}
       TOKEN_CHANNEL1_JSON: ${{ secrets.TOKEN_CHANNEL1_JSON }}
@@ -98,6 +99,8 @@ jobs:
         run: python publisher_one_shot_gate.py
       - name: Verify state, account and caption safety without API writes
         id: verify
+        env:
+          MEDIA_QUALITY_ENABLED: 'false'
         run: python -m unittest -v test_public_link_runtime.py
       - name: Check public folders, captions, histories and prepare intent
         id: plan
@@ -145,6 +148,8 @@ jobs:
           path: |
             link-runtime/operations-backup.zip
             link-runtime/operations-report.json
+            link-runtime/content-stock.json
+            link-runtime/quality/*.json
           if-no-files-found: ignore
           retention-days: 90
       - name: Preserve all results, including partial failures
