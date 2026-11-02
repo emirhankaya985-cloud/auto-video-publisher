@@ -35,16 +35,21 @@ def restore_history(target: str | Path, *, token: str | None = None,
                "X-GitHub-Api-Version": "2022-11-28"}
     endpoint = f"https://api.github.com/repos/{REPOSITORY}/actions/artifacts"
     try:
-        response = get(endpoint, headers=headers,
-                       params={"name": ARTIFACT_NAME, "per_page": 100},
-                       timeout=25, allow_redirects=False)
-        if response.status_code != 200:
-            raise RuntimeError("GitHub archive listing unavailable")
-        payload = response.json()
-        if not isinstance(payload, dict) or not isinstance(payload.get("artifacts"), list):
-            raise RuntimeError("GitHub archive listing invalid")
-        artifacts = payload["artifacts"]
-        if len(artifacts) >= 100 or payload.get("total_count", 0) > 100:
+        artifacts = []
+        for page in range(1, 21):
+            response = get(endpoint, headers=headers,
+                           params={"name": ARTIFACT_NAME, "per_page": 100, "page": page},
+                           timeout=25, allow_redirects=False)
+            if response.status_code != 200:
+                raise RuntimeError("GitHub archive listing unavailable")
+            payload = response.json()
+            if not isinstance(payload, dict) or not isinstance(payload.get("artifacts"), list):
+                raise RuntimeError("GitHub archive listing invalid")
+            batch = payload["artifacts"]
+            artifacts.extend(batch)
+            if len(batch) < 100:
+                break
+        else:
             raise RuntimeError("GitHub archive history pagination incomplete")
         matching = [
             row for row in artifacts

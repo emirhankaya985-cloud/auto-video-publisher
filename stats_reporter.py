@@ -743,10 +743,11 @@ def build_report(now=None):
 def notify(message):
     title = "🌙 Günlük Sosyal Medya Raporu"
     comparison = getattr(message, "comparison", None)
-    body = (ntfy_table(comparison) if comparison and "publication" in comparison
-            else compact_phone_report(message, ACCOUNT_TARGETS))
+    body = None
     ntfy_error = None
     try:
+        body = (ntfy_table(comparison) if comparison and "publication" in comparison
+                else compact_phone_report(message, ACCOUNT_TARGETS))
         receipt = send_ntfy(title, body, timeout=20, require_ack=True)
         print(f"ntfy sunucu alındısı doğrulandı: HTTP {receipt['http_status']}; "
               "telefon teslimatı doğrulanmadı.", flush=True)
@@ -757,7 +758,7 @@ def notify(message):
     if telegram_configured():
         try:
             comparison = getattr(message, "comparison", None)
-            parts = telegram_tables(comparison) if comparison else [(title, body)]
+            parts = telegram_tables(comparison) if comparison else [(title, body or str(message))]
             if comparison and "publication" in comparison:
                 parts.append(publication_telegram(comparison))
             acknowledged = 0
