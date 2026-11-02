@@ -23,3 +23,9 @@ its bytes into a new directory, inspect source/intent/post records, then obtain
 explicit production-recovery approval before modifying the publisher state.
 No expiration is configured for Drive backups; retention depends on account
 availability, free Drive quota and the owner not deleting the destination.
+
+Initial run 41515910390: backup failed with missing_drive_credentials; no Drive
+write occurred. Acceptance setup failed because the new ubuntu-latest runner did
+not include FFmpeg. The safe repair installs FFmpeg/FFprobe like the normal
+publisher, then repeats only GET/local acceptance. Credential access is not
+repaired by this change. Provider publishing remains untouched.

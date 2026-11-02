@@ -534,3 +534,12 @@ izlenir; bu inceleme test amaçlı gerçek yayın tetiklemedi.
 - Doğru video ID + kanal + public/uploaded durumunda accepted bekleyişi açıkça raporlanır; done sayılmaz ve normal işlem bekleyişi hata gibi gösterilmez. Processed/public olduktan sonra done olur. Yanlış ID/kanal, görünürlük sorunu ve GET hatası hâlâ başarısızdır.
 - Test: GET kesildiğinde ID'nin önceden diskte bulunması ve ikinci publish çağrısının upload'u yinelememesi; normal pending ile yanlış video kimliğinin ayrılması. 793 unittest başarılı. Bu mock test yeni canlı upload kanıtı değildir.
 - Geri alma: ilgili bridge commit'ini revert et; accepted/uncertain state veya artifact silme. Hak/kanal kontrolü, intent arşivi ve tekrar yükleme kilitleri korunur.
+
+
+### 2 Kasım 2026 — Yeni bağımsız yedek ve kabul kontrolünün ilk koşumu
+
+- Kanıt: https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/41515910390 , main 368a42aa4935dd3e22ff12191d258d3c71793fc7.
+- Backup job 125519306279: reason=missing_drive_credentials; bu job'a DRIVE_TOKEN_JSON sağlanmıyor. Secret değeri okunmadı; Drive dosyası yazılmadı. Kod hazır olması kalıcı yedek kabulü değildir.
+- Acceptance job 125519306661: bağımlılıklar kuruldu ancak runner'da ffmpeg bulunmadığından kontrol başlamadı. Başarı diye raporlanmaz. FFmpeg/FFprobe normal yayıncının kullandığı apt yoluyla kurulacak; tekrar yalnız GET ve yerel kalite analizi yapacak.
+- Yeni yayın, intent temizliği, Meta token değişimi veya kör POST tekrarı yok. Backup receipt artifact saklandı. Credential eksikliği bu kod yamasıyla çözülmez.
+- Geri alma: publication_backup workflow'unu devre dışı bırak; mevcut state/artifact/Drive dosyalarını silme.

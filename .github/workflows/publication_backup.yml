@@ -73,7 +73,7 @@ jobs:
       - run: |
           python -m pip install --require-hashes -r requirements.txt
           python -m pip install gdown==6.4.2
-          command -v ffmpeg
+          command -v ffmpeg && command -v ffprobe || (sudo apt-get update -qq && sudo apt-get install -y ffmpeg)
       - name: Verify live stock, existing posts, one source quality and new engagement GETs
         env:
           GITHUB_TOKEN: ${{ github.token }}
