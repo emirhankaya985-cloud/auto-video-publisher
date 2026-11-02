@@ -11,6 +11,7 @@ import nvidia_assistant as ai
 from telegram_ai_worker import Worker, compact_history, latest_evidence
 
 ENV = {"NVIDIA_AI_ENABLED": "true", "NVIDIA_API_KEY": "secret-test-key",
+       "TELEGRAM_STATUS_ONLY": "false",
        "TELEGRAM_BOT_TOKEN": "123456:abcdefghijklmnopqrstuvwx",
        "TELEGRAM_CHAT_ID": "123456789", "TELEGRAM_AI_OWNER_ID": "987654321"}
 

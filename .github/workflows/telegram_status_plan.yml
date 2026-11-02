@@ -1,0 +1,57 @@
+name: Owner requested Telegram status and timetable
+on:
+  push:
+    branches: [main]
+    paths: ['docs/telegram-status-plan-delivery-20261103.md']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: telegram-status-timetable
+  cancel-in-progress: false
+jobs:
+  status:
+    # A rerun must not repeat a message with an uncertain previous delivery.
+    if: github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: pip install --require-hashes -r requirements.txt
+      - name: Prepare status table from settings and authoritative publication ledger
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PUBLISHER_VARS_JSON: ${{ toJSON(vars) }}
+        run: python telegram_status.py
+      - name: Archive prepared table before delivery
+        uses: actions/upload-artifact@v4
+        with:
+          name: telegram-status-intent
+          path: link-runtime/telegram-status.html
+          if-no-files-found: error
+      - name: Deliver prepared timetable once to the existing report chat
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from telegram_notifications import send_telegram
+          root = Path('link-runtime')
+          result = send_telegram('📋 Yayın planlaması', (root / 'telegram-status.html').read_text(encoding='utf-8'), parse_mode='HTML')
+          (root / 'telegram-status-receipt.json').write_text(json.dumps(result), encoding='utf-8')
+          print(json.dumps({'server_ack': result['server_ack'], 'phone_delivery_verified': False}))
+          PY
+      - name: Preserve server receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: telegram-status-result
+          path: link-runtime/telegram-status-receipt.json
+          if-no-files-found: ignore
+          retention-days: 30
