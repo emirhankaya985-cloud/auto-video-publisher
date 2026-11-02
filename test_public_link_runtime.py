@@ -69,6 +69,14 @@ runtime.record_error = Mock()
 
 
 class LinkRuntimeSafety(unittest.TestCase):
+    def setUp(self):
+        # Old publisher simulations use placeholder MP4s and deliberately
+        # sparse intent rows. Source integrity is exercised with real bytes
+        # in test_operational_enhancements.py; do not dilute its prod gate.
+        integrity = patch("operational_enhancements.bind_source_integrity", return_value=True)
+        integrity.start()
+        self.addCleanup(integrity.stop)
+
     def test_unordered_ig_quarantine_requires_exact_prepublish_source_proof(self):
         row = {"route": "tarladaki", "platform": "instagram", "file": "192.mp4",
                "caption_hash": "hash", "status": "uncertain",
