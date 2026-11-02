@@ -54,6 +54,8 @@ def transcribe_local(video, destination, model_directory, *, language="tr", mode
         raise ValueError("local speech model directory missing")
     if language not in {"tr", "en", "de"}:
         raise ValueError("explicit speech language required")
+    if destination.exists():
+        raise FileExistsError("subtitle file already exists; refusing overwrite")
     if model_factory is None:
         try:
             from faster_whisper import WhisperModel
