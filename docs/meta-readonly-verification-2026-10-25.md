@@ -16,3 +16,7 @@ The owner explicitly requested an immediate manual test of the account daily/lif
 ## Detailed Telegram report verification — 27 October 2026
 
 After PR #26, the owner explicitly requested the daily/weekly percentage tables and additional account performance detail on Telegram. This marker requests one live report with the three bounded Telegram HTML parts, current counters and existing archived baselines. Check all three Telegram server receipts and the comparison JSON artifact. Missing seven-day history remains unavailable; no dates or percentages are fabricated. Existing read-only account audit is unchanged; no video publishing or credential changes are requested.
+
+## Owner-requested Meta publication table verification — 2 November 2026
+
+The owner requested immediate real Telegram and ntfy table verification after PRs #75 and #76. Run existing Meta read-only analytics and notification workflows once. Check publication-progress and comparison artifacts, ntfy HTTP acknowledgement and all four Telegram part acknowledgements. No video publishing, state reset or token changes. This is a partial-day manual measurement, not the nightly result.
