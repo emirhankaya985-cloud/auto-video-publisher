@@ -1005,6 +1005,15 @@ def quarantined_unordered_local_failure(route, item, state, platforms, day):
     return True
 
 
+def prioritized_route_items(day):
+    """Move rights-approved serial routes first only during today's owner catch-up."""
+    items = list(ROUTES.items())
+    if os.getenv("CATCHUP_BATCH_DATE") == day:
+        series_first = {"film": 0, "film_second": 1, "toonzone": 2}
+        items.sort(key=lambda pair: series_first.get(pair[0], 3))
+    return items
+
+
 def plan(audit=False):
     now = datetime.now(TR)
     day = now.date().isoformat()
@@ -1052,7 +1061,7 @@ def plan(audit=False):
     history_cache = {}
     duplicate_fingerprints = {}
     rescue_only = os.getenv("IG_AUDITED_RESCUE_ONLY") == "true"
-    for route, (source, page_name) in ROUTES.items():
+    for route, (source, page_name) in prioritized_route_items(day):
         if rescue_only and route not in _AUDITED_IG_V3_FILES:
             continue
         report.extend(["", f"## {page_name}"])
