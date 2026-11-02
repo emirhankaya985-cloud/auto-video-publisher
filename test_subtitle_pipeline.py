@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -19,6 +20,8 @@ class SubtitlePipelineTests(unittest.TestCase):
         self.assertEqual(receipt['status'], 'source_language_unverified')
         transcribe.assert_not_called()
 
+    @unittest.skipUnless(shutil.which('ffmpeg') and shutil.which('ffprobe'),
+                         'Dedicated advanced CI installs FFmpeg for this test')
     def test_real_ffmpeg_burn_preserves_original_and_keeps_srt(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
