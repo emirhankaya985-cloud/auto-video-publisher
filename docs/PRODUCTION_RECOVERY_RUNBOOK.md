@@ -526,3 +526,11 @@ izlenir; bu inceleme test amaçlı gerçek yayın tetiklemedi.
 - ntfy tablo/özet hazırlığı Telegram gönderiminden önce korumasız çalışıyordu. Artık ntfy biçimlendirme hatası Telegram tablo gönderimini durdurmaz. Telegram başarı alındısı varsa ntfy arızası açıkça loglanır; iki kanal da başarısızsa işlem başarısız kalır. Test gerçek bildirim göndermeden iki Telegram parçasının kabulünü denetler.
 - Son yayın gözlemi: run 41425754467 Meta publish/notify başarılı, 4 doğrulanmış yeni post; üst workflow hatası YouTube accepted durumundaki RuntimeError. Yayın güvenlik kilitleri, belirsiz intent ve kaynak karantinası değiştirilmedi.
 - Geri alma: bu raporlama commit'ini revert et. State veya geçmiş silme yok. Canlı günlük rapor alındıları ayrıca doğrulanmalıdır.
+
+### 2 Kasım 2026 — YouTube kabul kimliğini doğrulamadan önce koru
+
+- Canlı kanıt: 41425754467 Tarladaki upload accepted sonrası fail; salt-okunur 41429822977 job125225512745 aynı 6oPNuammOYU videosunu public/processed doğruladı, uploads_attempted=0. Normal işleme gecikmesi tek başına yeni upload gerektirmez.
+- Kod açığı: upload dönen ID sonraki videos.list GET'inden önce kaydedilmiyordu. Şimdi accepted+post_id hemen diske yazılır. Sonraki çalışmada yalnız aynı ID GET ile uzlaştırılır; insert tekrar edilmez.
+- Doğru video ID + kanal + public/uploaded durumunda accepted bekleyişi açıkça raporlanır; done sayılmaz ve normal işlem bekleyişi hata gibi gösterilmez. Processed/public olduktan sonra done olur. Yanlış ID/kanal, görünürlük sorunu ve GET hatası hâlâ başarısızdır.
+- Test: GET kesildiğinde ID'nin önceden diskte bulunması ve ikinci publish çağrısının upload'u yinelememesi; normal pending ile yanlış video kimliğinin ayrılması. 793 unittest başarılı. Bu mock test yeni canlı upload kanıtı değildir.
+- Geri alma: ilgili bridge commit'ini revert et; accepted/uncertain state veya artifact silme. Hak/kanal kontrolü, intent arşivi ve tekrar yükleme kilitleri korunur.

@@ -109,6 +109,24 @@ def previous_upload(youtube, expected, marker, title):
     raise RuntimeError('YouTube history incomplete')
 
 
+def verify_saved_upload(youtube, entry, expected):
+    """GET-only reconciliation; ordinary processing is pending, never done."""
+    rows = youtube.videos().list(part='snippet,status', id=entry['post_id']).execute().get('items', [])
+    if (len(rows) != 1 or rows[0].get('id') != entry['post_id']
+            or rows[0].get('snippet', {}).get('channelId') != expected):
+        raise RuntimeError('YouTube upload identity not verified')
+    status = rows[0].get('status', {})
+    entry.update(privacy_status=status.get('privacyStatus'), upload_status=status.get('uploadStatus'))
+    if entry['privacy_status'] == 'public' and entry['upload_status'] == 'processed':
+        entry['status'] = 'done'
+        return
+    if entry['privacy_status'] == 'public' and entry['upload_status'] == 'uploaded':
+        print(json.dumps({'platform': 'youtube', 'route': entry['route'],
+                          'status': 'accepted_processing_pending', 'post_id': entry['post_id']}), flush=True)
+        return
+    raise RuntimeError('YouTube processing or visibility not verified')
+
+
 def publish():
     if os.getenv('YOUTUBE_PUBLISHING_ENABLED') != 'true' or os.getenv('YOUTUBE_INTENT_ARCHIVED') != 'true':
         raise RuntimeError('YouTube publication requires enabled, archived intent')
@@ -129,20 +147,16 @@ def publish():
             credentials = Credentials.from_authorized_user_info(json.loads(os.environ[secret]))
             youtube = build('youtube', 'v3', credentials=credentials, cache_discovery=False)
             if reconciling:
-                rows = youtube.videos().list(part='snippet,status', id=entry['post_id']).execute().get('items', [])
-                if (len(rows) == 1 and rows[0]['snippet'].get('channelId') == expected
-                        and rows[0]['status'].get('privacyStatus') == 'public'
-                        and rows[0]['status'].get('uploadStatus') == 'processed'):
-                    entry.update(status='done', privacy_status='public', upload_status='processed')
-                else:
-                    raise RuntimeError('YouTube processing or public status pending')
+                verify_saved_upload(youtube, entry, expected)
                 continue
             # The permanent source marker detects accepted uploads before any replay.
             marker = '[avp-source:' + key + ']'
             existing = previous_upload(youtube, expected, marker, entry['title'])
             if existing:
                 entry.update(status='accepted', post_id=existing, reconciled=True)
-                raise RuntimeError('YouTube existing source requires status verification')
+                save(STATE, state)
+                verify_saved_upload(youtube, entry, expected)
+                continue
             with tempfile.TemporaryDirectory() as temp:
                 video = download(entry['source_id'], Path(temp) / 'source.mp4')
                 verify_source_video(video)
@@ -152,15 +166,12 @@ def publish():
                                     privacy_status='public')
                 if not isinstance(post, str) or not re.fullmatch(r'[A-Za-z0-9_-]{11}', post):
                     raise RuntimeError('YouTube returned no valid video ID')
-                proof = youtube.videos().list(part='snippet,status', id=post).execute()
-                rows = proof.get('items', [])
-                if len(rows) != 1 or rows[0]['snippet'].get('channelId') != expected:
-                    raise RuntimeError('YouTube upload verification failed')
-                entry.update(status='accepted', post_id=post, privacy_status=rows[0]['status'].get('privacyStatus'),
-                             upload_status=rows[0]['status'].get('uploadStatus'))
-                if entry['privacy_status'] != 'public' or entry['upload_status'] != 'processed':
-                    raise RuntimeError('YouTube public publication not confirmed')
-                entry['status'] = 'done'
+                # Persist the accepted ID before any subsequent network read.
+                entry.update(status='accepted', post_id=post)
+                save(STATE, state)
+                verify_saved_upload(youtube, entry, expected)
+                if entry['status'] != 'done':
+                    continue
                 print(json.dumps({'platform': 'youtube', 'route': entry['route'], 'post_id': post,
                                   'privacy_status': entry['privacy_status']}), flush=True)
         except Exception as exc:
