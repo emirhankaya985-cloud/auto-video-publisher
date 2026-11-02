@@ -133,7 +133,7 @@ class TelegramTests(unittest.TestCase):
         fake.get.return_value.json.return_value = {"value": "false"}
         with patch.dict(os.environ, {"TELEGRAM_CONTROL_ENABLED": "true",
                                      "GITHUB_CONTROL_TOKEN": "example-test-token"}):
-            self.assertIn("durduruldu", toggle_schedule(False, session=fake))
+            self.assertIn("kapalı", toggle_schedule(False, session=fake))
         self.assertEqual(fake.patch.call_count, 1)
         with patch.dict(os.environ, {"TELEGRAM_CONTROL_ENABLED": "false",
                                      "GITHUB_CONTROL_TOKEN": "example-test-token"}):
