@@ -19,6 +19,8 @@ on:
       - 'telegram_owner_control.py'
       - 'telegram_ai_worker.py'
       - 'telegram_status.py'
+      - 'telegram_status_evidence.py'
+      - 'test_telegram_status_evidence.py'
       - 'test_telegram_status.py'
       - 'telegram_status_inbox.py'
       - 'test_telegram_status_inbox.py'
@@ -47,4 +49,4 @@ jobs:
           AUTO_SUBTITLES_ENABLED: 'false'
           ADAPTIVE_SCHEDULE_ENABLED: 'false'
         run: |
-          python -m unittest -v test_advanced_operations.py test_public_link_runtime.py test_meta_page_token_health.py test_publisher_recovery.py test_telegram_notifications.py test_subtitle_pipeline.py test_adaptive_schedule.py test_telegram_readonly_diagnostic.py test_content_features.py test_telegram_status.py test_nvidia_assistant.py test_telegram_status_inbox.py
+          python -m unittest -v test_advanced_operations.py test_public_link_runtime.py test_meta_page_token_health.py test_publisher_recovery.py test_telegram_notifications.py test_subtitle_pipeline.py test_adaptive_schedule.py test_telegram_readonly_diagnostic.py test_content_features.py test_telegram_status.py test_nvidia_assistant.py test_telegram_status_inbox.py test_telegram_status_evidence.py
