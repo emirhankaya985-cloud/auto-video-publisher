@@ -33,7 +33,7 @@ def build_stock(catalogs, state, routes, daily_targets, *, unavailable=()):
                 rows = [entries.get(f"{route}:{platform}:{v['id']}", {}) for v in variants]
                 if any(r.get('status') == 'done' and r.get('post_id') for r in rows):
                     counts['completed'] += 1
-                elif any(r.get('status') in {'intent', 'uncertain', 'done'} for r in rows):
+                elif any(r.get('status') in {'intent', 'uncertain', 'done', 'held'} for r in rows):
                     counts['held'] += 1
                 elif len(variants) != 1:
                     counts['ambiguous'] += 1

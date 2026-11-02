@@ -147,8 +147,9 @@ class TelegramTests(unittest.TestCase):
             return SimpleNamespace(status_code=code, json=lambda: data, content=content)
         zip_bytes = io.BytesIO()
         with zipfile.ZipFile(zip_bytes, "w") as z:
-            z.writestr("content-stock.json", json.dumps([
-                {"account": "ToonZone", "platform": "facebook", "remaining": 8}]))
+            z.writestr("content-stock.json", json.dumps({
+                "measured_at": "2026-11-02T20:00:00+03:00", "accounts": [
+                {"account": "ToonZone", "platform": "facebook", "remaining": 8}]}))
         responses = [
             response(200, data={"workflow_runs": [{
                 "head_branch": "main", "conclusion": "success", "id": 1,

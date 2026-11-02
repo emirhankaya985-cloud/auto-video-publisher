@@ -881,6 +881,13 @@ def target_count(route, now):
         slots = [(12, m) for m in (0, 10, 20, 30)]
     else:
         slots = [(h, 30 if route == "penguen" else 15 if route == "gonle" else 0) for h in hours[route]]
+    if os.getenv("ADAPTIVE_SCHEDULE_ENABLED", "false").lower() == "true":
+        from adaptive_schedule import slots_for_route
+        try:
+            document = json.loads((ROOT / "adaptive-schedule.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            document = {}
+        slots = slots_for_route(document, route, now, slots)
     if os.getenv("COMPLETE_DAY_DATE") == now.date().isoformat():
         # The second Film page still lacked the already-confirmed Part 6 at cutover.
         return len(slots) + (1 if route == "film_second" and now.date().isoformat() == "2026-10-23" else 0)
@@ -1018,6 +1025,11 @@ def plan(audit=False):
     now = datetime.now(TR)
     day = now.date().isoformat()
     state = restore()
+    if not audit and os.getenv("ADAPTIVE_SCHEDULE_ENABLED", "false").lower() == "true":
+        # Persist the first policy (including an empty fallback) for the day.
+        # A late/re-run report must never move today's remaining publication slots.
+        from adaptive_schedule import freeze_schedule
+        freeze_schedule(state, day, ROOT / "adaptive-schedule.json")
     apply_verified_migration(state)
     quarantine_weak_caption_aliases(state)
     pages = {p["page_name"]: p for p in load_meta_auth()["pages"]}
@@ -1705,6 +1717,10 @@ def publish():
                 if os.getenv("ADVANCED_DEDUPE_ENABLED", "false").lower() == "true":
                     from media_similarity import visual_fingerprint
                     source_fingerprint = visual_fingerprint(video)
+                from subtitle_pipeline import prepare_subtitles
+                video, subtitle_receipt = prepare_subtitles(
+                    video, item["route"], ROOT / "subtitles" / item["route"] / item["id"])
+                save(ROOT / "subtitles" / item["route"] / item["id"] / "receipt.json", subtitle_receipt)
                 if item.get("cover_id"):
                     cover = download(item["cover_id"], temp / "cover.png")
                     video = create_instagram_cover_video(video, cover, temp / "covered.mp4")

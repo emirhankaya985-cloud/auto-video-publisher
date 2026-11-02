@@ -44,8 +44,11 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
       MEDIA_QUALITY_ENABLED: ${{ vars.MEDIA_QUALITY_ENABLED != 'false' && 'true' || 'false' }}
-      # Opt-in only after offline CI and live hold acceptance; never auto-post on match.
-      ADVANCED_DEDUPE_ENABLED: ${{ vars.ADVANCED_DEDUPE_ENABLED == 'true' && 'true' || 'false' }}
+      # Owner-requested rollout after offline and real FFmpeg acceptance.
+      ADVANCED_DEDUPE_ENABLED: ${{ vars.ADVANCED_DEDUPE_ENABLED != 'false' && 'true' || 'false' }}
+      AUTO_SUBTITLES_ENABLED: ${{ vars.AUTO_SUBTITLES_ENABLED == 'true' && 'true' || 'false' }}
+      SUBTITLE_MODEL_DIR: ${{ github.workspace }}/speech-model
+      ADAPTIVE_SCHEDULE_ENABLED: ${{ vars.ADAPTIVE_SCHEDULE_ENABLED != 'false' && 'true' || 'false' }}
       # Only User token can discover verified Page tokens; invalid/expired token fails closed.
       YOUTUBE_PUBLISHING_ENABLED: ${{ vars.YOUTUBE_PUBLISHING_ENABLED != 'false' && 'true' || 'false' }}
       TOKEN_CHANNEL1_JSON: ${{ secrets.TOKEN_CHANNEL1_JSON }}
@@ -103,7 +106,15 @@ jobs:
         id: verify
         env:
           MEDIA_QUALITY_ENABLED: 'false'
+          ADVANCED_DEDUPE_ENABLED: 'false'
+          AUTO_SUBTITLES_ENABLED: 'false'
+          ADAPTIVE_SCHEDULE_ENABLED: 'false'
         run: python -m unittest -v test_public_link_runtime.py
+      - name: Restore next-day evidence for non-serial slots (fallback to current hours)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python -c "import os; from datetime import datetime, timezone; from adaptive_schedule import restore_schedule; print(restore_schedule('link-runtime/adaptive-schedule.json', token=os.environ['GITHUB_TOKEN'], now=datetime.now(timezone.utc)))"
       - name: Check public folders, captions, histories and prepare intent
         id: plan
         env:
@@ -120,6 +131,19 @@ jobs:
         if: success() && steps.release_gate.outputs.publish_allowed == 'true' && steps.release_gate.outputs.recovery_only != 'true' && env.YOUTUBE_PUBLISHING_ENABLED == 'true'
         continue-on-error: true
         run: python youtube_main_bridge.py prepare
+      - name: Cache pinned local subtitle model
+        if: success() && steps.release_gate.outputs.publish_allowed == 'true' && env.AUTO_SUBTITLES_ENABLED == 'true'
+        uses: actions/cache@v4
+        with:
+          path: speech-model
+          key: whisper-small-536b0662742c02347bc0e980a01041f333bce120
+      - name: Prepare optional CPU subtitle runtime and fixed model
+        if: success() && steps.release_gate.outputs.publish_allowed == 'true' && env.AUTO_SUBTITLES_ENABLED == 'true'
+        continue-on-error: true
+        timeout-minutes: 8
+        run: |
+          python -m pip install 'faster-whisper==1.2.1' 'huggingface-hub==0.34.4' 'av==15.1.0'
+          python install_subtitle_model.py
       - name: Persist intent before any Meta upload
         id: intent_archive
         if: success() && steps.release_gate.outputs.publish_allowed == 'true'
@@ -152,6 +176,7 @@ jobs:
             link-runtime/operations-report.json
             link-runtime/content-stock.json
             link-runtime/quality/*.json
+            link-runtime/subtitles/**
           if-no-files-found: ignore
           retention-days: 90
       - name: Preserve all results, including partial failures

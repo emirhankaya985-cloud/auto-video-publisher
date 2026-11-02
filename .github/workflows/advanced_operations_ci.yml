@@ -5,6 +5,16 @@ on:
       - 'media_similarity.py'
       - 'adaptive_publish_times.py'
       - 'offline_subtitles.py'
+      - 'subtitle_pipeline.py'
+      - 'install_subtitle_model.py'
+      - 'adaptive_schedule.py'
+      - 'test_subtitle_pipeline.py'
+      - 'test_adaptive_schedule.py'
+      - 'telegram_readonly_diagnostic.py'
+      - 'test_telegram_readonly_diagnostic.py'
+      - 'content_stock.py'
+      - 'test_content_features.py'
+      - '.github/workflows/public_link_schedule.yml'
       - 'api_capacity_guard.py'
       - 'telegram_owner_control.py'
       - 'telegram_ai_worker.py'
@@ -24,9 +34,13 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install --require-hashes -r requirements.txt
+      - name: Install FFmpeg for real local video acceptance
+        run: command -v ffmpeg && command -v ffprobe || (sudo apt-get update -qq && sudo apt-get install -y ffmpeg)
       - name: Validate new code with no cloud secrets, posting or notifications
         env:
           ADVANCED_DEDUPE_ENABLED: 'false'
           TELEGRAM_CONTROL_ENABLED: 'false'
+          AUTO_SUBTITLES_ENABLED: 'false'
+          ADAPTIVE_SCHEDULE_ENABLED: 'false'
         run: |
-          python -m unittest -v test_advanced_operations.py test_public_link_runtime.py test_meta_page_token_health.py test_publisher_recovery.py test_telegram_notifications.py
+          python -m unittest -v test_advanced_operations.py test_public_link_runtime.py test_meta_page_token_health.py test_publisher_recovery.py test_telegram_notifications.py test_subtitle_pipeline.py test_adaptive_schedule.py test_telegram_readonly_diagnostic.py test_content_features.py

@@ -27,3 +27,11 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python telegram_readonly_diagnostic.py
+      - name: Preserve redacted connection and consumer evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: telegram-connection
+          path: link-runtime/telegram-connection.json
+          if-no-files-found: warn
+          retention-days: 30

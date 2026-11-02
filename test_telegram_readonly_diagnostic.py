@@ -48,6 +48,23 @@ class TelegramReadonlyDiagnosticTests(unittest.TestCase):
         self.assertEqual(actual["code"], "telegram_secrets_missing")
         get.assert_not_called()
 
+    def test_consumer_diagnostic_never_consumes_updates_or_exposes_webhook(self):
+        for active in (False, True):
+            with self.subTest(active=active):
+                good = Mock(status_code=200)
+                good.json.return_value = {'ok': True, 'result': {'id': 1234}}
+                hook = Mock(status_code=200)
+                hook.json.return_value = {'ok': True, 'result': {
+                    'url': 'https://private.example/secret' if active else ''}}
+                get = Mock(side_effect=[good, good, hook])
+                result = diagnose(token=self.TOKEN, chat_id=self.CHAT,
+                                  get=get, inspect_consumer=True)
+                self.assertEqual(result['webhook_active'], active)
+                self.assertFalse(result['updates_consumed'])
+                self.assertIn('not_discoverable', result['polling_worker_status'])
+                self.assertNotIn('secret', str(result))
+                self.assertTrue(get.call_args_list[-1].args[0].endswith('/getWebhookInfo'))
+
     def test_no_raw_server_response_in_logs_or_errors(self):
         response = Mock(status_code=200)
         response.json.return_value = {"ok": False, "description": "secret-bot-token"}
