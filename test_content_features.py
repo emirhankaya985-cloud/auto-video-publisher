@@ -33,6 +33,12 @@ class StockTests(unittest.TestCase):
         self.assertIsNone(row['remaining'])
         self.assertIsNone(row['estimated_days'])
 
+    def test_visual_duplicate_hold_is_not_available_stock(self):
+        files = {'Movie_Part_1.mp4': {'id': 'a', 'name': 'Movie_Part_1.mp4'},
+                 'Movie_Part_1.txt': {}}
+        row = self.stock(files, {'film:facebook:a': {'status': 'held'}})[0]
+        self.assertEqual((row['remaining'], row['held']), (0, 1))
+
     def test_txt_and_confirmed_id_required(self):
         files = {'Movie_Part_1.mp4': {'id': 'a', 'name': 'Movie_Part_1.mp4'}}
         self.assertEqual(self.stock(files)[0]['missing_txt'], 1)

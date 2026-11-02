@@ -153,10 +153,12 @@ def main():
                if line.strip()]
     observations = observations_from_archive(history, state)
     rows = recommend_hours(observations)
+    from adaptive_schedule import build_schedule
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(json.dumps({
         "status": "recommendation_only" if rows else "insufficient_verified_samples",
         "source_posts": len(observations), "recommendations": rows,
+        "schedule": build_schedule(rows, generated_at=datetime.now(timezone.utc)),
         "auto_changed_schedule": False
     }, ensure_ascii=False, indent=2), encoding="utf-8")
 

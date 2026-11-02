@@ -8,7 +8,7 @@ import requests
 from telegram_notifications import _BOT_TOKEN, _CHAT_ID
 
 
-def diagnose(*, token=None, chat_id=None, get=requests.get):
+def diagnose(*, token=None, chat_id=None, get=requests.get, inspect_consumer=False):
     token = (token if token is not None else os.getenv("TELEGRAM_BOT_TOKEN", "")).strip()
     chat_id = (chat_id if chat_id is not None else os.getenv("TELEGRAM_CHAT_ID", "")).strip()
     if not token or not chat_id:
@@ -17,7 +17,9 @@ def diagnose(*, token=None, chat_id=None, get=requests.get):
         return {"status": "blocked", "code": "telegram_bot_token_format"}
     if not _CHAT_ID.fullmatch(chat_id):
         return {"status": "blocked", "code": "telegram_chat_id_format"}
-    for method in ("getMe", "getChat"):
+    methods = ("getMe", "getChat", "getWebhookInfo") if inspect_consumer else ("getMe", "getChat")
+    consumer = {}
+    for method in methods:
         try:
             res = get(
                 f"https://api.telegram.org/bot{token}/{method}",
@@ -36,11 +38,22 @@ def diagnose(*, token=None, chat_id=None, get=requests.get):
             return {"status": "unknown", "code": "telegram_response_invalid"}
         if not isinstance(payload, dict) or payload.get("ok") is not True or not isinstance(payload.get("result"), dict):
             return {"status": "unknown", "code": f"telegram_{method.lower()}_receipt_invalid"}
-    return {"status": "healthy", "code": "bot_and_chat_readable", "message_sent": False}
+        if method == "getWebhookInfo":
+            result = payload["result"]
+            if not isinstance(result.get("url"), str):
+                return {"status": "unknown", "code": "telegram_webhook_receipt_invalid"}
+            consumer = {"webhook_active": bool(result["url"]),
+                        "polling_worker_status": "not_discoverable_via_bot_api",
+                        "updates_consumed": False}
+    return {"status": "healthy", "code": "bot_and_chat_readable", "message_sent": False, **consumer}
 
 
 def main():
-    result = diagnose()
+    result = diagnose(inspect_consumer=True)
+    from pathlib import Path
+    destination = Path("link-runtime/telegram-connection.json")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(json.dumps(result), encoding="utf-8")
     print(json.dumps(result), flush=True)
     return 0 if result["status"] == "healthy" else 1
 
