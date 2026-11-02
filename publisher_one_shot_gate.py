@@ -16,6 +16,9 @@ IG_V4_SUBJECT = "ops: authorized-once-exact-two-ig-v4-compact-2026-10-26"
 OWNER_CATCHUP_MARKER = "docs/owner-authorized-catchup-2026-11-01.md"
 OWNER_CATCHUP_SUBJECT = "ops: owner-authorized-catchup-2026-11-01"
 OWNER_CATCHUP_DATE = "2026-11-01"
+TODAY_CATCHUP_MARKER = "docs/owner-authorized-catchup-2026-11-02.md"
+TODAY_CATCHUP_SUBJECT = "ops: owner-authorized-catchup-2026-11-02"
+TODAY_CATCHUP_DATE = "2026-11-02"
 
 
 def is_owner_catchup_push(event, ref, subject, added_paths, *, today=None, run_attempt=None):
@@ -32,6 +35,19 @@ def is_owner_catchup_push(event, ref, subject, added_paths, *, today=None, run_a
         and str(run_attempt) == "1"
     )
 
+
+
+def is_today_catchup_push(event, ref, subject, added_paths, *, today=None, run_attempt=None):
+    """Explicitly authorized 2 Nov only; first run, main, exact new marker."""
+    if today is None:
+        today = datetime.now(timezone(timedelta(hours=3))).date().isoformat()
+    if run_attempt is None:
+        run_attempt = os.getenv("GITHUB_RUN_ATTEMPT", "1")
+    return (event == "push" and ref == "refs/heads/main"
+            and subject == TODAY_CATCHUP_SUBJECT
+            and TODAY_CATCHUP_MARKER in added_paths
+            and today == TODAY_CATCHUP_DATE
+            and str(run_attempt) == "1")
 
 
 def is_v4_recovery_push(event, ref, subject, added_paths):
@@ -56,7 +72,8 @@ def determine_mode(event, ref, subject="", added_paths=(), requested_mode="audit
         normal = ref == "refs/heads/main" and subject == SUBJECT and MARKER in added_paths
         rescue = is_ig_rescue_push(event, ref, subject, added_paths)
         v4 = is_v4_recovery_push(event, ref, subject, added_paths)
-        catchup = is_owner_catchup_push(event, ref, subject, added_paths)
+        catchup = (is_owner_catchup_push(event, ref, subject, added_paths)
+                   or is_today_catchup_push(event, ref, subject, added_paths))
         return "publish" if normal or rescue or v4 or catchup else "audit"
     return "audit"
 
