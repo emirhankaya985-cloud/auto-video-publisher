@@ -930,6 +930,16 @@ class LinkRuntimeSafety(unittest.TestCase):
         self.assertNotIn(secret_path, str(raised.exception))
         self.assertNotIn(stderr, str(raised.exception))
 
+    def test_ffprobe_malformed_exit_status_is_not_echoed(self):
+        failure = subprocess.CalledProcessError(
+            1, ["ffprobe", "/private/media.mp4"]
+        )
+        failure.returncode = "sensitive-provider-value"
+        with patch.object(runtime, "probe", side_effect=failure):
+            with self.assertRaisesRegex(RuntimeError, "ffprobe_exit=unknown") as raised:
+                runtime.verify_source_video(Path("/private/media.mp4"))
+        self.assertNotIn("sensitive-provider-value", str(raised.exception))
+
     def test_local_ig_prepare_failure_keeps_fb_publishable(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
