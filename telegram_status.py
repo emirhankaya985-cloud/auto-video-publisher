@@ -6,6 +6,7 @@ from html import escape
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from telegram_status_evidence import status_evidence
 from adaptive_schedule import slots_for_route
 from publication_github_progress import restore_publication_state
 from publication_safety import route_paused
@@ -82,7 +83,7 @@ def status_table(*, now=None, state=None, configured=False):
             'Saatler planı gösterir; hak, kaynak, kota ve tekrar kontrolleri yayını bekletebilir. '
             'Daily Laugh kendi New York gününü kullanır; saatleri TR’ye çevrildi. '
             '(+1)/(-1): rapor tarihine göre ertesi/önceki gün.\n'
-            'Gönderi sayıları son arşivden gelir; bu bilgi canlı anlık izlenme değildir.')
+            'Gönderi sayıları son arşivden gelir; bu bilgi canlı anlık izlenme değildir.' + status_evidence(state))
 
 
 def load_status():
