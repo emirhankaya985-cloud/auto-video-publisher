@@ -35,7 +35,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install --require-hashes -r requirements.txt
-      - run: python -m unittest -v test_threads_accounts.py test_threads_publisher.py
+      - run: python -m unittest -v test_threads_accounts.py test_threads_publisher.py test_threads_audit_secret_contract.py
   readonly-api:
     if: github.event_name == 'workflow_dispatch'
     needs: mock-tests
