@@ -1075,6 +1075,7 @@ def plan(audit=False):
     # Different Drive IDs with identical text are not two safe posts.
     planned_caption_hashes = set()
     batch_limit = 8 if os.getenv("CATCHUP_BATCH_DATE") == day else 1
+    from operational_enhancements import bounded_catchup_limit
     history_cache = {}
     duplicate_fingerprints = {}
     rescue_only = os.getenv("IG_AUDITED_RESCUE_ONLY") == "true"
@@ -1109,8 +1110,8 @@ def plan(audit=False):
                 # when a different history adapter is injected by a caller.
                 for row in histories[p]:
                     timestamp(row)
-        except RuntimeError as exc:
-            report.append("HELD: " + str(exc))
+        except (RuntimeError, ValueError, TypeError, KeyError) as exc:
+            report.append("HELD: account history unavailable; other routes continue.")
             record_error("meta_history", "meta_history_unavailable",
                          route=route, error=exc)
             continue
@@ -1153,6 +1154,10 @@ def plan(audit=False):
             # account quota. Exact caption reconciliation still runs above.
             counts = {p: 0 for p in platforms}
         due = target_count(route, now)
+        if os.getenv("CATCHUP_BATCH_DATE") != day:
+            batch_limit = bounded_catchup_limit(
+                route, due, counts, clock,
+                enabled=os.getenv("AUTO_BACKFILL_ENABLED", "false").lower() == "true")
         if due == 0:
             report.append("NOT DUE: publication hours have not started for this route's local day.")
             continue
@@ -1496,6 +1501,7 @@ def plan(audit=False):
                     old_resume = state["entries"].get(key, {}).get("container_resume")
                     old_attempts = state["entries"].get(key, {}).get("prepublish_retry_count", 0)
                     old_expired = state["entries"].get(key, {}).get("expired_container_recovery")
+                    old_source_sha256 = state["entries"].get(key, {}).get("source_sha256")
                     state["entries"][key] = {
                         "route": route, "platform": p, "status": "intent",
                         "caption_hash": caption_key(captions[p]), "file": item["name"],
@@ -1503,6 +1509,8 @@ def plan(audit=False):
                         "day": clock.date().isoformat(), "run_id": os.environ["GITHUB_RUN_ID"],
                         "prepublish_retry_count": old_attempts,
                     }
+                    if isinstance(old_source_sha256, str) and len(old_source_sha256) == 64:
+                        state["entries"][key]["source_sha256"] = old_source_sha256
                     if p == "instagram" and old_resume:
                         state["entries"][key]["container_resume"] = old_resume
                     if p == "instagram" and old_expired:
@@ -1700,6 +1708,15 @@ def publish():
                 if header[4:8] != b"ftyp":
                     raise RuntimeError("Source is not MP4")
                 verify_source_video(video)
+                from operational_enhancements import bind_source_integrity
+                if not bind_source_integrity(item, state, video):
+                    failures.append(item["page"] + ": source changed; held before Meta upload")
+                    record_error("source_video", "source_content_changed",
+                                 route=item["route"], video=item["name"], safe_to_retry=False)
+                    save(STATE, state)
+                    continue
+                # Persist the immutable source digest before any external POST.
+                save(STATE, state)
                 if os.getenv('MEDIA_QUALITY_ENABLED', 'false').lower() == 'true':
                     from media_quality import inspect_video
                     try:
