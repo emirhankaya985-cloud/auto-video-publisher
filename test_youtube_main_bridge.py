@@ -83,6 +83,49 @@ class BridgeTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'reconciliation'):
             bridge.previous_upload(youtube, 'expected', '[source]', 'Same title')
 
+    def test_accepted_id_saved_before_verification_and_never_reuploaded(self):
+        expected = bridge.ROUTES['tarladaki'][2]
+        post = 'abcdefghijk'
+        entry = {'status': 'intent', 'run_id': '1', 'attempt': '1', 'route': 'tarladaki',
+                 'source_id': 'source', 'channel_id': expected, 'title': 'title', 'caption': 'caption'}
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / 'state.json'
+            state.write_text(json.dumps({'youtube_entries': {'tarladaki:source': entry}}))
+            youtube = Mock()
+            def fail_read():
+                saved = json.loads(state.read_text())['youtube_entries']['tarladaki:source']
+                self.assertEqual((saved['status'], saved['post_id']), ('accepted', post))
+                raise RuntimeError('temporary GET failure')
+            youtube.videos().list().execute.side_effect = fail_read
+            with patch.object(bridge, 'STATE', state), patch.dict(os.environ, {
+                'YOUTUBE_PUBLISHING_ENABLED':'true','YOUTUBE_INTENT_ARCHIVED':'true',
+                'GITHUB_RUN_ID':'1','TOKEN_CHANNEL1_JSON':'{}'}, clear=True), \
+                patch.object(bridge, 'check_channel', return_value={'status':'verified','channel_id':expected}), \
+                patch.object(bridge.Credentials, 'from_authorized_user_info'), \
+                patch.object(bridge, 'build', return_value=youtube), \
+                patch.object(bridge, 'previous_upload', return_value=None), \
+                patch.object(bridge, 'download', return_value=Path(tmp)/'video.mp4'), \
+                patch.object(bridge, 'verify_source_video'), \
+                patch.object(bridge, 'record_error'), \
+                patch.object(bridge, 'upload_video', return_value=post) as upload:
+                with self.assertRaises(SystemExit):
+                    bridge.publish()
+                with self.assertRaises(SystemExit):
+                    bridge.publish()
+                upload.assert_called_once()
+
+    def test_normal_processing_is_pending_and_wrong_identity_is_failure(self):
+        youtube = Mock()
+        entry = {'post_id':'abcdefghijk','route':'tarladaki','status':'accepted'}
+        youtube.videos().list().execute.return_value = {'items':[{'id':'abcdefghijk',
+            'snippet':{'channelId':'expected'},'status':{'privacyStatus':'public','uploadStatus':'uploaded'}}]}
+        bridge.verify_saved_upload(youtube, entry, 'expected')
+        self.assertEqual(entry['status'], 'accepted')
+        youtube.videos().list().execute.return_value['items'][0]['id'] = 'wrong-video'
+        with self.assertRaisesRegex(RuntimeError, 'identity'):
+            bridge.verify_saved_upload(youtube, entry, 'expected')
+
+
 
 if __name__ == '__main__':
     unittest.main()
