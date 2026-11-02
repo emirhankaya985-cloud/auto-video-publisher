@@ -107,5 +107,28 @@ class RankingTests(unittest.TestCase):
         self.assertEqual(result["ranking"][0]["top_posts"][0]["interactions"], 2)
 
 
+
+class LiveIntegrationContractTests(unittest.TestCase):
+    def test_source_digest_gate_is_before_any_meta_upload(self):
+        import ast
+        tree = ast.parse((Path(__file__).parent / "public_link_runtime.py").read_text())
+        publisher = next(node for node in tree.body
+                         if isinstance(node, ast.FunctionDef) and node.name == "publish")
+        calls = [(n.func.id, n.lineno) for n in ast.walk(publisher)
+                 if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)]
+        digest_line = min(l for name, l in calls if name == "bind_source_integrity")
+        meta_lines = [l for name, l in calls
+                      if name in {"upload_facebook_reel", "upload_instagram_reel"}]
+        self.assertTrue(meta_lines)
+        self.assertTrue(all(digest_line < l for l in meta_lines))
+
+    def test_backfill_is_opt_in_in_production_workflow(self):
+        yml = (Path(__file__).parent / ".github" / "workflows" /
+               "public_link_schedule.yml").read_text()
+        self.assertIn("vars.AUTO_BACKFILL_ENABLED == 'true'", yml)
+        self.assertIn("bounded_catchup_limit", (Path(__file__).parent /
+                                              "public_link_runtime.py").read_text())
+
+
 if __name__ == "__main__":
     unittest.main()
