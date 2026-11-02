@@ -78,3 +78,88 @@ def recommend_hours(rows, *, now=None, min_posts=4, min_days=3, max_age_days=30)
                        "status": "recommendation_only"})
     return sorted(result, key=lambda r: (r["route"], r["platform"],
                                          -r["engagement_per_1000_views"], r["hour_tr"]))
+
+
+def observations_from_archive(records, state):
+    """Join only identical real platform post IDs in the authoritative ledger."""
+    links, collision = {}, set()
+    for entry in state.get("entries", {}).values():
+        if not isinstance(entry, dict) or entry.get("status") != "done":
+            continue
+        post = str(entry.get("post_id") or "").strip()
+        route, platform = entry.get("route"), entry.get("platform")
+        if not post or not route or platform not in {"facebook", "instagram"}:
+            continue
+        if post in links and links[post] != (route, platform):
+            collision.add(post)
+        links[post] = (route, platform)
+    video = {}
+    for row in records:
+        if (not isinstance(row, dict) or row.get("entity_type") != "video"
+                or row.get("status") != "ok"
+                or row.get("metric") not in {"view_count", "like_count", "comment_count"}):
+            continue
+        ident = str(row.get("entity_id") or "")
+        if ident not in links or ident in collision:
+            continue
+        route, platform = links[ident]
+        source_platform = str(row.get("platform") or "").lower()
+        if platform not in source_platform:
+            continue
+        stamp = row.get("measured_at")
+        if not isinstance(stamp, str):
+            continue
+        key = (ident, row["metric"])
+        current = video.get(key)
+        if current is None or stamp > current["measured_at"]:
+            video[key] = row
+    observations = []
+    for ident, (route, platform) in links.items():
+        if ident in collision:
+            continue
+        found = {metric: video.get((ident, metric))
+                 for metric in ("view_count", "like_count", "comment_count")}
+        if not all(found.values()):
+            continue
+        published_at = found["view_count"].get("published_at")
+        if not isinstance(published_at, str) or not published_at:
+            continue
+        observations.append({
+            "route": route, "platform": platform, "post_id": ident,
+            "published_at": published_at,
+            "measured_at": max(r["measured_at"] for r in found.values()),
+            "views": found["view_count"].get("value"),
+            "like_count": found["like_count"].get("value"),
+            "comment_count": found["comment_count"].get("value"),
+        })
+    return observations
+
+
+def main():
+    """GET-only nightly recommendations; no automatic clock or route edits."""
+    import json
+    import os
+    from pathlib import Path
+    from publication_github_progress import restore_publication_state
+
+    archive = Path("link-runtime/daily_video_views.jsonl")
+    target = Path("link-runtime/time-recommendations.json")
+    if not archive.is_file():
+        raise RuntimeError("verified analytics archive missing")
+    if not os.getenv("GITHUB_TOKEN"):
+        raise RuntimeError("read-only GitHub token missing")
+    state = restore_publication_state()
+    history = [json.loads(line) for line in archive.read_text(encoding="utf-8").splitlines()
+               if line.strip()]
+    observations = observations_from_archive(history, state)
+    rows = recommend_hours(observations)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps({
+        "status": "recommendation_only" if rows else "insufficient_verified_samples",
+        "source_posts": len(observations), "recommendations": rows,
+        "auto_changed_schedule": False
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+if __name__ == "__main__":
+    main()
