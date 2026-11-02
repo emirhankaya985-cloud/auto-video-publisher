@@ -35,7 +35,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install --require-hashes -r requirements.txt
-      - run: python -m unittest -v test_threads_accounts.py test_threads_publisher.py
+      - run: python -m unittest -v test_threads_accounts.py test_threads_publisher.py test_threads_audit_secret_contract.py
   readonly-api:
     if: github.event_name == 'workflow_dispatch'
     needs: mock-tests
@@ -51,18 +51,18 @@ jobs:
         env:
           THREADS_CHECK_ROUTE: ${{ inputs.account }}
           THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
-          TARLADAKI_THREADS_ACCESS_TOKEN: ${{ secrets.TARLADAKI_THREADS_ACCESS_TOKEN }}
+          TARLADAKI_THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_TARLADAKI_FASULYE_ACCESS_TOKEN || secrets.TARLADAKI_THREADS_ACCESS_TOKEN }}
           PENGUEN_THREADS_ACCESS_TOKEN: ${{ secrets.PENGUEN_THREADS_ACCESS_TOKEN }}
-          GONLE_THREADS_ACCESS_TOKEN: ${{ secrets.GONLE_THREADS_ACCESS_TOKEN }}
-          DAILY_LAUGH_THREADS_ACCESS_TOKEN: ${{ secrets.DAILY_LAUGH_THREADS_ACCESS_TOKEN }}
-          FILM_THREADS_ACCESS_TOKEN: ${{ secrets.FILM_THREADS_ACCESS_TOKEN }}
-          TOONZONE_THREADS_ACCESS_TOKEN: ${{ secrets.TOONZONE_THREADS_ACCESS_TOKEN }}
-          TARLADAKI_THREADS_USERNAME: ${{ vars.TARLADAKI_THREADS_USERNAME }}
-          PENGUEN_THREADS_USERNAME: ${{ vars.PENGUEN_THREADS_USERNAME }}
-          GONLE_THREADS_USERNAME: ${{ vars.GONLE_THREADS_USERNAME }}
-          DAILY_LAUGH_THREADS_USERNAME: ${{ vars.DAILY_LAUGH_THREADS_USERNAME }}
-          FILM_THREADS_USERNAME: ${{ vars.FILM_THREADS_USERNAME }}
-          TOONZONE_THREADS_USERNAME: ${{ vars.TOONZONE_THREADS_USERNAME }}
+          GONLE_THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_GONLE_DUSEN_ACCESS_TOKEN || secrets.GONLE_THREADS_ACCESS_TOKEN }}
+          DAILY_LAUGH_THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_DAILY_LAUGH_LAB_ACCESS_TOKEN || secrets.DAILY_LAUGH_THREADS_ACCESS_TOKEN }}
+          FILM_THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_FILM_MAGARASI_ACCESS_TOKEN || secrets.FILM_THREADS_ACCESS_TOKEN }}
+          TOONZONE_THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_TOONZONE_ACCESS_TOKEN || secrets.TOONZONE_THREADS_ACCESS_TOKEN }}
+          TARLADAKI_THREADS_USERNAME: ${{ vars.TARLADAKI_THREADS_USERNAME || 'tarladakifasulye_' }}
+          PENGUEN_THREADS_USERNAME: ${{ vars.PENGUEN_THREADS_USERNAME || 'beyinsiz.penguen' }}
+          GONLE_THREADS_USERNAME: ${{ vars.GONLE_THREADS_USERNAME || 'gonl_edusen' }}
+          DAILY_LAUGH_THREADS_USERNAME: ${{ vars.DAILY_LAUGH_THREADS_USERNAME || 'dail.ylaughlab' }}
+          FILM_THREADS_USERNAME: ${{ vars.FILM_THREADS_USERNAME || 'film_magrasi' }}
+          TOONZONE_THREADS_USERNAME: ${{ vars.TOONZONE_THREADS_USERNAME || 'toonzone.tr' }}
           TARLADAKI_THREADS_USER_ID: ${{ vars.TARLADAKI_THREADS_USER_ID }}
           PENGUEN_THREADS_USER_ID: ${{ vars.PENGUEN_THREADS_USER_ID }}
           GONLE_THREADS_USER_ID: ${{ vars.GONLE_THREADS_USER_ID }}

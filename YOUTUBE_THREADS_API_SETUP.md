@@ -44,6 +44,21 @@ For each PREFIX set the following in https://github.com/emirhankaya985-cloud/aut
 
 Compatibility: `THREADS_ACCESS_TOKEN` is accepted as a fallback **only** for Penguen; no other account inherits its token.
 
+**Existing GitHub secret names (six-account onboarding, 3 November 2026):**
+The read-only audit accepts the following names directly, without copying tokens or renaming secrets. Older `PREFIX_THREADS_ACCESS_TOKEN` names remain supported as fallbacks, while `THREADS_ACCESS_TOKEN` remains exclusive to Penguen.
+
+| Route | Existing Actions secret name | Username checked by default |
+| --- | --- | --- |
+| `penguen` | `THREADS_ACCESS_TOKEN` | `beyinsiz.penguen` |
+| `daily_laugh` | `THREADS_DAILY_LAUGH_LAB_ACCESS_TOKEN` | `dail.ylaughlab` |
+| `film` | `THREADS_FILM_MAGARASI_ACCESS_TOKEN` | `film_magrasi` |
+| `gonle` | `THREADS_GONLE_DUSEN_ACCESS_TOKEN` | `gonl_edusen` |
+| `tarladaki` | `THREADS_TARLADAKI_FASULYE_ACCESS_TOKEN` | `tarladakifasulye_` |
+| `toonzone` | `THREADS_TOONZONE_ACCESS_TOKEN` | `toonzone.tr` |
+
+The public usernames above were copied from the user's Threads token generator screenshot. For a changed handle, override the corresponding `PREFIX_THREADS_USERNAME` Actions variable; the live API `GET /me` must then match exactly. These defaults **do not prove token correctness**. Secret presence alone also cannot prove validity. No posting is enabled by the read-only audit.
+
+
 After the branch is merged, open https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/workflows/threads_connection_audit.yml and select **Run workflow → account: all** (default). A single run performs six separate authenticated `GET /me` checks, verifies each account's username and optional user ID, and reports each route as PASS or FAIL without revealing credentials. You can also select just one route. It **does not** create a video container or publish anything. Missing or mismatched accounts make the overall audit fail safely; other accounts are still checked. This cannot independently prove the presence of the publish permission until an authorized publish-specific API check is carried out.
 
 **Production prerequisites:** the selected accounts must have approved Threads authorization, tokens must be rotated/refreshed before expiry, media must be accessible to Meta from a real public HTTPS video URL (a Google Drive share-page URL is not a direct MP4), and the multi-account posting path must be integrated with per-account Drive intent/claim/idempotency before enabling any route. Existing `threads_publisher.py` is only the low-level video client. Do not cross-publish the same file automatically without rights clearance.
