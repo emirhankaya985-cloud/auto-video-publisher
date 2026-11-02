@@ -21,6 +21,8 @@ from cloud_omnichannel_publisher import (
 from analytics_archive import make_record, upsert_records, export_csv
 from analytics_drive_store import get_or_create_archive_folder, download_history, save_history_and_csv
 from analytics_github_history import restore_history
+from publication_github_progress import restore_publication_state, ledger_progress
+from meta_report_tables import ntfy_table, publication_telegram
 from ntfy_notifications import send_ntfy
 from telegram_notifications import send_telegram, telegram_configured
 from ntfy_phone_report import compact_phone_report
@@ -589,6 +591,12 @@ def build_report(now=None):
         elif drive and archive_folder:
             errors.append("Geçmiş okunamadığı için Drive arşivi korunuyor; üzerine yazılmadı.")
 
+        publication_state = None
+        if meta_only:
+            try:
+                publication_state = restore_publication_state()
+            except Exception as exc:
+                errors.append(f"GitHub yayın sayacı: {safe_error(exc)}")
         report_accounts = {}
         for account, (target, route, _folder, _keys) in ACCOUNT_TARGETS.items():
             platform_names = {p for owner, _page, p in META_TARGETS if owner == account}
@@ -601,11 +609,21 @@ def build_report(now=None):
                 # views are not a valid period-specific measurement.
                 platforms = {p: (total, None) for p, (total, _delta) in platforms.items()}
             try:
-                progress = publication_progress(drive, account, today)
+                progress = (ledger_progress(publication_state, route, today, target)
+                            if meta_only and publication_state is not None
+                            else None if meta_only
+                            else publication_progress(drive, account, today))
             except Exception as exc:
                 errors.append(f"{account} yayın sayacı: {safe_error(exc)}")
                 progress = None
             report_accounts[account] = (target, route, platforms, progress)
+
+        if meta_only and publication_state is not None:
+            evidence = Path("link-runtime/publication_progress.json")
+            evidence.parent.mkdir(parents=True, exist_ok=True)
+            evidence.write_text(json.dumps({"day": today, "scope": "Meta ledger",
+                "accounts": {account: value[3] for account, value in report_accounts.items()}},
+                ensure_ascii=False, indent=2), encoding="utf-8")
 
         rows = [f"🌙 GÜNLÜK SOSYAL MEDYA RAPORU — {report_day:%d.%m.%Y}",
                 f"🕒 Ölçüm: {now:%d.%m.%Y %H:%M} TRT",
@@ -620,7 +638,7 @@ def build_report(now=None):
                 "",
             ])
         all_daily, all_lifetime = [], []
-        completed_total = target_total = failed_total = posts_total = 0
+        completed_total = target_total = failed_total = posts_total = expected_posts_total = 0
         for account, (target, _route, platforms, progress) in report_accounts.items():
             target_total += target
             rows.append(account.upper())
@@ -628,8 +646,10 @@ def build_report(now=None):
                 completed_total += progress["completed"]
                 failed_total += progress["failures"]
                 posts_total += progress["posts"]
+                expected_posts_total += progress["expected_posts"]
                 mark = "✅" if progress["completed"] >= target else "⚠️"
                 rows.append(f"🎬 Yayın: {progress['completed']}/{target} {mark}")
+                rows.append(f"  Eksik video: {max(target - progress['completed'], 0)}")
             else:
                 rows.append("🎬 Yayın: ⚠️ Veri alınamadı")
             known_daily = [delta for _total, delta in platforms.values() if delta is not None]
@@ -660,18 +680,22 @@ def build_report(now=None):
                     if route_key and route_key in progress["platforms"]:
                         stats = progress["platforms"][route_key]
                         publication_status = (f"Yayın ✅{stats['success']} / ❌{stats['failure']}"
+                                              f" | Eksik: {max(target - stats['success'], 0)} | Belirsiz: {stats.get('uncertain', 0)}"
                                               f" | Son: {stats['latest_status']}")
                     elif platform == "YouTube" and account == "🌱 Tarladaki Fasulye":
                         stats = progress["platforms"]["yt1"]
                         publication_status = (f"Yayın ✅{stats['success']} / ❌{stats['failure']}"
+                                              f" | Eksik: {max(target - stats['success'], 0)} | Belirsiz: {stats.get('uncertain', 0)}"
                                               f" | Son: {stats['latest_status']}")
                     elif platform == "YouTube" and account == "🐧 Beyinsiz Penguen":
                         stats = progress["platforms"]["yt2"]
                         publication_status = (f"Yayın ✅{stats['success']} / ❌{stats['failure']}"
+                                              f" | Eksik: {max(target - stats['success'], 0)} | Belirsiz: {stats.get('uncertain', 0)}"
                                               f" | Son: {stats['latest_status']}")
                     elif platform == "YouTube" and account == "😂 Daily Laugh Lab":
                         stats = progress["platforms"]["yt_daily"]
                         publication_status = (f"Yayın ✅{stats['success']} / ❌{stats['failure']}"
+                                              f" | Eksik: {max(target - stats['success'], 0)} | Belirsiz: {stats.get('uncertain', 0)}"
                                               f" | Son: {stats['latest_status']}")
                 rows.append(f"{platform}: {delta_text} | Genel {total_text}")
                 rows.append(f"  {publication_status}")
@@ -695,6 +719,8 @@ def build_report(now=None):
             f"👀 GENEL TOPLAM: {'Kısmi: ' if len(all_lifetime) < sum(len(x[2]) for x in report_accounts.values()) else ''}{tr_number(sum(all_lifetime))}" if all_lifetime else "👀 GENEL TOPLAM: ⚠️ Veri alınamadı",
             f"🚨 Yayın hatası: {failed_total}" if progress_known else "🚨 Yayın hatası: N/A",
             f"✅ Başarılı platform gönderileri: {posts_total}" if progress_known else "✅ Başarılı platform gönderileri: N/A",
+            f"🎯 Platform gönderi hedefi: {expected_posts_total} | Eksik gönderi: {sum(max(p['expected_posts'] - sum(min(p['target'], v['success']) for v in p['platforms'].values()), 0) for _, _, _, p in report_accounts.values() if p)}" if meta_only and progress_known else "📋 Platform hedefi: N/A" if meta_only else "📋 Platform hedefi: Drive.",
+            "📋 Tamamlanan video: en düşük platform kotası; aynı kaynak eşleşmesi iddiası değildir. GitHub done + post ID sayılır, belirsizler sayılmaz." if meta_only else "📋 Yayın sayıları: Drive yayın geçmişi.",
             "📊 Günlük fark: önceki gün sonu snapshot'ına göre; platform sayaç tanımları farklıdır.",
             f"🗄️ Geçmiş: {'GitHub artifact için hazırlandı (yükleme doğrulanmalı)' if archive_saved else '⚠️ GitHub artifact hazırlanamadı'}" if meta_only else
             f"🗄️ Geçmiş: {'Drive’a kaydedildi' if archive_saved else '⚠️ Drive arşivi kaydedilemedi'}",
@@ -707,6 +733,8 @@ def build_report(now=None):
             {account: list(value[2]) for account, value in report_accounts.items()},
             report_day, now.isoformat(timespec="seconds"), delayed=delayed,
         )
+        if meta_only:
+            comparison["publication"] = {account: value[3] for account, value in report_accounts.items()}
         comparison["collection"] = validate_collection(comparison)
         comparison["collection_errors"] = collection_errors
         return ViewReport("\n".join(rows), comparison)
@@ -714,7 +742,9 @@ def build_report(now=None):
 
 def notify(message):
     title = "🌙 Günlük Sosyal Medya Raporu"
-    body = compact_phone_report(message, ACCOUNT_TARGETS)
+    comparison = getattr(message, "comparison", None)
+    body = (ntfy_table(comparison) if comparison and "publication" in comparison
+            else compact_phone_report(message, ACCOUNT_TARGETS))
     ntfy_error = None
     try:
         receipt = send_ntfy(title, body, timeout=20, require_ack=True)
@@ -728,6 +758,8 @@ def notify(message):
         try:
             comparison = getattr(message, "comparison", None)
             parts = telegram_tables(comparison) if comparison else [(title, body)]
+            if comparison and "publication" in comparison:
+                parts.append(publication_telegram(comparison))
             acknowledged = 0
             for part_title, part_body in parts:
                 options = {"parse_mode": "HTML"} if comparison else {}
