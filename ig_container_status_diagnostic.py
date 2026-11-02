@@ -16,6 +16,7 @@ PINNED = {
 # are used. No source/container is selected heuristically.
 NAMED_PINNED = {
  "tarladaki_192_nov01": ("Tarladaki Fasulye", "18111440750133751"),
+ "tarladaki_194_nov01": ("Tarladaki Fasulye", "18111509597133751"),
  "penguen_193_nov01": ("Beyinsiz Penguen", "18120540917054769"),
 }
 STATES = frozenset(("IN_PROGRESS", "FINISHED", "PUBLISHED", "ERROR", "EXPIRED"))
