@@ -119,5 +119,15 @@ class DurableBackupTests(unittest.TestCase):
                     self.assertTrue(any(k.arg == 'audit' and k.value.value is True for k in call.keywords))
 
 
+    def test_live_acceptance_installs_missing_ffmpeg_without_publishing(self):
+        workflow = (Path(__file__).parent / '.github' / 'workflows' / 'publication_backup.yml').read_text()
+        acceptance = workflow.split('  acceptance:\n', 1)[1]
+        self.assertIn('if ! command -v ffmpeg', acceptance)
+        self.assertIn('sudo apt-get install -y ffmpeg', acceptance)
+        self.assertIn('command -v ffprobe', acceptance)
+        self.assertIn('run: python publication_live_acceptance.py', acceptance)
+        self.assertNotIn('publish_public_drive_once.py', acceptance)
+
+
 if __name__ == '__main__':
     unittest.main()
