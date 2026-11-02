@@ -543,3 +543,7 @@ izlenir; bu inceleme test amaçlı gerçek yayın tetiklemedi.
 - Acceptance job 125519306661: bağımlılıklar kuruldu ancak runner'da ffmpeg bulunmadığından kontrol başlamadı. Başarı diye raporlanmaz. FFmpeg/FFprobe normal yayıncının kullandığı apt yoluyla kurulacak; tekrar yalnız GET ve yerel kalite analizi yapacak.
 - Yeni yayın, intent temizliği, Meta token değişimi veya kör POST tekrarı yok. Backup receipt artifact saklandı. Credential eksikliği bu kod yamasıyla çözülmez.
 - Geri alma: publication_backup workflow'unu devre dışı bırak; mevcut state/artifact/Drive dosyalarını silme.
+
+- Sonuç güncellemesi: 41516183167 acceptance job125520221690 gerçek GET/yerel kabulü VERIFIED: 13 stok satırı,43 mevcut post ID,4811 engagement kaydı,13 follower sayacı,180s gerçek kaynakta3 kalite örneği. Yayın denemesi yok. Aynı koşumun backup job'u ayrı credential eksikliği nedeniyle failure kaldı.
+- Bağlı Drive alternatifinde owner-only klasör doğrulandı; 1CTqkOEYGFrMdQ_6pWBmU8eXFEIThh64N recovery ZIP yüklendi, Drive fetch ile tekrar indirildi, SHA256=1ddd55455fcbaea540c0c4abe75d3eba26b27409158bc0d6ff79b05ed12c4c04 eşleşti; izole restore1005 state kaydı+19537 analytics satırı. Bu ilk bağımsız yedek canlı kanıtıdır. Yeni görev5limitine takıldığı için mevcut Meta nöbetine salt yedek ek görevi eklendi; sonraki otomatik koşum henüz doğrulanmadı.
+- Direct runner backup DURABLE_DRIVE_BACKUP_ENABLED=true ile opt-in oldu; bilinen eksik credential için her normal yayından sonra yeni kırmızı iş yaratılmaz. Meta/Drive tokenları taşınmadı veya değiştirilmedi.
