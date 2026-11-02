@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from publisher_one_shot_gate import (
     OWNER_CATCHUP_MARKER, OWNER_CATCHUP_SUBJECT, determine_mode,
-    is_owner_catchup_push,
+    is_owner_catchup_push, is_today_catchup_push, TODAY_CATCHUP_MARKER, TODAY_CATCHUP_SUBJECT,
 )
 
 
@@ -51,6 +51,21 @@ class OwnerCatchupGateTests(unittest.TestCase):
         self.assertFalse(is_owner_catchup_push(
             "push", "refs/heads/main", OWNER_CATCHUP_SUBJECT, [],
             today="2026-11-01", run_attempt="1"))
+
+    def test_nov2_explicit_marker_first_run_only(self):
+        args = ("push", "refs/heads/main", TODAY_CATCHUP_SUBJECT, [TODAY_CATCHUP_MARKER])
+        self.assertTrue(is_today_catchup_push(*args, today="2026-11-02", run_attempt="1"))
+        self.assertFalse(is_today_catchup_push(*args, today="2026-11-01", run_attempt="1"))
+        self.assertFalse(is_today_catchup_push(*args, today="2026-11-03", run_attempt="1"))
+        self.assertFalse(is_today_catchup_push(*args, today="2026-11-02", run_attempt="2"))
+        self.assertFalse(is_today_catchup_push("push", "refs/heads/other", TODAY_CATCHUP_SUBJECT,
+                                               [TODAY_CATCHUP_MARKER], today="2026-11-02", run_attempt="1"))
+        self.assertFalse(is_today_catchup_push("pull_request", "refs/heads/main", TODAY_CATCHUP_SUBJECT,
+                                               [TODAY_CATCHUP_MARKER], today="2026-11-02", run_attempt="1"))
+        self.assertEqual(determine_mode("pull_request", "refs/heads/main", TODAY_CATCHUP_SUBJECT,
+                                        [TODAY_CATCHUP_MARKER]), "audit")
+        self.assertEqual(determine_mode("push", "refs/heads/main", "wrong",
+                                        [TODAY_CATCHUP_MARKER]), "audit")
 
     def test_gate_defaults_to_audit_for_pr_and_unrelated_push(self):
         self.assertEqual(determine_mode("pull_request", "refs/heads/main"), "audit")
