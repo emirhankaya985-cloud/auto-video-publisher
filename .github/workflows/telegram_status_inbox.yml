@@ -33,6 +33,7 @@ jobs:
       - name: Prepare owner replies without sending or modifying publishing
         run: python telegram_status_inbox.py prepare
       - name: Persist processed offset before any Telegram reply
+        if: always() && hashFiles('status-runtime/checkpoint-ready') != ''
         uses: actions/upload-artifact@v4
         with:
           name: telegram-status-checkpoint

@@ -83,16 +83,26 @@ def prepare(*, session=requests):
     def reserve(title, message, **kwargs):
         messages.append({'title': title, 'message': message, 'parse_mode': kwargs.get('parse_mode')})
     worker = Worker(str(database), sender=reserve, status_loader=status)
+    (ROOT/'checkpoint-ready').write_text('valid', encoding='utf-8')
     try:
+        if worker.db.execute("SELECT value FROM state WHERE key='inbox_blocked'").fetchone():
+            raise RuntimeError('inbox_blocked_pending_review')
         response = session.get(worker.url+'getWebhookInfo', timeout=15, allow_redirects=False)
         response.raise_for_status()
         info = response.json()
         if info.get('ok') is not True or not isinstance(info.get('result', {}).get('url'), str) or info['result']['url']:
+            if info.get('ok') is True and info.get('result', {}).get('url'):
+                worker.db.execute("INSERT OR REPLACE INTO state VALUES ('inbox_blocked', 'webhook_active')")
+                worker.db.commit()
             raise RuntimeError('webhook_active_or_unknown')
         response = session.get(worker.url+'getUpdates',
             params={'offset': worker.offset(), 'timeout': 0, 'limit': 20,
                     'allowed_updates': json.dumps(['message'])}, timeout=15, allow_redirects=False)
         # In particular, a 409 is a competing-consumer incident, never retried.
+        if response.status_code == 409:
+            worker.db.execute("INSERT OR REPLACE INTO state VALUES ('inbox_blocked', 'consumer_conflict')")
+            worker.db.commit()
+            raise RuntimeError('consumer_conflict')
         response.raise_for_status()
         result = response.json()
         if result.get('ok') is not True or not isinstance(result.get('result'), list):

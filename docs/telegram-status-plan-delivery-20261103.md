@@ -16,6 +16,8 @@ The status-only inbox reuses the existing owner-authenticated handler in bounded
 GitHub Actions batches, nominally every five minutes (schedule delays possible).
 There is no always-on server or AI request. A single concurrency group prevents
 overlapping batches; an active webhook or 409 consumer conflict blocks polling.
+Those conflicts are latched in the archived checkpoint; later scheduled batches
+make no Telegram polling requests until an operator reviews the ownership issue.
 Do not also run the old long-polling worker with this bot. Offset SQLite is
 archived BEFORE replies; reruns never repeat a possibly delivered message.
 Checkpoint retention is seven days to bound storage. Expired/malformed state

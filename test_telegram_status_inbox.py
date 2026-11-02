@@ -51,3 +51,17 @@ class InboxTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 inbox.prepare(session=session)
             session.get.assert_not_called()
+
+    def test_consumer_conflict_latches_and_next_batch_does_not_poll(self):
+        session = Mock()
+        conflict = self.response({})
+        conflict.status_code = 409
+        session.get.side_effect = [self.response({'ok': True, 'result': {'url': ''}}), conflict]
+        with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, self.env, clear=True), \
+                patch.object(inbox, 'ROOT', Path(temp)), patch.object(inbox, 'restore_checkpoint'):
+            with self.assertRaisesRegex(RuntimeError, 'consumer_conflict'):
+                inbox.prepare(session=session)
+            session.get.reset_mock()
+            with self.assertRaisesRegex(RuntimeError, 'pending_review'):
+                inbox.prepare(session=session)
+            session.get.assert_not_called()
