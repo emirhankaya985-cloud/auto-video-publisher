@@ -104,6 +104,17 @@ def post_message(row, run_id):
             f"✅ Durum: Başarılı\n"
             f"🆔 Gönderi ID: {safe(row['post_id'])}\n"
             f"🔎 https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/{run_id}")
+    try:
+        stock = json.loads(STATE_PATH.with_name('content-stock.json').read_text())
+        for item in stock['accounts']:
+            if (item.get('route') == route and item.get('platform') == platform
+                    and item.get('low_stock') is True):
+                body += (f"\n📦 Stok az: {int(item['remaining'])} aday video, "
+                         f"yaklaşık {float(item['estimated_days']):g} gün."
+                         '\nCaption, hak ve kalite kontrolleri ayrıca uygulanır.')
+                break
+    except (OSError, ValueError, TypeError, KeyError):
+        pass  # Missing stock evidence never invalidates a confirmed post.
     return title, body
 
 

@@ -1023,11 +1023,13 @@ def plan(audit=False):
     pages = {p["page_name"]: p for p in load_meta_auth()["pages"]}
     report = [f"# Public link publisher — {day}", "", "YouTube: disabled. Drive OAuth: not used.", ""]
     catalogs = {}
+    unavailable_catalogs = set()
     for key, value in FOLDERS.items():
         try:
             catalogs[key] = inventory(value)
         except Exception as exc:
             catalogs[key] = {}
+            unavailable_catalogs.add(key)
             report.append(f"HELD source {key}: {type(exc).__name__}")
             record_error("drive_inventory", "drive_unavailable", route=key,
                          error=exc, safe_to_retry=True)
@@ -1522,6 +1524,12 @@ def plan(audit=False):
                 alert_days[route] = local_day
     save(STATE, state)
     save(PLAN, plans)
+    from content_stock import build_stock, stock_markdown
+    stocks = build_stock(catalogs, state, ROUTES,
+                         {r: (4 if r == 'toonzone' else 8 if r == 'daily_laugh' else 5)
+                          for r in ROUTES}, unavailable=unavailable_catalogs)
+    save(ROOT / 'content-stock.json', {'measured_at': now.isoformat(), 'accounts': stocks})
+    report.extend(['', stock_markdown(stocks)])
     summary = "\n".join(report) + "\n"
     (ROOT / "report.md").write_text(summary, encoding="utf-8")
     print(summary, flush=True)
@@ -1667,6 +1675,16 @@ def publish():
                 if header[4:8] != b"ftyp":
                     raise RuntimeError("Source is not MP4")
                 verify_source_video(video)
+                if os.getenv('MEDIA_QUALITY_ENABLED', 'false').lower() == 'true':
+                    from media_quality import inspect_video
+                    try:
+                        quality = inspect_video(video)
+                    except Exception:
+                        save(ROOT / 'quality' / (item['id'] + '.json'),
+                             {'status': 'held', 'reason': 'quality_check_failed',
+                              'source_id': item['id']})
+                        raise RuntimeError('Local media quality gate held source') from None
+                    save(ROOT / 'quality' / (item['id'] + '.json'), quality)
                 if item.get("approved_md5"):
                     checksum = hashlib.md5(video.read_bytes()).hexdigest()
                     if checksum != item["approved_md5"]:

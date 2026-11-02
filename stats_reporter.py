@@ -569,6 +569,22 @@ def build_report(now=None):
             else _collect_snapshot(now)
         )
         errors.extend(collection_errors)
+        if os.getenv('ENGAGEMENT_HISTORY_ENABLED', 'false').lower() == 'true':
+            from performance_history import collect_engagement, follower_changes
+            engagement, engagement_errors = collect_engagement(
+                META_TARGETS, get_meta_page_info, graph_get, graph_pages,
+                measured_at=now.isoformat(timespec='seconds'), period=today)
+            records.extend(engagement)
+            # Engagement is independent of view collection. Missing optional
+            # fields must not erase valid history or trigger video retries.
+            evidence = Path('link-runtime/engagement-collection.json')
+            evidence.parent.mkdir(parents=True, exist_ok=True)
+            evidence.write_text(json.dumps({
+                'period': today, 'records': len(engagement),
+                'unavailable_records': sum(r['status'] != 'ok' for r in engagement),
+                'errors': engagement_errors,
+                'followers': follower_changes(engagement, previous),
+            }, ensure_ascii=False, indent=2), encoding='utf-8')
         archive_saved = False
         if meta_only and history_read_ok:
             try:
@@ -737,6 +753,8 @@ def build_report(now=None):
             comparison["publication"] = {account: value[3] for account, value in report_accounts.items()}
         comparison["collection"] = validate_collection(comparison)
         comparison["collection_errors"] = collection_errors
+        if os.getenv('ENGAGEMENT_HISTORY_ENABLED', 'false').lower() == 'true':
+            comparison['followers'] = follower_changes(engagement, previous)
         return ViewReport("\n".join(rows), comparison)
 
 
@@ -761,6 +779,14 @@ def notify(message):
             parts = telegram_tables(comparison) if comparison else [(title, body or str(message))]
             if comparison and "publication" in comparison:
                 parts.append(publication_telegram(comparison))
+            if comparison and comparison.get('followers'):
+                from html import escape
+                lines = []
+                for row in comparison['followers']:
+                    count = 'N/A' if row['followers'] is None else str(row['followers'])
+                    delta = 'N/A' if row['daily_change'] is None else f"{row['daily_change']:+d}"
+                    lines.append(escape(f"{row['account']} / {row['platform']}: {count} ({delta})"))
+                parts.append(('📈 Takipçi geçmişi', '\n'.join(lines)))
             acknowledged = 0
             for part_title, part_body in parts:
                 options = {"parse_mode": "HTML"} if comparison else {}

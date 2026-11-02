@@ -1292,6 +1292,35 @@ class LinkRuntimeSafety(unittest.TestCase):
                     runtime.publish()
             self.assertEqual(json.loads(state_path.read_text())["entries"]["toonzone:facebook:v"]["status"], "ready")
 
+    def test_enabled_quality_gate_blocks_both_platforms_before_upload(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            item = {'page': 'Daily Laugh Lab', 'route': 'daily_laugh', 'id': 'v',
+                    'name': '1.mp4', 'platforms': ['facebook', 'instagram'],
+                    'captions': {'facebook': 'copy', 'instagram': 'copy'}}
+            runtime.save(root / 'state.json', {'entries': {
+                f'daily_laugh:{p}:v': {'status': 'intent'} for p in item['platforms']}})
+            runtime.save(root / 'plan.json', [item])
+            def download(source, path):
+                path.write_bytes(b'1234ftypOK')
+                return path
+            with patch.dict(os.environ, {'MEDIA_QUALITY_ENABLED': 'true'}), \
+                    patch.object(runtime, 'ROOT', root), \
+                    patch.object(runtime, 'STATE', root / 'state.json'), \
+                    patch.object(runtime, 'PLAN', root / 'plan.json'), \
+                    patch.object(runtime, 'download', side_effect=download), \
+                    patch.object(runtime, 'load_meta_auth', return_value={'pages': [{'page_name': 'Daily Laugh Lab'}]}), \
+                    patch('media_quality.inspect_video', side_effect=RuntimeError('black_screen_samples')), \
+                    patch.object(runtime, 'upload_facebook_reel') as fb, \
+                    patch.object(runtime, 'upload_instagram_reel') as ig:
+                with self.assertRaises(SystemExit):
+                    runtime.publish()
+            fb.assert_not_called()
+            ig.assert_not_called()
+            entries = json.loads((root / 'state.json').read_text())['entries']
+            self.assertTrue(all(r['status'] == 'ready' for r in entries.values()))
+            self.assertEqual(json.loads((root / 'quality/v.json').read_text())['status'], 'held')
+
 
     def test_daily_laugh_caption_collision_skips_old_and_plans_new_without_duplicate(self):
         """Old remote captions cannot lock out new unique clips or fabricate post IDs."""

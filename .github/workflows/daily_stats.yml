@@ -40,6 +40,7 @@ jobs:
           META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
           GITHUB_TOKEN: ${{ github.token }}
           META_ONLY_REPORTING: 'true'
+          ENGAGEMENT_HISTORY_ENABLED: ${{ vars.ENGAGEMENT_HISTORY_ENABLED != 'false' && 'true' || 'false' }}
           NTFY_TOPIC_URL: ${{ secrets.NTFY_TOPIC_URL }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -48,6 +49,14 @@ jobs:
           NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
           NVIDIA_MODEL: ${{ vars.NVIDIA_MODEL || 'nvidia/nemotron-3.5-super-vl-120b-a12b' }}
         run: python stats_reporter.py
+      - name: Preserve engagement collection coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: engagement-collection
+          path: link-runtime/engagement-collection.json
+          if-no-files-found: ignore
+          retention-days: 90
       - name: Preserve Meta view history for the next report (no Drive OAuth)
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
