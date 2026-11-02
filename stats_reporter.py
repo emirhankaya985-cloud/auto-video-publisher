@@ -22,6 +22,7 @@ from analytics_archive import make_record, upsert_records, export_csv
 from analytics_drive_store import get_or_create_archive_folder, download_history, save_history_and_csv
 from analytics_github_history import restore_history
 from publication_github_progress import restore_publication_state, ledger_progress
+from meta_report_tables import ntfy_table, publication_telegram
 from ntfy_notifications import send_ntfy
 from telegram_notifications import send_telegram, telegram_configured
 from ntfy_phone_report import compact_phone_report
@@ -732,6 +733,8 @@ def build_report(now=None):
             {account: list(value[2]) for account, value in report_accounts.items()},
             report_day, now.isoformat(timespec="seconds"), delayed=delayed,
         )
+        if meta_only:
+            comparison["publication"] = {account: value[3] for account, value in report_accounts.items()}
         comparison["collection"] = validate_collection(comparison)
         comparison["collection_errors"] = collection_errors
         return ViewReport("\n".join(rows), comparison)
@@ -739,7 +742,9 @@ def build_report(now=None):
 
 def notify(message):
     title = "🌙 Günlük Sosyal Medya Raporu"
-    body = compact_phone_report(message, ACCOUNT_TARGETS)
+    comparison = getattr(message, "comparison", None)
+    body = (ntfy_table(comparison) if comparison and "publication" in comparison
+            else compact_phone_report(message, ACCOUNT_TARGETS))
     ntfy_error = None
     try:
         receipt = send_ntfy(title, body, timeout=20, require_ack=True)
@@ -753,6 +758,8 @@ def notify(message):
         try:
             comparison = getattr(message, "comparison", None)
             parts = telegram_tables(comparison) if comparison else [(title, body)]
+            if comparison and "publication" in comparison:
+                parts.append(publication_telegram(comparison))
             acknowledged = 0
             for part_title, part_body in parts:
                 options = {"parse_mode": "HTML"} if comparison else {}
