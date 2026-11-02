@@ -558,3 +558,10 @@ izlenir; bu inceleme test amaçlı gerçek yayın tetiklemedi.
 - Akıllı saatler yalnız Tarladaki/Penguen/Gönle için, beş saatin her birinde her iki platformda dört post/üç gün kanıt olduğunda ertesi İstanbul gününe uygulanabilir. İlk plan veya fallback ledger'a sabitlenir. Seri saatleri, kota, hak ve belirsiz POST kuralları korunur. Yetersiz kanıtta eski saatler aynen sürer. ADAPTIVE_SCHEDULE_ENABLED=false geri dönüş anahtarıdır.
 - Telegram tanısı getMe/getChat/getWebhookInfo GET'leriyle genişletildi; getUpdates tüketmez, webhook silmez, mesaj göndermez. Boş webhook aktif polling olmadığını kanıtlamaz. Sürekli bot kurulduğu varsayılmaz; tanı artifact'ı canlı kabulün yalnız bağlantı bölümüdür.
 - Ücretli servis, Render değişikliği, yeni token, gerçek yayın denemesi, state/claim silme yok. CI ve merge sonrası gerçek tanı/normal schedule sonuçları ayrıca incelenmelidir.
+
+## 3 Kasım 2026 — Threads Penguen kimlik kontrolü (salt-okunur)
+
+- **Kanıt:** [985 Threads GET-only run #41539380193](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/41539380193), job `readonly-api`: Tarladaki, Gönle, Daily Laugh, Film, ToonZone PASS; Beyinsiz Penguen **HTTP 401**. Altı mock test koşumu başarılı; canlı Threads paylaşımı yapılmadı.
+- **Neden:** Penguen'in seçili erişim tokenı reddedildi. Gerçek secret değerini okuyamadığımız için tokenın süresi dolduğunu veya yanlış OAuth uygulamasına ait olduğunu **kanıtlamıyoruz**. Denetim workflow'unda legacy genel tokenın Penguen'e özel tokenı gölgelemesi için olası öncelik hatası görüldü.
+- **Güvenli düzeltme:** [3 Kasım operasyon notu](../docs/operations-enhancements-2026-11-03.md) kapsamındaki PR #90 ile **Penguen'e özel secret varsa önce onu** kullan. Hata devam ederse yalnız ilgili tokenın kullanıcı tarafından güvenli biçimde yenilenmesi ve yeniden GET-only denetimi gerekir; başka beş tokenı değiştirme. Threads POST/yayın otomatik açılmaz.
+- **Kabul:** PR no-publish CI ve yeni `readonly-api` run'ında altı bağımsız gerçek `/me` kimliği PASS görülene kadar Penguen **UNVERIFIED**.
