@@ -76,10 +76,11 @@ def stock_summary(*, session=requests):
                 if info.file_size > 250_000:
                     continue
                 data = json.loads(archive.read(info))
-            if not isinstance(data, list):
+            if (not isinstance(data, dict) or not isinstance(data.get('accounts'), list)
+                    or not isinstance(data.get('measured_at'), str)):
                 continue
-            lines = ["Son başarılı stok ölçümü: " + str(run.get("created_at", "bilinmiyor"))]
-            for row in data[:15]:
+            lines = ["Son başarılı stok ölçümü: " + data['measured_at']]
+            for row in data['accounts'][:15]:
                 if not isinstance(row, dict):
                     continue
                 n = row.get("remaining")
