@@ -13,7 +13,7 @@ import requests
 from analytics_github_history import REPOSITORY, MAX_ARCHIVE_BYTES, restore_history
 from nvidia_assistant import answer, enabled
 from telegram_notifications import _BOT_TOKEN, _CHAT_ID, send_telegram
-from telegram_owner_control import stock_summary, toggle_schedule
+from telegram_status import load_status
 
 
 def compact_history(path):
@@ -76,11 +76,12 @@ def latest_evidence(directory, *, session=requests):
 
 
 class Worker:
-    def __init__(self, database, *, evidence_loader=latest_evidence, model=answer, sender=send_telegram):
+    def __init__(self, database, *, evidence_loader=latest_evidence, model=answer, sender=send_telegram, status_loader=load_status):
         self.chat = os.getenv("TELEGRAM_CHAT_ID", "")
         self.owner = os.getenv("TELEGRAM_AI_OWNER_ID", "")
         token = os.getenv("TELEGRAM_BOT_TOKEN", "")
-        if (not ((enabled() and os.getenv("NVIDIA_API_KEY")) or os.getenv("TELEGRAM_CONTROL_ENABLED", "false").lower() == "true") or not _BOT_TOKEN.fullmatch(token) or not _CHAT_ID.fullmatch(self.chat) or not self.owner.isdecimal()):
+        self.status_only = os.getenv('TELEGRAM_STATUS_ONLY', 'true').lower() == 'true'
+        if (not (self.status_only or (enabled() and os.getenv("NVIDIA_API_KEY")) or os.getenv("TELEGRAM_CONTROL_ENABLED", "false").lower() == "true") or not _BOT_TOKEN.fullmatch(token) or not _CHAT_ID.fullmatch(self.chat) or not self.owner.isdecimal()):
             raise RuntimeError("Assistant configuration incomplete")
         self.url = "https://api.telegram.org/bot" + token + "/"
         self.directory = Path(database).parent
@@ -90,6 +91,7 @@ class Worker:
         self.db.execute("CREATE TABLE IF NOT EXISTS conversation (id INTEGER PRIMARY KEY, role TEXT, content TEXT)")
         self.db.commit()
         self.load, self.model, self.send = evidence_loader, model, sender
+        self.load_status = status_loader
 
     def offset(self):
         row = self.db.execute("SELECT value FROM state WHERE key='offset'").fetchone()
@@ -113,27 +115,30 @@ class Worker:
         text = message.get("text")
         if not isinstance(text, str) or not text.strip():
             return
+        command = text.strip().casefold()
+        if command in {'/stok', '/durdur', '/devam'}:
+            self.send('📋 Durum', 'Bu komut kaldırıldı. Yalnız /durum veya durum yazabilirsin.')
+            return
+        if self.status_only:
+            if command in {'/start', '/help'}:
+                self.send('📋 Durum', '/durum veya durum: yayın durumu ve saat tablosu.')
+            elif command in {'/durum', 'durum'}:
+                try:
+                    reply = self.load_status()
+                except Exception:
+                    reply = 'Yayın durumu şu an okunamadı. Sayı tahmin etmedim; yayın ayarları değiştirilmedi.'
+                self.send('📋 Yayın durumu', reply, parse_mode='HTML')
+            return
         if text.strip() in {"/start", "/help"}:
-            self.send("🤖 Sosyal medya yardımcısı", "/ozet: son ölçümün özeti\n/durum: veri tarihi\n/stok: son doğrulanmış stok\n/durdur: planlı kontrolü kapat (opt-in)\n/devam: planlı kontrolü aç (opt-in)\n/sifirla: sohbeti unut")
+            self.send("🤖 Sosyal medya yardımcısı", "/durum: veri tarihi\n/sifirla: sohbeti unut")
             return
         if text.strip() == "/sifirla":
             self.db.execute("DELETE FROM conversation")
             self.db.commit()
             self.send("🤖 Sohbet", "Sohbet geçmişi silindi. Ölçüm arşivi korundu.")
             return
-        if text.strip() in {"/stok", "/durdur", "/devam"}:
-            try:
-                if text.strip() == "/stok":
-                    reply = stock_summary()
-                else:
-                    reply = toggle_schedule(text.strip() == "/devam")
-            except Exception:
-                reply = ("Komut doğrulanamadı; yayın durumunu değiştirdim demiyorum. "
-                         "Gerekli yetki/sürekli çalışan bot veya GitHub verisi mevcut olmayabilir.")
-            self.send("🤖 Operasyon kontrolü", reply)
-            return
         if not (enabled() and os.getenv("NVIDIA_API_KEY")) and text.strip() not in {"/durum"}:
-            self.send("🤖 Veri durumu", "AI özeti etkin değil. /stok ve /durum kullanılabilir.")
+            self.send("🤖 Veri durumu", "AI özeti etkin değil. /durum kullanılabilir.")
             return
         history = [{"role": r, "content": c} for r, c in self.db.execute("SELECT role,content FROM conversation ORDER BY id")]
         try:
