@@ -10,6 +10,7 @@ import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
+from api_capacity_guard import safe_recovery_action
 
 JOURNAL = Path("link-runtime/errors.jsonl")
 
@@ -31,6 +32,7 @@ _ALLOWED_REASON = {
     "unreconciled_previous_intent", "no_eligible_content", "other",
     "intent_validation_failed", "existing_container_reconciliation_failed",
     "missing_secret", "youtube_publication_unverified",
+    "visual_duplicate_review",
 }
 
 
@@ -58,6 +60,11 @@ def error_event(stage, reason, *, route="", platform="", video="",
         "retry_policy": ("pre_upload_only" if safe_to_retry
                          else "never_blindly_retry_meta_post"),
         "error_type": safe_label(type(exc).__name__ if exc else "", 70),
+        "recovery_action": safe_recovery_action(
+            "meta_publish" if stage in {"facebook_publish", "instagram_publish"}
+            else "read_only_get" if stage in {"meta_history", "shared_account_history"}
+            else "ffmpeg_prepare" if stage == "instagram_preparation"
+            else "manual_review", previous_attempt=(status == "uncertain"))["action"],
     }
     for name, attr in (("http_status", "http_status"), ("graph_code", "code"),
                        ("graph_subcode", "subcode")):
