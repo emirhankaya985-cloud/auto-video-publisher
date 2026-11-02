@@ -165,5 +165,24 @@ class TelegramTests(unittest.TestCase):
         fake.patch.assert_not_called()
 
 
+class RuntimeIntegrationTests(unittest.TestCase):
+    def test_duplicate_gate_is_before_meta_upload_and_reason_is_registered(self):
+        import ast
+        from publisher_error_journal import error_event
+        event = error_event("source_video", "visual_duplicate_review",
+                            route="film", video="clip.mp4")
+        self.assertEqual(event["recovery_action"], "manual_review")
+        tree = ast.parse(Path(__file__).with_name("public_link_runtime.py").read_text(encoding="utf-8"))
+        publisher = next(node for node in tree.body
+                         if isinstance(node, ast.FunctionDef) and node.name == "publish")
+        calls = [(node.func.id, node.lineno) for node in ast.walk(publisher)
+                 if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)]
+        fingerprint = min(n for name, n in calls if name == "hold_visual_duplicate")
+        uploads = [n for name, n in calls if name in
+                   {"upload_facebook_reel", "upload_instagram_reel"}]
+        self.assertTrue(uploads)
+        self.assertTrue(all(fingerprint < n for n in uploads))
+
+
 if __name__ == "__main__":
     unittest.main()
