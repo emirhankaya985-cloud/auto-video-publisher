@@ -98,6 +98,7 @@ jobs:
           path: |
             link-runtime/live-acceptance.json
             link-runtime/engagement-preview.json
+            link-runtime/content-ranking.json
             link-runtime/content-stock.json
             link-runtime/report.md
           if-no-files-found: warn
