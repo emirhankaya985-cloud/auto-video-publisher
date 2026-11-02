@@ -54,7 +54,8 @@ class ReportingIndependenceTests(unittest.TestCase):
                 return_value={"status": "first_snapshot", "source_run": None}
             ), patch(
                 "stats_reporter._collect_snapshot", return_value=(current, [], [])
-            ), patch("stats_reporter.publication_progress",
+            ), patch("stats_reporter.restore_publication_state",
+                     side_effect=RuntimeError("archive unavailable")), patch("stats_reporter.publication_progress",
                      return_value=None):
                 report = stats_reporter.build_report(now)
             self.assertIn("YouTube ölçülmedi", report)
@@ -63,6 +64,25 @@ class ReportingIndependenceTests(unittest.TestCase):
             self.assertIn("❌ Eksik: N/A", report)
             self.assertTrue(destination.is_file())
             self.assertNotIn("❌ Eksik: 32", report)
+
+    def test_meta_only_publication_counts_from_ledger_without_drive(self):
+        now = datetime(2026, 11, 1, 23, 59, tzinfo=ZoneInfo("Europe/Istanbul"))
+        state = {"schema": 1, "entries": {
+            f"gonle:{platform}:source": {"route": "gonle", "platform": platform,
+                "status": "done", "post_id": platform, "day": "2026-11-01"}
+            for platform in ("facebook", "instagram")}}
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {
+            "META_ONLY_REPORTING": "true", "META_REPORT_ARTIFACT_PATH": tmp + "/history.jsonl"
+        }), patch("stats_reporter.get_drive_client", side_effect=AssertionError("no Drive")), \
+             patch("stats_reporter.restore_history", return_value={"status": "restored"}), \
+             patch("stats_reporter.restore_publication_state", return_value=state), \
+             patch("stats_reporter._collect_snapshot", return_value=({}, [], [])), \
+             patch("stats_reporter.requests.post", side_effect=AssertionError("no publish")):
+            report = stats_reporter.build_report(now)
+        self.assertIn("🎬 Yayın: 1/5", report)
+        self.assertIn("✅ Tamamlanan: 1", report)
+        self.assertIn("❌ Eksik: 31", report)
+        self.assertIn("Platform gönderi hedefi: 69 | Eksik gönderi: 67", report)
 
     def test_meta_only_collects_no_youtube_stats(self):
         now = datetime(2026, 10, 24, 23, 59, tzinfo=ZoneInfo("Europe/Istanbul"))
