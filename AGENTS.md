@@ -38,3 +38,9 @@ yeni bir işte silme veya göz ardı etme.
 - Kullanıcı Meta bağlantısını yalnız `META_ACCESS_TOKEN` ile yönetmek istiyor. Kullanıcıdan Page-token JSON oluşturmasını, kopyalamasını veya `META_AUTH_JSON` secret'ı eklemesini tekrar isteme.
 - Token tabanlı keşif ve kimlik denetimini kullan. Kullanıcı bu tercihi açıkça değiştirmedikçe JSON yedeğini zorunlu kurulum veya kurtarma adımı yapma.
 - Bu tercih kaydı canlı erişimin düzeldiği anlamına gelmez; kimlik GET ve normal schedule yayın kanıtını ayrı doğrula.
+
+## Kullanıcının 2 Kasım 2026 seri yayın önceliği
+
+- Kullanıcı Film ve ToonZone gibi seri içeriklerin bölüm sırasını ve eksiksizliğini diğer bağımsız kliplerden daha önemli görüyor. Önce bu serilerin gerçek eksik bölümünü ve kaynak kimliğini uzlaştır; Fasulye/Penguen bağımsız eski belirsiz klipleri daha düşük öncelikle koru.
+- Film Avanak Apti Part 10 kopyası için run 41433521684 job125237670132, `SOURCE ALIAS VERIFIED` ile tam kaynak baytları + mevcut gerçek Instagram gönderisini doğruladı. Güncel result artifact 13135078232 içinde asıl `Avanak_Apti_Part_10.mp4` kaydı done ve Instagram post_id=18130409657501240; kopya `(1)` intent'i geçmiş kanıt olarak held kalır. Bu kopyayı eksik bölüm sanıp yeniden yükleme veya ikinci başarı sayma. Facebook asıl/diğer sayfa kayıtları 953738704266778 ve 1972744990778609.
+- Bu kanıt başka dosya/part için genellenmez. Seri sırasını, kaynak bayt eşitliği denetimini ve belirsiz POST tekrar kilidini koru.
