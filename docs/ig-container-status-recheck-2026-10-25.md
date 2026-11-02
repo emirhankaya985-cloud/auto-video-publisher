@@ -34,3 +34,5 @@ Read only the exact Tarladaki 192 and Penguen 193 prior containers after live Pa
 ## 2 November 2026 — immediate owner-requested reconciliation evidence
 
 Recheck the exact pinned failed and uncertain containers with authenticated GET only. No upload, media_publish, intent reset or state deletion. Compare current provider states with the normal publisher's reconciled ledger before any recovery action. This diagnostic receipt alone never means a published post was verified.
+
+The latest authoritative intent also contains Fasulye 194, source 1gHlBKdHEo9_RcN1Hi1oGWxhOpRPBXetZ, container 18111509597133751. Include its exact identity-bound GET in this verification. Never upload or publish from this diagnostic.
