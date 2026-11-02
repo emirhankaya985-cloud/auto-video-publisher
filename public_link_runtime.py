@@ -1059,6 +1059,9 @@ def plan(audit=False):
                 )
     plans = []
     planned_counts = {}
+    # Reserve the exact final caption per route/platform within this batch.
+    # Different Drive IDs with identical text are not two safe posts.
+    planned_caption_hashes = set()
     batch_limit = 8 if os.getenv("CATCHUP_BATCH_DATE") == day else 1
     history_cache = {}
     duplicate_fingerprints = {}
@@ -1434,6 +1437,14 @@ def plan(audit=False):
             for p in pending:
                 if not state["entries"].get(f"{route}:{p}:{item['id']}"):
                     captions[p] = prepare_caption(captions[p], route, Path(item["name"]).stem, p)
+            if any((route, p, caption_key(captions[p])) in planned_caption_hashes
+                   for p in pending):
+                # Remote history is a snapshot taken before this batch. A
+                # second Drive alias must not bypass the caption check.
+                # Hold the whole clip rather than guessing its source identity.
+                report.append("HELD: identical caption already reserved by another "
+                              "Drive source in this run; no second Meta upload.")
+                continue
             selected = dict(item, route=route, page=page_name, platforms=pending, captions=captions, caption_source=origin)
             ig_entry = state["entries"].get(f"{route}:instagram:{item['id']}", {})
             if "instagram" in pending and ig_entry.get("container_resume"):
@@ -1486,6 +1497,7 @@ def plan(audit=False):
                         state["entries"][key]["expired_container_recovery"] = old_expired
                 plans.append(selected)
                 for p in pending:
+                    planned_caption_hashes.add((route, p, caption_key(captions[p])))
                     planned_counts[(route, p)] = planned_counts.get((route, p), 0) + 1
                     if route == "film":
                         planned_film_parts.add((p, film_canonical_part(item["name"])))
