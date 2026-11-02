@@ -11,6 +11,7 @@ def main():
     from publication_github_progress import restore_publication_state
     from media_quality import inspect_video
     from performance_history import collect_engagement
+    from operational_enhancements import rank_complete_engagement
     from stats_reporter import META_TARGETS, get_meta_page_info, graph_get, graph_pages
     root = runtime.ROOT
     root.mkdir(exist_ok=True)
@@ -59,6 +60,8 @@ def main():
         'unavailable': sum(r['status'] != 'ok' for r in records),
         'followers_verified': sum(r['metric'] == 'followers' and r['status'] == 'ok' for r in records)}
     runtime.save(root / 'engagement-preview.json', records)
+    results['content_ranking'] = rank_complete_engagement(records)
+    runtime.save(root / 'content-ranking.json', results['content_ranking'])
     if errors or results['engagement']['unavailable']:
         failures.append('engagement_partial')
     results.update(failures=failures, publishing_attempted=False,

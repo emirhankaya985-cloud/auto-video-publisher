@@ -30,7 +30,7 @@ class ThreadsAuditWorkflowContractTests(unittest.TestCase):
             with self.subTest(prefix=prefix):
                 self.assertIn(f"secrets.{saved}", self.workflow)
                 if prefix == "PENGUEN":
-                    self.assertIn("PENGUEN_THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN || secrets.PENGUEN_THREADS_ACCESS_TOKEN }}", self.workflow)
+                    self.assertIn("PENGUEN_THREADS_ACCESS_TOKEN: ${{ secrets.PENGUEN_THREADS_ACCESS_TOKEN || secrets.THREADS_ACCESS_TOKEN }}", self.workflow)
                 if prefix != "PENGUEN":
                     line = re.search(
                         rf"^\s+{prefix}_THREADS_ACCESS_TOKEN:\s+(.+)$",
