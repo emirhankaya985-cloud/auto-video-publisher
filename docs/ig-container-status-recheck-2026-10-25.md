@@ -29,3 +29,8 @@ classification labels and numeric error codes, never raw provider status text.
 ## 1 November 2026 owner-requested diagnosis
 
 Read only the exact Tarladaki 192 and Penguen 193 prior containers after live Page and linked Instagram identity verification, alongside Film Part10. Do not upload, publish, clear intents, or log credential/provider text. This diagnostic does not grant any retry.
+
+
+## 2 November 2026 — immediate owner-requested reconciliation evidence
+
+Recheck the exact pinned failed and uncertain containers with authenticated GET only. No upload, media_publish, intent reset or state deletion. Compare current provider states with the normal publisher's reconciled ledger before any recovery action. This diagnostic receipt alone never means a published post was verified.
