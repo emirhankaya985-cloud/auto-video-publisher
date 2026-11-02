@@ -519,3 +519,10 @@ izlenir; bu inceleme test amaçlı gerçek yayın tetiklemedi.
 - Düzeltme: raporlama için yalnız GET ile en yeni main `link-state-result`/daha yeni `link-state-intent` okunur. Done ve post ID bulunan kayıtlar platform başına tekilleştirilir. Eksik/bozuk arşiv sıfıra dönüştürülmez. Günlük kota tamamlanması platformların en düşük sayısından hesaplanır; aynı kaynak videosu eşleşmesi iddiası değildir. Meta toplam platform hedefi 69; video kota hedefi 32. Belirsiz kayıt başarı sayılmaz.
 - Test: arşiv seçimi, tekilleştirme, Film'in üç hedefi, kaynak kimliği farkları, ID'siz/belirsiz kayıtlar ve rapor entegrasyonu. Gerçek 2 Kasım arşiviyle 1 Kasım platform sayıları 69/69 okunabildi; bu yeni kodun canlı günlük rapor çalışması değildir.
 - Yayın, token, intent veya state değiştirilmez. Geri alma: bu raporlama değişikliğini revert et; artifact geçmişini silme. Son kabul: merge sonrası normal günlük raporun `publication-progress` artifact'ı ve bildirimdeki sayılar ayrıca doğrulanmalıdır.
+
+### 2 Kasım 2026 — Rapor arşivi sayfalaması ve bağımsız bildirim hazırlığı
+
+- Günlük arşiv okuyucu 100 artifact sınırında geçerli geçmişi reddediyordu. Sınırlı sayfalama eklendi; erişim/şema hatasında eski geçmiş yine korunur. 101. kayıttaki geçerli snapshot regresyonu eklendi.
+- ntfy tablo/özet hazırlığı Telegram gönderiminden önce korumasız çalışıyordu. Artık ntfy biçimlendirme hatası Telegram tablo gönderimini durdurmaz. Telegram başarı alındısı varsa ntfy arızası açıkça loglanır; iki kanal da başarısızsa işlem başarısız kalır. Test gerçek bildirim göndermeden iki Telegram parçasının kabulünü denetler.
+- Son yayın gözlemi: run 41425754467 Meta publish/notify başarılı, 4 doğrulanmış yeni post; üst workflow hatası YouTube accepted durumundaki RuntimeError. Yayın güvenlik kilitleri, belirsiz intent ve kaynak karantinası değiştirilmedi.
+- Geri alma: bu raporlama commit'ini revert et. State veya geçmiş silme yok. Canlı günlük rapor alındıları ayrıca doğrulanmalıdır.

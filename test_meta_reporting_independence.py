@@ -153,6 +153,28 @@ class ReportingIndependenceTests(unittest.TestCase):
             self.assertEqual(actual["source_run"], 500)
             self.assertEqual(dest.read_bytes(), raw)
 
+    def test_archive_restores_valid_snapshot_after_full_page(self):
+        raw = b'{"period":"2026-11-01","status":"ok"}\n'
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as z:
+            z.writestr("daily_video_views.jsonl", raw)
+        def get(url, **kwargs):
+            if url.endswith('/zip'):
+                return Mock(status_code=200, content=buffer.getvalue())
+            page = kwargs['params']['page']
+            rows = [{"name": ARTIFACT_NAME, "expired": True}] * 100 if page == 1 else [{
+                "name": ARTIFACT_NAME, "id": 9, "expired": False,
+                "created_at": "2026-11-01T20:00:00Z",
+                "workflow_run": {"id": 12, "head_branch": "main"}}]
+            response = Mock(status_code=200)
+            response.json.return_value = {"artifacts": rows, "total_count": 101}
+            return response
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / 'history.jsonl'
+            actual = restore_history(dest, token='fake', get=get)
+            self.assertEqual(actual['source_run'], 12)
+            self.assertEqual(dest.read_bytes(), raw)
+
     def test_inaccessible_archive_does_not_overwrite_prior_history(self):
         listing = Mock(status_code=403)
         with tempfile.TemporaryDirectory() as d:
