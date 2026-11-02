@@ -11,6 +11,7 @@ import io
 import json
 import os
 import re
+import subprocess
 import time
 import tempfile
 import zipfile
@@ -1531,10 +1532,17 @@ def verify_source_video(path):
             raise ValueError("no-video-stream")
         if not (0 < duration < 10800):
             raise ValueError("invalid-video-duration")
+    except subprocess.CalledProcessError as exc:
+        # ffprobe stderr/command may contain local paths or provider metadata.
+        # Preserve only its numeric exit status for safe source diagnosis.
+        exit_code = exc.returncode if type(exc.returncode) is int else "unknown"
+        raise RuntimeError(
+            f"MP4 medya doğrulaması çalıştırılamadı: ffprobe_exit={exit_code}"
+        ) from None
     except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
         raise RuntimeError("MP4 medya ön doğrulaması başarısız: " + type(exc).__name__) from None
     except Exception as exc:
-        # ffprobe process errors are handled like other local pre-upload errors.
+        # Other local probe failures stay fail-closed without leaking paths.
         raise RuntimeError("MP4 medya doğrulaması çalıştırılamadı: " + type(exc).__name__) from None
     return True
 
