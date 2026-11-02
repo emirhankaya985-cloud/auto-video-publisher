@@ -49,6 +49,8 @@ jobs:
       AUTO_SUBTITLES_ENABLED: ${{ vars.AUTO_SUBTITLES_ENABLED == 'true' && 'true' || 'false' }}
       SUBTITLE_MODEL_DIR: ${{ github.workspace }}/speech-model
       ADAPTIVE_SCHEDULE_ENABLED: ${{ vars.ADAPTIVE_SCHEDULE_ENABLED != 'false' && 'true' || 'false' }}
+      # Bounded two-item catch-up after 18:00; never bypasses per-route quota or safety locks.
+      AUTO_BACKFILL_ENABLED: ${{ vars.AUTO_BACKFILL_ENABLED == 'true' && 'true' || 'false' }}
       # Only User token can discover verified Page tokens; invalid/expired token fails closed.
       YOUTUBE_PUBLISHING_ENABLED: ${{ vars.YOUTUBE_PUBLISHING_ENABLED != 'false' && 'true' || 'false' }}
       TOKEN_CHANNEL1_JSON: ${{ secrets.TOKEN_CHANNEL1_JSON }}
