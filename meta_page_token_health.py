@@ -4,6 +4,7 @@ import os
 import sys
 import unicodedata
 import requests
+from api_capacity_guard import capacity_from_headers
 
 EXPECTED = {"Tarladaki Fasulye", "Beyinsiz Penguen", "Gönle Düşen",
             "Daily Laugh Lab", "Film Mağarası", "Filmmagrasi", "ToonZone"}
@@ -76,8 +77,12 @@ def check_page(page, get=requests.get):
         live_ig = str((body.get("instagram_business_account") or {}).get("id") or "")
         if instagram and live_ig != instagram:
             return {**out, "reason": "instagram_id_mismatch"}
-        return {**out, "status": "identity_verified", "reason": None,
-                "instagram_identity_checked": bool(instagram)}
+        capacity = capacity_from_headers(getattr(response, "headers", {}))
+        # 95% observed usage fails the existing preflight CLOSED. 80% is a
+        # redacted warning; missing headers are unknown, never read as zero.
+        return {**out, "status": "capacity_hold" if capacity["status"] == "hold" else "identity_verified",
+                "reason": "observed_api_capacity_95_percent" if capacity["status"] == "hold" else None,
+                "api_capacity": capacity, "instagram_identity_checked": bool(instagram)}
     except requests.RequestException as exc:
         return {**out, "reason": "network_error", "exception_type": type(exc).__name__}
     except Exception as exc:
