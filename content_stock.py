@@ -1,1 +1,80 @@
-IiIiQ29uc2VydmF0aXZlIHBsYXRmb3JtIGludmVudG9yeSBlc3RpbWF0ZXM7IG5ldmVyIGFsbG9jYXRlcyBvciBwdWJsaXNoZXMuIiIiCmZyb20gY29sbGVjdGlvbnMgaW1wb3J0IGRlZmF1bHRkaWN0CmZyb20gcGF0aGxpYiBpbXBvcnQgUGF0aApmcm9tIHB1YmxpY2F0aW9uX29wZXJhdGlvbnMgaW1wb3J0IHNlcmlhbF9pZGVudGl0eQoKCmRlZiBidWlsZF9zdG9jayhjYXRhbG9ncywgc3RhdGUsIHJvdXRlcywgZGFpbHlfdGFyZ2V0cywgKiwgdW5hdmFpbGFibGU9KCksCiAgICAgICAgICAgICAgICBnZW5lcmF0ZWRfY2FwdGlvbl9kaXJzPU5vbmUpOgogICAgZW50cmllcyA9IHN0YXRlLmdldCgnZW50cmllcycsIHt9KQogICAgcmVzdWx0ID0gW10KICAgIGZvciByb3V0ZSwgKHNvdXJjZSwgbGFiZWwpIGluIHJvdXRlcy5pdGVtcygpOgogICAgICAgIGlmIHNvdXJjZSBpbiB1bmF2YWlsYWJsZToKICAgICAgICAgICAgcmVzdWx0LmFwcGVuZChkaWN0KHJvdXRlPXJvdXRlLCBhY2NvdW50PWxhYmVsLCBzdGF0dXM9J3VuYXZhaWxhYmxlJywKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIHJlbWFpbmluZz1Ob25lLCBlc3RpbWF0ZWRfZGF5cz1Ob25lKSkKICAgICAgICAgICAgY29udGludWUKICAgICAgICBmaWxlcyA9IGNhdGFsb2dzLmdldChzb3VyY2UsIHt9KQogICAgICAgIGdlbmVyYXRlZF9jYXB0aW9uX2RpciA9IChnZW5lcmF0ZWRfY2FwdGlvbl9kaXJzIG9yIHt9KS5nZXQoc291cmNlKQogICAgICAgIHZpZGVvcyA9IFt2IGZvciBuLCB2IGluIGZpbGVzLml0ZW1zKCkgaWYgbi5sb3dlcigpLmVuZHN3aXRoKCcubXA0JyldCiAgICAgICAgIyBOYW1lIGFsaWFzZXMgc2hhcmUgYSBzbG90IGJ1dCBhcmUgbm90IGFzc3VtZWQgdG8gc2hhcmUgZmlsZSBieXRlcy4KICAgICAgICBncm91cHMgPSBkZWZhdWx0ZGljdChsaXN0KQogICAgICAgIGZvciB2aWRlbyBpbiB2aWRlb3M6CiAgICAgICAgICAgIGlkZW50aXR5ID0gc2VyaWFsX2lkZW50aXR5KHJvdXRlLCB2aWRlb1snbmFtZSddKQogICAgICAgICAgICBncm91cHNbaWRlbnRpdHkgb3IgKCdzb3VyY2UnLCB2aWRlb1snaWQnXSldLmFwcGVuZCh2aWRlbykKICAgICAgICBzZXJpZXNfcGFydHMgPSBkZWZhdWx0ZGljdChzZXQpCiAgICAgICAgZm9yIGlkZW50aXR5IGluIGdyb3VwczoKICAgICAgICAgICAgaWYgaWRlbnRpdHlbMF0gIT0gJ3NvdXJjZSc6CiAgICAgICAgICAgICAgICBzZXJpZXNfcGFydHNbaWRlbnRpdHlbMF1dLmFkZChpZGVudGl0eVsxXSkKICAgICAgICBzb3VyY2VfZ2FwcyA9IHt0aXRsZTogc29ydGVkKHNldChyYW5nZSgxLCA1IGlmIHJvdXRlID09ICd0b29uem9uZScKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgZWxzZSBtYXgocGFydHMpICsgMSkpIC0gcGFydHMpCiAgICAgICAgICAgICAgICAgICAgICAgZm9yIHRpdGxlLCBwYXJ0cyBpbiBzZXJpZXNfcGFydHMuaXRlbXMoKX0KICAgICAgICBwbGF0Zm9ybXMgPSAoJ2ZhY2Vib29rJywpIGlmIHJvdXRlID09ICdmaWxtX3NlY29uZCcgZWxzZSAoJ2ZhY2Vib29rJywgJ2luc3RhZ3JhbScpCiAgICAgICAgZm9yIHBsYXRmb3JtIGluIHBsYXRmb3JtczoKICAgICAgICAgICAgY291bnRzID0gZGljdChyZW1haW5pbmc9MCwgY29tcGxldGVkPTAsIGhlbGQ9MCwgYW1iaWd1b3VzPTAsIG1pc3NpbmdfdHh0PTApCiAgICAgICAgICAgIGZvciBpZGVudGl0eSwgdmFyaWFudHMgaW4gZ3JvdXBzLml0ZW1zKCk6CiAgICAgICAgICAgICAgICByb3dzID0gW2VudHJpZXMuZ2V0KGYie3JvdXRlfTp7cGxhdGZvcm19Ont2WydpZCddfSIsIHt9KSBmb3IgdiBpbiB2YXJpYW50c10KICAgICAgICAgICAgICAgIGlmIGFueShyLmdldCgnc3RhdHVzJykgPT0gJ2RvbmUnIGFuZCByLmdldCgncG9zdF9pZCcpIGZvciByIGluIHJvd3MpOgogICAgICAgICAgICAgICAgICAgIGNvdW50c1snY29tcGxldGVkJ10gKz0gMQogICAgICAgICAgICAgICAgZWxpZiBhbnkoci5nZXQoJ3N0YXR1cycpIGluIHsnaW50ZW50JywgJ3VuY2VydGFpbicsICdkb25lJywgJ2hlbGQnfSBmb3IgciBpbiByb3dzKToKICAgICAgICAgICAgICAgICAgICBjb3VudHNbJ2hlbGQnXSArPSAxCiAgICAgICAgICAgICAgICBlbGlmIGxlbih2YXJpYW50cykgIT0gMToKICAgICAgICAgICAgICAgICAgICBjb3VudHNbJ2FtYmlndW91cyddICs9IDEKICAgICAgICAgICAgICAgIGVsaWYgKHJvdXRlIGluIHsnZmlsbScsICdmaWxtX3NlY29uZCcsICd0b29uem9uZSd9CiAgICAgICAgICAgICAgICAgICAgICBhbmQgaWRlbnRpdHlbMF0gPT0gJ3NvdXJjZScpOgogICAgICAgICAgICAgICAgICAgIGNvdW50c1snYW1iaWd1b3VzJ10gKz0gMQogICAgICAgICAgICAgICAgZWxpZiBzb3VyY2UgPT0gJ2h1bW9yJyBhbmQgYW55KAogICAgICAgICAgICAgICAgICAgIGsuZW5kc3dpdGgoJzonICsgdmFyaWFudHNbMF1bJ2lkJ10pIGFuZCByLmdldCgncm91dGUnKSAhPSByb3V0ZQogICAgICAgICAgICAgICAgICAgIGFuZCByLmdldCgncm91dGUnKSBpbiB7J3RhcmxhZGFraScsICdwZW5ndWVuJ30KICAgICAgICAgICAgICAgICAgICBmb3IgaywgciBpbiBlbnRyaWVzLml0ZW1zKCkpOgogICAgICAgICAgICAgICAgICAgIGNvdW50c1snaGVsZCddICs9IDEKICAgICAgICAgICAgICAgIGVsc2U6CiAgICAgICAgICAgICAgICAgICAgY2FwdGlvbl9uYW1lID0gUGF0aCh2YXJpYW50c1swXVsnbmFtZSddKS53aXRoX3N1ZmZpeCgnLnR4dCcpLm5hbWUKICAgICAgICAgICAgICAgICAgICBoYXNfZ2VuZXJhdGVkX2NhcHRpb24gPSAoCiAgICAgICAgICAgICAgICAgICAgICAgIGdlbmVyYXRlZF9jYXB0aW9uX2RpciBpcyBub3QgTm9uZQogICAgICAgICAgICAgICAgICAgICAgICBhbmQgKGdlbmVyYXRlZF9jYXB0aW9uX2RpciAvIGNhcHRpb25fbmFtZSkuaXNfZmlsZSgpCiAgICAgICAgICAgICAgICAgICAgKQogICAgICAgICAgICAgICAgICAgIGlmIGNhcHRpb25fbmFtZSBpbiBmaWxlcyBvciBoYXNfZ2VuZXJhdGVkX2NhcHRpb246CiAgICAgICAgICAgICAgICAgICAgICAgIGNvdW50c1sncmVtYWluaW5nJ10gKz0gMQogICAgICAgICAgICAgICAgICAgIGVsc2U6CiAgICAgICAgICAgICAgICAgICAgICAgIGNvdW50c1snbWlzc2luZ190eHQnXSArPSAxCiAgICAgICAgICAgIHRhcmdldCA9IGRhaWx5X3RhcmdldHNbcm91dGVdCiAgICAgICAgICAgIHJlc3VsdC5hcHBlbmQoZGljdChyb3V0ZT1yb3V0ZSwgYWNjb3VudD1sYWJlbCwgcGxhdGZvcm09cGxhdGZvcm0sCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBzdGF0dXM9J29ic2VydmVkX2NhbmRpZGF0ZXMnLCAqKmNvdW50cywKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIGVzdGltYXRlZF9kYXlzPXJvdW5kKGNvdW50c1sncmVtYWluaW5nJ10gLyB0YXJnZXQsIDIpLAogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgZGFpbHlfdGFyZ2V0PXRhcmdldCwKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIGxvd19zdG9jaz1jb3VudHNbJ3JlbWFpbmluZyddIDwgdGFyZ2V0ICogMywKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIG1pc3Npbmdfc291cmNlX3BhcnRzPXtrOiB2IGZvciBrLCB2IGluIHNvdXJjZV9nYXBzLml0ZW1zKCkgaWYgdn0sCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBjYXZlYXQ9J1RYVCBwcmVzZW5jZSBvbmx5OyByaWdodHMsIGNhcHRpb25zLCByZW1vdGUgaGlzdG9yeSBhbmQgcXVhbGl0eSBnYXRlcyBzdGlsbCByZXF1aXJlZCcpKQogICAgcmV0dXJuIHJlc3VsdAoKCmRlZiBzdG9ja19tYXJrZG93bihyb3dzKToKICAgIGxpbmVzID0gWycjIyDEsMOnZXJpayBzdG/En3UgKGFkYXkga2F5bmFrbGFyOyB5YXnEsW4gZ2FyYW50aXNpIGRlxJ9pbGRpciknLCAnJywKICAgICAgICAgICAgICd8IEhlc2FwIHwgUGxhdGZvcm0gfCBBZGF5IHwgQmVrbGV5ZW4gfCBUYWhtaW5pIGfDvG4gfCcsCiAgICAgICAgICAgICAnfCAtLS0gfCAtLS0gfCAtLS0gfCAtLS0gfCAtLS0gfCddCiAgICBmb3Igcm93IGluIHJvd3M6CiAgICAgICAgaWYgcm93WydzdGF0dXMnXSA9PSAndW5hdmFpbGFibGUnOgogICAgICAgICAgICBsaW5lcy5hcHBlbmQoZiJ8IHtyb3dbJ2FjY291bnQnXX0gfCBOL0EgfCBOL0EgfCBOL0EgfCBOL0EgfCIpCiAgICAgICAgZWxzZToKICAgICAgICAgICAgbGluZXMuYXBwZW5kKGYifCB7cm93WydhY2NvdW50J119IHwge3Jvd1sncGxhdGZvcm0nXX0gfCB7cm93WydyZW1haW5pbmcnXX0gfCB7cm93WydoZWxkJ119IHwge3Jvd1snZXN0aW1hdGVkX2RheXMnXX0gfCIpCiAgICByZXR1cm4gJ1xuJy5qb2luKGxpbmVzKQo=
+"""Conservative platform inventory estimates; never allocates or publishes."""
+from collections import defaultdict
+from pathlib import Path
+from publication_operations import serial_identity
+
+
+def build_stock(catalogs, state, routes, daily_targets, *, unavailable=(),
+                generated_caption_dirs=None):
+    entries = state.get('entries', {})
+    result = []
+    for route, (source, label) in routes.items():
+        if source in unavailable:
+            result.append(dict(route=route, account=label, status='unavailable',
+                               remaining=None, estimated_days=None))
+            continue
+        files = catalogs.get(source, {})
+        generated_caption_dir = (generated_caption_dirs or {}).get(source)
+        videos = [v for n, v in files.items() if n.lower().endswith('.mp4')]
+        # Name aliases share a slot but are not assumed to share file bytes.
+        groups = defaultdict(list)
+        for video in videos:
+            identity = serial_identity(route, video['name'])
+            groups[identity or ('source', video['id'])].append(video)
+        series_parts = defaultdict(set)
+        for identity in groups:
+            if identity[0] != 'source':
+                series_parts[identity[0]].add(identity[1])
+        source_gaps = {title: sorted(set(range(1, 5 if route == 'toonzone'
+                                       else max(parts) + 1)) - parts)
+                       for title, parts in series_parts.items()}
+        platforms = ('facebook',) if route == 'film_second' else ('facebook', 'instagram')
+        for platform in platforms:
+            counts = dict(remaining=0, completed=0, held=0, ambiguous=0, missing_txt=0)
+            for identity, variants in groups.items():
+                rows = [entries.get(f"{route}:{platform}:{v['id']}", {}) for v in variants]
+                if any(r.get('status') == 'done' and r.get('post_id') for r in rows):
+                    counts['completed'] += 1
+                elif any(r.get('status') in {'intent', 'uncertain', 'done', 'held'} for r in rows):
+                    counts['held'] += 1
+                elif len(variants) != 1:
+                    counts['ambiguous'] += 1
+                elif (route in {'film', 'film_second', 'toonzone'}
+                      and identity[0] == 'source'):
+                    counts['ambiguous'] += 1
+                elif source == 'humor' and any(
+                    k.endswith(':' + variants[0]['id']) and r.get('route') != route
+                    and r.get('route') in {'tarladaki', 'penguen'}
+                    for k, r in entries.items()):
+                    counts['held'] += 1
+                else:
+                    caption_name = Path(variants[0]['name']).with_suffix('.txt').name
+                    has_generated_caption = (
+                        generated_caption_dir is not None
+                        and (generated_caption_dir / caption_name).is_file()
+                    )
+                    if caption_name in files or has_generated_caption:
+                        counts['remaining'] += 1
+                    else:
+                        counts['missing_txt'] += 1
+            target = daily_targets[route]
+            result.append(dict(route=route, account=label, platform=platform,
+                               status='observed_candidates', **counts,
+                               estimated_days=round(counts['remaining'] / target, 2),
+                               daily_target=target,
+                               low_stock=counts['remaining'] < target * 3,
+                               missing_source_parts={k: v for k, v in source_gaps.items() if v},
+                               caveat='TXT presence only; rights, captions, remote history and quality gates still required'))
+    return result
+
+
+def stock_markdown(rows):
+    lines = ['## İçerik stoğu (aday kaynaklar; yayın garantisi değildir)', '',
+             '| Hesap | Platform | Aday | Bekleyen | Tahmini gün |',
+             '| --- | --- | --- | --- | --- |']
+    for row in rows:
+        if row['status'] == 'unavailable':
+            lines.append(f"| {row['account']} | N/A | N/A | N/A | N/A |")
+        else:
+            lines.append(f"| {row['account']} | {row['platform']} | {row['remaining']} | {row['held']} | {row['estimated_days']} |")
+    return '\n'.join(lines)
