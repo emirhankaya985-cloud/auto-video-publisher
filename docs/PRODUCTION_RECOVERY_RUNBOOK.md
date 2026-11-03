@@ -565,3 +565,8 @@ izlenir; bu inceleme test amaçlı gerçek yayın tetiklemedi.
 - **Neden:** Penguen'in seçili erişim tokenı reddedildi. Gerçek secret değerini okuyamadığımız için tokenın süresi dolduğunu veya yanlış OAuth uygulamasına ait olduğunu **kanıtlamıyoruz**. Denetim workflow'unda legacy genel tokenın Penguen'e özel tokenı gölgelemesi için olası öncelik hatası görüldü.
 - **Güvenli düzeltme:** [3 Kasım operasyon notu](../docs/operations-enhancements-2026-11-03.md) kapsamındaki PR #90 ile **Penguen'e özel secret varsa önce onu** kullan. Hata devam ederse yalnız ilgili tokenın kullanıcı tarafından güvenli biçimde yenilenmesi ve yeniden GET-only denetimi gerekir; başka beş tokenı değiştirme. Threads POST/yayın otomatik açılmaz.
 - **Kabul:** PR no-publish CI ve yeni `readonly-api` run'ında altı bağımsız gerçek `/me` kimliği PASS görülene kadar Penguen **UNVERIFIED**.
+
+## 3 Kasım 2026 — Üretilen TXT'ler stok raporunda eksik sayılıyordu
+
+- [Planlı çalışma #41586702003](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/41586702003) ToonZone için 159, Daily Laugh Lab için 117 TXT üretti. Stok hesabı yalnız Drive'daki TXT'leri saydığı için ToonZone'u sıfır aday gösterdi ve Daily Laugh Lab adaylarını eksik saydı.
+- Stok hesabı bu iki rota için video ile tam dosya adı eşleşen, yerelde oluşturulmuş TXT'yi de sayıyor. Seri sırası, bekleyen intent ve doğrulanmış gönderi kontrolleri korunuyor. Yerel testler stok hesabını doğruladı. Güncel stok raporunun canlı kabulü sonraki planlı çalışmayı bekliyor.

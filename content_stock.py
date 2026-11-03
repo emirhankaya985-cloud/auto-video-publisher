@@ -4,7 +4,8 @@ from pathlib import Path
 from publication_operations import serial_identity
 
 
-def build_stock(catalogs, state, routes, daily_targets, *, unavailable=()):
+def build_stock(catalogs, state, routes, daily_targets, *, unavailable=(),
+                generated_caption_dirs=None):
     entries = state.get('entries', {})
     result = []
     for route, (source, label) in routes.items():
@@ -13,6 +14,7 @@ def build_stock(catalogs, state, routes, daily_targets, *, unavailable=()):
                                remaining=None, estimated_days=None))
             continue
         files = catalogs.get(source, {})
+        generated_caption_dir = (generated_caption_dirs or {}).get(source)
         videos = [v for n, v in files.items() if n.lower().endswith('.mp4')]
         # Name aliases share a slot but are not assumed to share file bytes.
         groups = defaultdict(list)
@@ -45,10 +47,16 @@ def build_stock(catalogs, state, routes, daily_targets, *, unavailable=()):
                     and r.get('route') in {'tarladaki', 'penguen'}
                     for k, r in entries.items()):
                     counts['held'] += 1
-                elif Path(variants[0]['name']).with_suffix('.txt').name not in files:
-                    counts['missing_txt'] += 1
                 else:
-                    counts['remaining'] += 1
+                    caption_name = Path(variants[0]['name']).with_suffix('.txt').name
+                    has_generated_caption = (
+                        generated_caption_dir is not None
+                        and (generated_caption_dir / caption_name).is_file()
+                    )
+                    if caption_name in files or has_generated_caption:
+                        counts['remaining'] += 1
+                    else:
+                        counts['missing_txt'] += 1
             target = daily_targets[route]
             result.append(dict(route=route, account=label, platform=platform,
                                status='observed_candidates', **counts,
