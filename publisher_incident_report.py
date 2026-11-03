@@ -74,7 +74,7 @@ def build_incident_report(state, run_id, *, plan_text="", errors=None, step_outc
     # Never persist raw provider responses or secret-bearing tracebacks.
     events = [event for event in (errors or []) if event.get("run_id") == run_id]
     outcomes = {k: v for k, v in (step_outcomes or {}).items()
-                if k in ("preflight", "verify", "plan", "publish", "notify")
+                if k in ("preflight", "verify", "plan", "publish", "post_verification", "notify")
                 and v in ("success", "failure", "skipped", "cancelled")}
     # An early credential gate can fail before any ledger exists. Never present
     # an empty incident list as proof of a healthy publication run.
@@ -126,7 +126,7 @@ def main():
     report_path = ROOT / "report.md"
     plan_text = report_path.read_text(encoding="utf-8") if report_path.is_file() else ""
     outcomes = {key: os.getenv("OUTCOME_" + key.upper(), "")
-                for key in ("preflight", "verify", "plan", "publish", "notify")}
+                for key in ("preflight", "verify", "plan", "publish", "post_verification", "notify")}
     summary = build_incident_report(
         state, run_id, plan_text=plan_text,
         errors=read_errors(run_id=run_id), step_outcomes=outcomes,
