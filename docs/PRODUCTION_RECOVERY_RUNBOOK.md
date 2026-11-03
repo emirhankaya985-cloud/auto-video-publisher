@@ -565,3 +565,9 @@ izlenir; bu inceleme test amaçlı gerçek yayın tetiklemedi.
 - **Neden:** Penguen'in seçili erişim tokenı reddedildi. Gerçek secret değerini okuyamadığımız için tokenın süresi dolduğunu veya yanlış OAuth uygulamasına ait olduğunu **kanıtlamıyoruz**. Denetim workflow'unda legacy genel tokenın Penguen'e özel tokenı gölgelemesi için olası öncelik hatası görüldü.
 - **Güvenli düzeltme:** [3 Kasım operasyon notu](../docs/operations-enhancements-2026-11-03.md) kapsamındaki PR #90 ile **Penguen'e özel secret varsa önce onu** kullan. Hata devam ederse yalnız ilgili tokenın kullanıcı tarafından güvenli biçimde yenilenmesi ve yeniden GET-only denetimi gerekir; başka beş tokenı değiştirme. Threads POST/yayın otomatik açılmaz.
 - **Kabul:** PR no-publish CI ve yeni `readonly-api` run'ında altı bağımsız gerçek `/me` kimliği PASS görülene kadar Penguen **UNVERIFIED**.
+
+### 3 Kasım 2026 — Yayın sonrası doğrulama ve watchdog uyarısı
+
+- [10:06 TRT koşumu](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/41594144036) altı gönderi ve Fasulye MP4 hazırlama hatası kaydetti. [11:21 TRT koşumu](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/41602656968) iki gönderi kaydetti ve yayın sonrası geçmiş doğrulamasında başarısız oldu. Olay raporundaki önceki doğrulama alanı yalnızca ön test sonucunu gösteriyordu.
+- [Watchdog](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/41610942219) bu iki ardışık başarısız koşumu bildirdi. [12:26 TRT koşumu](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/41611079344) sekiz yeni gönderiyi doğruladı, yeni hata kaydetmedi.
+- Yayın sonrası geçmiş sorgusu geçici okuma hatası veya henüz görünmeyen ID için en fazla iki ek GET denemesi yapar. Çözülemeyen doğrulama ayrı adım sonucu olarak kaydedilir. Durum kaydı korunur. Düzeltmenin canlı kabulü bekleniyor.
