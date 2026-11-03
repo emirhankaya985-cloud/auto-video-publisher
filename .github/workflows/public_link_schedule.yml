@@ -166,6 +166,7 @@ jobs:
           YOUTUBE_INTENT_ARCHIVED: 'true'
         run: python youtube_main_bridge.py publish
       - name: Back up state and verify current-run posts with read-only history
+        id: post_verification
         if: always() && hashFiles('link-runtime/state.json') != ''
         run: python publication_operations.py --verify
       - name: Preserve checked backup and serial publication report
@@ -258,6 +259,7 @@ jobs:
           GITHUB_RUN_ID: ${{ github.run_id }}
           OUTCOME_PREFLIGHT: ${{ steps.meta_preflight.outcome }}
           OUTCOME_VERIFY: ${{ steps.verify.outcome }}
+          OUTCOME_POST_VERIFICATION: ${{ steps.post_verification.outcome }}
           OUTCOME_PLAN: ${{ steps.plan.outcome }}
           OUTCOME_PUBLISH: ${{ steps.publish.outcome }}
           OUTCOME_NOTIFY: ${{ (steps.notify_plan.outcome == 'failure' || steps.notify_intent.outcome == 'failure' || steps.notify.outcome == 'failure') && 'failure' || steps.notify.outcome }}

@@ -7,7 +7,8 @@ import zipfile
 from pathlib import Path
 
 from publication_operations import (create_backup, restore_backup, series_report,
-                                    verify_publications, checked_backup)
+                                    verify_publications, verify_publications_with_retry,
+                                    checked_backup)
 
 
 def entry(part, status='done', post='100', route='film', platform='instagram'):
@@ -17,6 +18,26 @@ def entry(part, status='done', post='100', route='film', platform='instagram'):
 
 
 class OperationsTests(unittest.TestCase):
+    def test_retry_reads_only_pending_history_and_preserves_evidence(self):
+        state = {'schema': 1, 'entries': {
+            'ig': entry(1, post='100'),
+            'fb': entry(1, post='200', platform='facebook'),
+        }}
+        attempts, delays = [], []
+
+        def history(route, platform):
+            attempts.append(platform)
+            if platform == 'facebook':
+                return [{'id': '200'}]
+            if attempts.count('instagram') == 1:
+                raise TimeoutError
+            return [{'id': '100'}]
+
+        results = verify_publications_with_retry(state, '123', history, sleep=delays.append)
+        self.assertEqual([row['status'] for row in results], ['verified', 'verified'])
+        self.assertEqual(attempts, ['instagram', 'facebook', 'instagram'])
+        self.assertEqual(delays, [5])
+
     def test_platform_isolation_and_gap(self):
         state = dict(schema=1, entries={'a': entry(1), 'b': entry(3),
                      'c': entry(2, platform='facebook')})
