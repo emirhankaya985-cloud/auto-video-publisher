@@ -983,15 +983,24 @@ def quarantine_weak_caption_aliases(state):
             entry["reconciliation_conflict"] = "post_id_belongs_to_other_source"
 
 
+# Exact Drive source independently read in full after production run #371.
+# A corrected upload with a new Drive ID is eligible as a separate source.
+_CONFIRMED_UNREADABLE_SHARED_SOURCES = {
+    ("tarladaki", "1hArLxDecYFwPs9lWQasXaNHK4f0dQ20W", "195.mp4"): "41790686639",
+}
+
+
 def quarantined_unordered_local_failure(route, item, state, platforms, day):
     """Skip an already proven pre-upload-broken clip, never an uncertain POST.
 
-    Limit this to unordered shared-humor sources on the same publication day.
+    Limit this to unordered shared-humor sources. Normally the hold lasts one
+    publication day; an independently verified corrupt source can stay held.
     Every active platform must have an exact prior source, file and local-only
     failure record. Do not alter those records or release any old intents.
     """
     if route not in {"tarladaki", "penguen"} or not platforms:
         return False
+    confirmed_run = _CONFIRMED_UNREADABLE_SHARED_SOURCES.get((route, item["id"], item["name"]))
     for platform in platforms:
         if platform not in {"facebook", "instagram"}:
             return False
@@ -1000,7 +1009,8 @@ def quarantined_unordered_local_failure(route, item, state, platforms, day):
         failure = entry.get("failure") or {}
         if not (
             entry.get("route") == route and entry.get("platform") == platform
-            and entry.get("file") == item["name"] and entry.get("day") == day
+            and entry.get("file") == item["name"]
+            and (entry.get("day") == day or str(entry.get("run_id")) == confirmed_run)
             and entry.get("status") == "ready"
             and isinstance(failure, dict)
             and failure.get("reason") == "source_or_cover_preparation_failed"
@@ -1588,6 +1598,26 @@ def verify_source_video(path):
     return True
 
 
+def download_verified_publication_video(file_id, path):
+    """Validate the downloaded MP4, with one alternate read if it is unreadable."""
+    video = download(file_id, path)
+    for attempt in range(2):
+        try:
+            with video.open("rb") as source:
+                if source.read(8)[4:8] != b"ftyp":
+                    raise RuntimeError("Source is not MP4")
+            verify_source_video(video)
+            return video
+        except RuntimeError:
+            video.unlink(missing_ok=True)
+            if attempt:
+                raise
+            print("İndirilen MP4 doğrulanamadı; bir kez alternatif Drive indirmesi deneniyor.", flush=True)
+            video = direct_public_drive(file_id, path)
+            if video is None:
+                raise
+
+
 def pending_publication_platforms(item, state):
     """Validate a persisted plan against its ledger before any download or POST."""
     platforms = item.get("platforms")
@@ -1702,12 +1732,7 @@ def publish():
             temp = Path(tmp)
             source_fingerprint = None
             try:
-                video = download(item["id"], temp / "source.mp4")
-                with video.open("rb") as source:
-                    header = source.read(8)
-                if header[4:8] != b"ftyp":
-                    raise RuntimeError("Source is not MP4")
-                verify_source_video(video)
+                video = download_verified_publication_video(item["id"], temp / "source.mp4")
                 from operational_enhancements import bind_source_integrity
                 if not bind_source_integrity(item, state, video):
                     failures.append(item["page"] + ": source changed; held before Meta upload")
