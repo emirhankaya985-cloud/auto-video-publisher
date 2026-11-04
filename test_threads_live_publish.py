@@ -16,7 +16,7 @@ class ThreadsNativeVideoTest(unittest.TestCase):
         timestamp = self.now - timedelta(minutes=offset)
         return {"id": identifier, "media_type": "VIDEO", "timestamp": timestamp.isoformat(),
                 "caption": "🎞️" * 400,
-                "media_url": "https://scontent.example.cdninstagram.com/v/clip.mp4",
+                "media_url": "https://drive.usercontent.google.com/download?id=clip",
                 "permalink": f"https://www.instagram.com/reel/clip{identifier}/"}
 
     def test_first_run_uses_newest_owned_confirmed_video_and_stores_intent(self):
@@ -46,6 +46,20 @@ class ThreadsNativeVideoTest(unittest.TestCase):
                   "permalink": "https://www.threads.com/@film_magrasi/post/abc/"}
         self.assertIsNone(live.choose("film", self.account, "1", candidates, self.history, [remote], "79", self.now))
         self.assertEqual(next(iter(self.history["records"].values()))["post_id"], "234")
+
+    def test_recovery_only_for_audited_prepublication_failure(self):
+        row = self.video("101", 15)
+        candidates = [(live.archive.stamp(row["timestamp"]), "101", "drive", row)]
+        with patch.object(live, "ready_media", return_value=row["media_url"]):
+            first = live.choose("film", self.account, "1", candidates, self.history, [], live.FIRST_PREPUBLISH_FAILURE, self.now)
+            entry = self.history["records"][first["key"]]
+            entry.update(status="attempted", failure="container_error")
+            second = live.choose("film", self.account, "1", candidates, self.history, [], "78", self.now)
+        self.assertEqual(first["key"], second["key"])
+        self.assertEqual(self.history["records"][second["key"]]["initial_failed_run_id"], live.FIRST_PREPUBLISH_FAILURE)
+        self.history["records"][second["key"]].update(status="attempted", failure="container_error")
+        with self.assertRaisesRegex(RuntimeError, "previous_threads_intent_unresolved"):
+            live.choose("film", self.account, "1", candidates, self.history, [], "79", self.now)
 
     def test_native_publish_verifies_returned_post_identity_and_exact_source(self):
         row = self.video("101", 5)

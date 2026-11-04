@@ -1,12 +1,13 @@
 """Mirror confirmed, owned Instagram videos into their matching Threads account."""
 import argparse
+import hashlib
 import json
 import os
 import re
 import time
 from datetime import timedelta
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 
 import requests
 
@@ -30,6 +31,9 @@ ROUTES = {
     "film": "Film Mağarası", "toonzone": "ToonZone",
 }
 ID = re.compile(r"[0-9]{1,30}\Z")
+DRIVE_ID = re.compile(r"[A-Za-z0-9_-]{20,128}\Z")
+SHA256 = re.compile(r"[0-9a-f]{64}\Z")
+FIRST_PREPUBLISH_FAILURE = "41869402302"
 REEL = re.compile(r"https://www\.instagram\.com/(?:reel|p)/[A-Za-z0-9_-]+/?\Z")
 
 
@@ -107,19 +111,40 @@ def safe_media_url(url):
     p = urlsplit(url)
     host = p.hostname or ""
     return (p.scheme == "https" and p.netloc == host and not p.fragment
-            and any(host.endswith("." + suffix) for suffix in ("cdninstagram.com", "fbcdn.net")))
+            and (host == "drive.usercontent.google.com" or host.endswith(".googleusercontent.com")))
 
 
-def ready_media(url):
-    if not safe_media_url(url):
-        raise RuntimeError("untrusted_media_host")
-    with requests.get(url, headers={"Range": "bytes=0-31"}, timeout=(8, 20),
-                      stream=True, allow_redirects=False) as response:
-        if response.status_code not in {200, 206}:
-            raise RuntimeError(f"source_video_http_{response.status_code}")
-        head = next(response.iter_content(chunk_size=32), b"")
-        if head[4:8] != b"ftyp":
-            raise RuntimeError("source_not_mp4")
+def ready_media(source_id, expected_hash):
+    """Validate the actual, already shared source before exposing its URL to Threads."""
+    if not DRIVE_ID.fullmatch(source_id) or not SHA256.fullmatch(expected_hash):
+        raise RuntimeError("unverified_drive_source")
+    url = "https://drive.usercontent.google.com/download?" + urlencode(
+        {"id": source_id, "export": "download", "confirm": "t"})
+    for _ in range(4):
+        with requests.get(url, timeout=(8, 25), stream=True, allow_redirects=False) as response:
+            if response.status_code in {301, 302, 303, 307, 308}:
+                url = response.headers.get("Location", "")
+                if not safe_media_url(url):
+                    raise RuntimeError("untrusted_drive_redirect")
+                continue
+            if response.status_code != 200:
+                raise RuntimeError(f"drive_video_http_{response.status_code}")
+            digest, total, head = hashlib.sha256(), 0, b""
+            for chunk in response.iter_content(chunk_size=1024 * 1024):
+                if not chunk:
+                    continue
+                if not total:
+                    head = chunk[:8]
+                    if head[4:8] != b"ftyp":
+                        raise RuntimeError("drive_source_not_mp4")
+                total += len(chunk)
+                if total > 300_000_000:
+                    raise RuntimeError("drive_source_too_large")
+                digest.update(chunk)
+            if not total or digest.hexdigest() != expected_hash:
+                raise RuntimeError("drive_source_hash_changed")
+            return url
+    raise RuntimeError("drive_redirect_limit")
 
 
 def sources(route, state, feed, now):
@@ -130,7 +155,7 @@ def sources(route, state, feed, now):
                 or row.get("status") != "done" or not ID.fullmatch(str(row.get("post_id", "")))):
             continue
         source = row.get("duplicate_of_file_id") or key.removeprefix(prefix)
-        accepted.setdefault(str(row["post_id"]), str(source))
+        accepted.setdefault(str(row["post_id"]), (str(source), str(row.get("source_sha256") or "")))
     candidates = []
     for row in feed:
         identifier = str(row.get("id", ""))
@@ -139,7 +164,8 @@ def sources(route, state, feed, now):
         timestamp = archive.stamp(row.get("timestamp"))
         if not now - timedelta(days=2) <= timestamp <= now:
             continue
-        candidates.append((timestamp, identifier, accepted[identifier], row))
+        source_id, digest = accepted[identifier]
+        candidates.append((timestamp, identifier, source_id, dict(row, source_sha256=digest)))
     return sorted(candidates, key=lambda item: item[:3])
 
 
@@ -167,11 +193,20 @@ def owns_post(row, user, marker):
 def choose(route, account, target, candidates, history, own_posts, run_id, now):
     records = history["records"]
     prior = [row for row in records.values() if row.get("route") == route]
+    recovery = None
     for record in prior:
         if record["user_id"] != target:
             raise RuntimeError("archived_threads_identity_changed")
         if record["status"] != "verified":
             matches = [p for p in own_posts if owns_post(p, account.username, record["marker"])]
+            if not matches and (record["intent_run_id"] == FIRST_PREPUBLISH_FAILURE
+                                and record["status"] == "attempted"
+                                and record.get("failure") == "container_error"
+                                and not record.get("post_id") and recovery is None):
+                # The audited first run exited during container processing.
+                # No threads_publish call was reached for these exact rows.
+                recovery = record
+                continue
             if len(matches) != 1:
                 raise RuntimeError("previous_threads_intent_unresolved")
             record.update(status="verified", post_id=matches[0]["id"], permalink=matches[0]["permalink"])
@@ -180,6 +215,11 @@ def choose(route, account, target, candidates, history, own_posts, run_id, now):
     seen_posts = {row["instagram_id"] for row in prior}
     eligible = [p for p in candidates if p[2] not in seen and p[1] not in seen_posts
                 and (newest is None or p[0] > newest)]
+    if recovery:
+        eligible = [p for p in candidates if p[1] == recovery["instagram_id"]
+                    and p[2] == recovery["source_id"] and "Instagram: " + link_for(p[3]) == recovery["marker"]]
+        if len(eligible) != 1:
+            raise RuntimeError("recovery_source_unavailable")
     if not eligible:
         return None
     timestamp, ig_id, source_id, row = eligible[-1] if newest is None else eligible[0]
@@ -188,17 +228,18 @@ def choose(route, account, target, candidates, history, own_posts, run_id, now):
     if len(matches) > 1:
         raise RuntimeError("threads_duplicate_history")
     key = archive.identity("threads_video", route, "threads", source_id)
-    if not matches:
-        ready_media(row.get("media_url"))
+    url = None if matches else ready_media(source_id, row.get("source_sha256", ""))
     record = dict(route=route, source_id=source_id, instagram_id=ig_id, user_id=target,
                   source_published_at=timestamp.isoformat(), marker=marker,
                   last_seen=now.isoformat(), intent_run_id=run_id, status="reserved")
     if matches:
         record.update(status="verified", post_id=matches[0]["id"], permalink=matches[0]["permalink"])
+    if recovery:
+        record["initial_failed_run_id"] = FIRST_PREPUBLISH_FAILURE
     records[key] = record
     if matches:
         return None
-    return dict(key=key, route=route, url=row["media_url"], text=caption_for(row))
+    return dict(key=key, route=route, url=url, text=caption_for(row))
 
 
 def error_label(exc):
@@ -235,7 +276,7 @@ def prepare(run_id):
             if not ID.fullmatch(ig):
                 raise RuntimeError("source_instagram_not_linked")
             owned = rows(META, f"{ig}/media", page["page_token"],
-                         "id,caption,media_type,media_url,permalink,timestamp")
+                         "id,caption,media_type,permalink,timestamp")
             # Instagram supplies newest first; current sources need only one
             # page, and the publisher ledger independently supplies post IDs.
             from itertools import islice
@@ -264,10 +305,17 @@ def publish(plan, record, account):
         raise RuntimeError("container_id_missing")
     for _ in range(30):
         time.sleep(4)
-        phase = graph(THREADS, identifier, account.token, fields="status").get("status")
+        status = graph(THREADS, identifier, account.token, fields="status,error_message")
+        phase = status.get("status")
         if phase == "FINISHED":
             break
         if phase in {"ERROR", "EXPIRED", "PUBLISHED"}:
+            message = str(status.get("error_message", "")).lower()
+            if phase == "ERROR":
+                if any(word in message for word in ("fetch", "download", "url", "access")):
+                    raise RuntimeError("container_source_download_rejected")
+                if any(word in message for word in ("format", "codec", "duration", "size", "resolution")):
+                    raise RuntimeError("container_media_format_rejected")
             raise RuntimeError("container_" + phase.lower())
     else:
         raise RuntimeError("container_not_finished")
