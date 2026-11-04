@@ -578,3 +578,9 @@ izlenir; bu inceleme test amaçlı gerçek yayın tetiklemedi.
 - Kanıt: [41911406151](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/41911406151) 00:09 TRT'de rapor oluştururken `KeyError: 'yt1'` ile durdu. Günlük ölçüm geçmişi arşivlendi, karşılaştırma artifact'ı oluşmadı ve Telegram'a hata bildirimi gitti.
 - Neden: Çok platformlu izlenme raporu, YouTube verilerini Meta yayın arşiviyle birlikte işlerken Meta arşivinde YouTube yayın anahtarının bulunacağını varsaydı.
 - Güvenli düzeltme: Yayın sayacını hesap rotasıyla eşleştir ve yoksa yalnızca sayacı eksik göster. İzlenme ve abone verisini koru. Regresyon testi Meta arşivinde YouTube anahtarı olmadan rapor üretimini denetler. Canlı kabul için sonraki çalışmada karşılaştırma artifact'ı ve Telegram sunucu alındıları kontrol edilmeli.
+
+### 5 Kasım 2026 — ToonZone telif bildirimi
+
+- Kullanıcının Meta bildiriminde 26 Ekim tarihli Regular Show S01E03, Part 3/4 işaretlendi. Bildirim metni telif gerekçesini gösteriyor. İddia sahibi, kararın kapsamı ve diğer kopyaların durumu henüz doğrulanmadı.
+- ToonZone normal ve manuel yayın ile toplu yayın istisnasına kapatıldı. Durdurma, mevcut etkinleştirme bayraklarından bağımsızdır. Yayın geçmişini koru ve mevcut gönderiyi tekrar sıraya alma.
+- Yeniden açmadan önce hak belgesini doğrula, diğer platformlardaki aynı kaynağı ve serinin kalan kuyruğunu incele. Yerel test, etkinleştirme ve toplu yayın bayraklarının durdurmayı aşamadığını kontrol eder.

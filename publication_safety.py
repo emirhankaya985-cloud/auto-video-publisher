@@ -1,5 +1,6 @@
 """Emergency route hold with narrowly-scoped, one-shot batch exception."""
 import os
+COPYRIGHT_HELD_ROUTES = frozenset({"toonzone"})
 PAUSED_ROUTES = frozenset({"tarladaki", "penguen"})
 NEW_YOUTUBE_ROUTES = frozenset({"gonle_youtube", "daily_laugh_youtube"})
 NEW_META_ROUTES = frozenset({"film", "toonzone", "daily_laugh_instagram"})
@@ -14,6 +15,8 @@ def controlled_gonle_ig_test_enabled():
 
 
 def route_paused(route):
+    if route in COPYRIGHT_HELD_ROUTES:
+        return True
     # Gönle and Daily are enabled per channel.  A global existing-routes
     # switch must never wake a half-configured fan-out route.
     if route == "gonle_ig":
@@ -69,11 +72,12 @@ def batch_exception_allowed(route):
         return False
     base = route.removesuffix("_ig").removesuffix("_fb")
     allowed = {x.strip() for x in os.getenv("BATCH_ALLOWED_ROUTES", "").split(",") if x.strip()}
-    return bool(os.getenv("BATCH_ID") and os.getenv("BATCH_API_URL") and os.getenv("BATCH_API_TOKEN") and base in allowed)
+    return bool(os.getenv("BATCH_ID") and os.getenv("BATCH_API_URL") and os.getenv("BATCH_API_TOKEN") and base in allowed
+                and base not in COPYRIGHT_HELD_ROUTES)
 
 
 def platform_allowed(account, platform):
-    return True
+    return account not in COPYRIGHT_HELD_ROUTES
 
 
 def new_meta_route_enabled(route):
