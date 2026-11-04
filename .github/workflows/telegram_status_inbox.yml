@@ -4,7 +4,9 @@ on:
     - cron: '*/5 * * * *'
   push:
     branches: [main]
-    paths: ['docs/telegram-status-plan-delivery-20261103.md']
+    paths:
+      - 'docs/telegram-status-plan-delivery-20261103.md'
+      - 'docs/telegram-owner-inbox-wake.md'
   workflow_dispatch:
 permissions:
   contents: read
