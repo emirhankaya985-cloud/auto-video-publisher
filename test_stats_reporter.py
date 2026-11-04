@@ -101,7 +101,7 @@ def test_first_snapshot_is_labeled_na_but_failed_metric_is_unavailable():
 def test_daily_targets_and_film_fanout_match_requested_scope():
     assert [ACCOUNT_TARGETS[name][0] for name in ACCOUNT_TARGETS] == [5, 5, 5, 8, 5, 4]
     assert ACCOUNT_TARGETS["🎬 Film Mağarası + Filmmagrasi"][3] == ("fb_film_1", "fb_film_2", "ig")
-    assert all(account != "❤️ Gönle Düşen" for account, *_rest in YOUTUBE_TARGETS)
+    assert any(account == "❤️ Gönle Düşen" for account, *_rest in YOUTUBE_TARGETS)
 
 
 def test_publication_progress_reports_platform_failures_and_last_verified_status():
@@ -418,3 +418,24 @@ def test_late_scheduled_report_retains_previous_date_but_refuses_daily_gains():
     assert all(call.args[2] == "2026-10-20" for call in progress.call_args_list)
 
 
+
+
+def test_threads_snapshot_keeps_followers_when_video_insights_are_unavailable():
+    import pytest
+    from stats_reporter import threads_video_snapshot
+
+    followers = Mock()
+    replies = [
+        {"data": [{"name": "followers_count", "total_value": {"value": 0}}]},
+        {"data": []},
+    ]
+    with patch("threads_live_publish.account_config", return_value=Mock(token="test")), \
+            patch("threads_live_publish.profile", return_value="1"), \
+            patch("threads_live_publish.rows", return_value=[
+                {"id": "2", "media_type": "TEXT_POST"},
+                {"id": "3", "media_type": "VIDEO"},
+            ]), patch("threads_live_publish.graph", side_effect=replies) as graph:
+        with pytest.raises(RuntimeError, match="threads_video_views_unavailable"):
+            threads_video_snapshot("film", on_followers=followers)
+    followers.assert_called_once_with(0)
+    assert [call.args[1] for call in graph.call_args_list] == ["1/threads_insights", "3/insights"]

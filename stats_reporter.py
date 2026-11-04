@@ -27,6 +27,7 @@ from ntfy_notifications import send_ntfy
 from telegram_notifications import STATISTICS_KEYBOARD, send_telegram, telegram_configured
 from ntfy_phone_report import compact_phone_report
 from publisher_recovery import read_with_retry
+from performance_history import counter, follower_changes
 from views_comparison import ViewReport, build_comparison, load_history, telegram_tables, validate_collection
 
 
@@ -48,8 +49,9 @@ META_TARGETS = (
 )
 
 YOUTUBE_TARGETS = (
-    ("🌱 Tarladaki Fasulye", "TOKEN_CHANNEL1_JSON", "token_channel1.json", None, "YouTube"),
-    ("🐧 Beyinsiz Penguen", "TOKEN_CHANNEL2_JSON", "token_channel2.json", None, "YouTube"),
+    ("🌱 Tarladaki Fasulye", "TOKEN_CHANNEL1_JSON", "token_channel1.json", "UCrUF3mT4oF26JNBLcyKPcGQ", "YouTube"),
+    ("🐧 Beyinsiz Penguen", "TOKEN_CHANNEL2_JSON", "token_channel2.json", "UCUG-NSyXpEt9PLt5RS4iumw", "YouTube"),
+    ("❤️ Gönle Düşen", "TOKEN_GONLE_DUSEN_JSON", "token_gonle_dusen.json", "UCvSvo5WghuXqsjwLRmIz22g", "YouTube"),
     ("😂 Daily Laugh Lab", "TOKEN_DAILY_LAUGH_LAB_JSON", "token_daily_laugh_lab.json", "UCF4KwI3alXzlExviMFmmJAA", "YouTube"),
 )
 
@@ -208,7 +210,7 @@ def publication_counts(drive, folder_id, result_keys, day):
     return total
 
 
-def youtube_video_snapshot(env_name, fallback, expected_channel_id=None):
+def youtube_video_snapshot(env_name, fallback, expected_channel_id=None, *, on_subscribers=None):
     """Collect current per-video lifetime views for every item in the uploads playlist."""
     youtube = get_youtube_client(env_name, fallback, scopes=SCOPES_YOUTUBE_CHANNEL_READ)
     channels = youtube.channels().list(
@@ -219,6 +221,10 @@ def youtube_video_snapshot(env_name, fallback, expected_channel_id=None):
     channel = channels[0]
     if expected_channel_id and channel.get("id") != expected_channel_id:
         raise RuntimeError("YouTube OAuth kanalı beklenen hesapla eşleşmiyor")
+    if on_subscribers is not None:
+        stats = channel.get("statistics") or {}
+        if stats.get("hiddenSubscriberCount") is not True:
+            on_subscribers(stats.get("subscriberCount"))
     upload_playlist = (
         channel.get("contentDetails", {}).get("relatedPlaylists", {}).get("uploads")
     )
@@ -333,6 +339,46 @@ def _local_date(value):
         return None
 
 
+def _threads_metric(response, name):
+    for entry in response.get("data", []):
+        if entry.get("name") != name:
+            continue
+        total = entry.get("total_value")
+        if isinstance(total, dict):
+            return counter(total.get("value"))
+        values = entry.get("values") or []
+        if len(values) == 1:
+            return counter(values[0].get("value"))
+    return None
+
+
+def threads_video_snapshot(route, *, on_followers):
+    from threads_live_publish import ID, THREADS, account_config, error_label, graph, profile, rows
+
+    account = account_config(route)
+    user_id = profile(account)
+    try:
+        insights = graph(THREADS, f"{user_id}/threads_insights", account.token,
+                         metric="followers_count")
+        on_followers(_threads_metric(insights, "followers_count"))
+    except Exception as exc:
+        print(f"{route} / Threads followers: {error_label(exc)}")
+
+    videos = {}
+    for post in rows(THREADS, f"{user_id}/threads", account.token, "id,media_type,timestamp"):
+        if post.get("media_type") != "VIDEO":
+            continue
+        post_id = str(post.get("id", ""))
+        if not ID.fullmatch(post_id) or post_id in videos:
+            raise RuntimeError("threads_invalid_video_id")
+        insights = graph(THREADS, f"{post_id}/insights", account.token, metric="views")
+        views = _threads_metric(insights, "views")
+        if views is None:
+            raise RuntimeError("threads_video_views_unavailable")
+        videos[post_id] = {"views": views, "published_at": post.get("timestamp")}
+    return videos
+
+
 def _collect_snapshot(now, *, report_day=None):
     snapshot, records, errors = {}, [], []
     measured_at = now.astimezone(TZ).isoformat(timespec="seconds")
@@ -368,6 +414,16 @@ def _collect_snapshot(now, *, report_day=None):
                 source_api=source_api, source_metric="views", status="ok",
             ))
 
+    def save_followers(account, platform, value, source, metric):
+        value = counter(value)
+        records.append(make_record(
+            measured_at=measured_at, timezone="Europe/Istanbul", account=account,
+            platform=platform, entity_type="account", entity_id=account, metric="followers",
+            value=value, unit="count", period=period, source_api=source, source_metric=metric,
+            status="ok" if value is not None else "unavailable",
+        ))
+
+    multiplatform = os.getenv("MULTIPLATFORM_STATS_ENABLED") == "true"
     for account, page_name, platform in META_TARGETS:
         api = "meta.graph.video.views" if platform.startswith("Facebook") else "meta.graph.ig_media_insights.views"
         try:
@@ -378,17 +434,36 @@ def _collect_snapshot(now, *, report_day=None):
             save_platform(account, platform, None, api, exc)
 
     for account, env_name, fallback, expected_id, platform in YOUTUBE_TARGETS:
-        if os.getenv("META_ONLY_REPORTING", "").lower() == "true":
+        if not multiplatform and os.getenv("META_ONLY_REPORTING", "").lower() == "true":
             continue
         api = "youtube.data.v3.videos.statistics.viewCount"
         if not os.environ.get(env_name, "").strip() and not Path(fallback).exists():
             save_platform(account, platform, None, api, RuntimeError("YouTube OAuth ayarı bulunamadı"))
             continue
         try:
-            data, _channel_title = youtube_video_snapshot(env_name, fallback, expected_id)
+            if multiplatform:
+                data, _channel_title = youtube_video_snapshot(
+                    env_name, fallback, expected_id,
+                    on_subscribers=lambda value: save_followers(
+                        account, platform, value, "youtube.data.v3", "subscriberCount"),
+                )
+            else:
+                data, _channel_title = youtube_video_snapshot(env_name, fallback, expected_id)
             save_platform(account, platform, data, api)
         except Exception as exc:
             save_platform(account, platform, None, api, exc)
+    if multiplatform:
+        from threads_live_publish import error_label
+        for account, (_target, route, _folder, _keys) in ACCOUNT_TARGETS.items():
+            api = "threads.graph.post.insights.views"
+            try:
+                data = threads_video_snapshot(
+                    route, on_followers=lambda value: save_followers(
+                        account, "Threads", value, "threads.graph", "followers_count"),
+                )
+                save_platform(account, "Threads", data, api)
+            except Exception as exc:
+                save_platform(account, "Threads", None, api, RuntimeError(error_label(exc)))
     return snapshot, records, errors
 
 
@@ -570,7 +645,7 @@ def build_report(now=None):
         )
         errors.extend(collection_errors)
         if os.getenv('ENGAGEMENT_HISTORY_ENABLED', 'false').lower() == 'true':
-            from performance_history import collect_engagement, follower_changes
+            from performance_history import collect_engagement
             engagement, engagement_errors = collect_engagement(
                 META_TARGETS, get_meta_page_info, graph_get, graph_pages,
                 measured_at=now.isoformat(timespec='seconds'), period=today)
@@ -616,8 +691,7 @@ def build_report(now=None):
         report_accounts = {}
         for account, (target, route, _folder, _keys) in ACCOUNT_TARGETS.items():
             platform_names = {p for owner, _page, p in META_TARGETS if owner == account}
-            if not meta_only:
-                platform_names.update(p for owner, _env, _fallback, _expected, p in YOUTUBE_TARGETS if owner == account)
+            platform_names.update(platform for owner, platform in snapshot if owner == account)
             platforms = {p: _platform_totals(snapshot, previous, account, p, today) for p in sorted(platform_names)}
             if delayed:
                 # A post-midnight API sample can include views earned after
@@ -644,7 +718,7 @@ def build_report(now=None):
         rows = [f"🌙 GÜNLÜK SOSYAL MEDYA RAPORU — {report_day:%d.%m.%Y}",
                 f"🕒 Ölçüm: {now:%d.%m.%Y %H:%M} TRT",
                 "📊 Kapsam: Meta video sayaçları (Facebook/Instagram); YouTube ölçülmedi."
-                if meta_only else "📊 Kapsam: Erişilebilir platform video sayaçları.",
+                if meta_only and os.getenv("MULTIPLATFORM_STATS_ENABLED") != "true" else "📊 Kapsam: Erişilebilir platform video ve Threads video gönderisi sayaçları.",
                 "⚠️ Genel toplamlar erişilebilen videoların toplamıdır; tüm içerik türleri veya tüm geçmiş garanti edilmez.", ""]
         if delayed:
             rows.extend([
@@ -752,9 +826,17 @@ def build_report(now=None):
         if meta_only:
             comparison["publication"] = {account: value[3] for account, value in report_accounts.items()}
         comparison["collection"] = validate_collection(comparison)
+        # Preserve the original nightly failure contract for Facebook/Instagram.
+        # Optional provider failures stay visible in coverage and do not block
+        # serving the fresh archive for otherwise successful runs.
+        if meta_only:
+            comparison["meta_collection"] = validate_collection({"accounts": [
+                {"platforms": [part for part in row["platforms"]
+                               if part["platform"].startswith(("Facebook", "Instagram"))]}
+                for row in comparison["accounts"]
+            ]})
         comparison["collection_errors"] = collection_errors
-        if os.getenv('ENGAGEMENT_HISTORY_ENABLED', 'false').lower() == 'true':
-            comparison['followers'] = follower_changes(engagement, previous)
+        comparison["followers"] = follower_changes(records, previous)
         return ViewReport("\n".join(rows), comparison)
 
 
@@ -847,6 +929,7 @@ if __name__ == "__main__":
     from nvidia_assistant import send_daily_summary
     if report.comparison["collection"]["status"] == "complete":
         send_daily_summary(report.comparison)
-    else:
+    required = report.comparison.get("meta_collection", report.comparison["collection"])
+    if required["status"] != "complete":
         print("::error::Meta görüntülenme verisi eksik; bildirim teslimi veri toplama başarısı değildir.", flush=True)
         raise SystemExit(1)
