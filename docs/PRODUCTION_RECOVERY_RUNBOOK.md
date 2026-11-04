@@ -572,3 +572,9 @@ izlenir; bu inceleme test amaçlı gerçek yayın tetiklemedi.
 - Aynı Drive kimliği bağımsız bağlantıyla tam 18.612.272 bayt indirildi. SHA256 `d5f925c5af9ab97a8ab731beae3b40a049e6527e877315a5275bf2f4c408a960`. FFprobe `moov atom not found` döndürdü. Doğrulanan kaynak kopyası geçerli MP4 değil; yeniden yükleme veya Meta izinleri bu bozuk baytları düzeltmez.
 - Sonraki planda mevcut yerel hata karantinası bu dosyayı aynı gün atlar. Yalnız doğrulanan Drive kimliği, dosya adı ve #371 yerel hata kaydı için sonraki günlerde de karantinayı koru. Farklı, sağlam Drive dosya kimliği normal seçim kurallarına tabidir. Seri rotaları ve belirsiz POST kayıtları karantina kapsamı dışındadır.
 - İndirilen MP4 doğrulanmazsa hatalı geçici kopyayı kaldır ve mevcut alternatif salt-okunur Drive yolundan bir kez indirip yeniden doğrula. İkinci doğrulama da başarısızsa yayın niyeti mevcut yerel hata yolunda kalır. Kaynak hash ve hak kontrolleri yayın öncesi uygulanır. Yeni canlı sonuç normal schedule post ID ile doğrulanmalıdır.
+
+### 5 Kasım 2026 — Gün sonu raporunda YouTube yayın sayacı
+
+- Kanıt: [41911406151](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/41911406151) 00:09 TRT'de rapor oluştururken `KeyError: 'yt1'` ile durdu. Günlük ölçüm geçmişi arşivlendi, karşılaştırma artifact'ı oluşmadı ve Telegram'a hata bildirimi gitti.
+- Neden: Çok platformlu izlenme raporu, YouTube verilerini Meta yayın arşiviyle birlikte işlerken Meta arşivinde YouTube yayın anahtarının bulunacağını varsaydı.
+- Güvenli düzeltme: Yayın sayacını hesap rotasıyla eşleştir ve yoksa yalnızca sayacı eksik göster. İzlenme ve abone verisini koru. Regresyon testi Meta arşivinde YouTube anahtarı olmadan rapor üretimini denetler. Canlı kabul için sonraki çalışmada karşılaştırma artifact'ı ve Telegram sunucu alındıları kontrol edilmeli.

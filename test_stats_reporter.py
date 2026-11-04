@@ -439,3 +439,25 @@ def test_threads_snapshot_keeps_followers_when_video_insights_are_unavailable():
             threads_video_snapshot("film", on_followers=followers)
     followers.assert_called_once_with(0)
     assert [call.args[1] for call in graph.call_args_list] == ["1/threads_insights", "3/insights"]
+
+
+def test_meta_publication_ledger_does_not_block_youtube_view_report(tmp_path, monkeypatch):
+    import stats_reporter
+
+    account = "🌱 Tarladaki Fasulye"
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("META_ONLY_REPORTING", "true")
+    monkeypatch.setenv("MULTIPLATFORM_STATS_ENABLED", "true")
+    monkeypatch.setenv("ENGAGEMENT_HISTORY_ENABLED", "false")
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "workflow_dispatch")
+    monkeypatch.setattr(stats_reporter, "restore_history", lambda path: {"status": "first_snapshot"})
+    monkeypatch.setattr(stats_reporter, "restore_publication_state", lambda: {})
+    monkeypatch.setattr(stats_reporter, "ledger_progress", lambda *args: {
+        "completed": 0, "failures": 0, "posts": 0, "expected_posts": 0, "platforms": {},
+    })
+    monkeypatch.setattr(stats_reporter, "_collect_snapshot", lambda now: (
+        {(account, "YouTube"): {"video": {"views": 125}}}, [], [],
+    ))
+    report = stats_reporter.build_report(datetime(2026, 11, 4, 23, 55, tzinfo=ZoneInfo("Europe/Istanbul")))
+    assert "YouTube: N/A (ilk ölçüm) | Genel 125\n  Yayın: ⚠️ sayaç alınamadı" in report
+    assert report.comparison["accounts"][0]["platforms"][-1]["total"] == 125
