@@ -45,6 +45,7 @@ jobs:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_STATUS_INBOX_ENABLED: ${{ vars.TELEGRAM_STATUS_INBOX_ENABLED != 'false' && 'true' || 'false' }}
           NVIDIA_AI_ENABLED: ${{ vars.NVIDIA_AI_ENABLED }}
           NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
           NVIDIA_MODEL: ${{ vars.NVIDIA_MODEL || 'nvidia/nemotron-3.5-super-vl-120b-a12b' }}

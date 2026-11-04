@@ -115,21 +115,26 @@ class ViewComparisonTests(unittest.TestCase):
 
     def test_notify_sends_three_detailed_messages_instead_of_truncated_compact_body(self):
         report = ViewReport("short report", compare())
-        with patch.object(stats_reporter, "send_ntfy", return_value={"http_status": 200}), \
+        with patch.dict(os.environ, {"TELEGRAM_STATUS_INBOX_ENABLED": "true"}), \
+                patch.object(stats_reporter, "send_ntfy", return_value={"http_status": 200}), \
                 patch.object(stats_reporter, "telegram_configured", return_value=True), \
                 patch.object(stats_reporter, "send_telegram", return_value={"server_ack": True}) as send:
             stats_reporter.notify(report)
         self.assertEqual(send.call_count, 3)
         self.assertTrue(all(c.kwargs["parse_mode"] == "HTML" for c in send.call_args_list))
+        self.assertEqual(send.call_args_list[0].kwargs["reply_markup"]["keyboard"], [[{"text": "📊 İstatistik"}]])
+        self.assertTrue(all("reply_markup" not in c.kwargs for c in send.call_args_list[1:]))
 
     def test_html_transport_adds_parse_mode_and_refuses_truncated_markup(self):
         env = {"TELEGRAM_BOT_TOKEN": "123456:abcdefghijklmnopqrstuvwx", "TELEGRAM_CHAT_ID": "123456789"}
         transport = Mock()
         transport.post.return_value = Mock(status_code=200, json=lambda: {"ok": True, "result": {"message_id": 1}})
         with patch.dict(os.environ, env, clear=True):
-            send_telegram("A & B", "<pre>safe</pre>", parse_mode="HTML", session=transport)
+            keyboard = {"keyboard": [[{"text": "📊 İstatistik"}]], "is_persistent": True}
+            send_telegram("A & B", "<pre>safe</pre>", parse_mode="HTML", reply_markup=keyboard, session=transport)
             payload = transport.post.call_args.kwargs["json"]
             self.assertEqual(payload["parse_mode"], "HTML")
+            self.assertEqual(payload["reply_markup"], keyboard)
             self.assertIn("A &amp; B", payload["text"])
             with self.assertRaises(ValueError):
                 send_telegram("hi", "<pre>" + "x" * 4000 + "</pre>", parse_mode="HTML", session=transport)

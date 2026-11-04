@@ -7,13 +7,15 @@ import time
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import requests
 
 from analytics_github_history import REPOSITORY, MAX_ARCHIVE_BYTES, restore_history
 from nvidia_assistant import answer, enabled
-from telegram_notifications import _BOT_TOKEN, _CHAT_ID, send_telegram
+from telegram_notifications import STATISTICS_BUTTON, STATISTICS_KEYBOARD, _BOT_TOKEN, _CHAT_ID, send_telegram
 from telegram_status import load_status
+from views_comparison import number
 
 
 def compact_history(path):
@@ -29,7 +31,7 @@ def compact_history(path):
     return [r for r in rows if r["period"] in days]
 
 
-def latest_evidence(directory, *, session=requests):
+def latest_comparison(*, session=requests):
     """Read only the fixed production repo, workflow and main branch artifacts."""
     token = os.getenv("GITHUB_TOKEN", "")
     if not token:
@@ -63,11 +65,20 @@ def latest_evidence(directory, *, session=requests):
             comparison = json.loads(archive.read("account_views_comparison.json"))
         if not isinstance(comparison, dict) or not isinstance(comparison.get("accounts"), list) or not comparison.get("measured_at"):
             raise ValueError("Comparison invalid")
+        return run["id"], comparison
+    except (requests.RequestException, ValueError, KeyError, TypeError, IndexError,
+            zipfile.BadZipFile, OSError):
+        raise RuntimeError("Verified analytics unavailable; no cached result presented as current") from None
+
+
+def latest_evidence(directory, *, session=requests):
+    run_id, comparison = latest_comparison(session=session)
+    try:
         history_path = Path(directory) / "ai-readonly-history.jsonl"
         restored = restore_history(history_path, get=session.get)
         history = compact_history(history_path) if restored["status"] == "restored" else []
         return {"fetched_at": datetime.now(timezone.utc).isoformat(),
-                "report_run": run["id"], "latest_comparison": comparison,
+                "report_run": run_id, "latest_comparison": comparison,
                 "archive_account_measurements": history,
                 "publication_status": "Bu veri kaynağında yayın sonucu bulunmuyor."}
     except (requests.RequestException, ValueError, KeyError, TypeError, IndexError,
@@ -75,8 +86,30 @@ def latest_evidence(directory, *, session=requests):
         raise RuntimeError("Verified analytics unavailable; no cached result presented as current") from None
 
 
+def load_statistics(*, session=requests):
+    """Render the latest successful nightly measurement without collecting new data."""
+    try:
+        run_id, comparison = latest_comparison(session=session)
+        measured = datetime.fromisoformat(comparison["measured_at"])
+        if measured.tzinfo is None or not comparison["accounts"]:
+            raise ValueError("Measurement unavailable")
+        measured = measured.astimezone(ZoneInfo("Europe/Istanbul"))
+        lines = [f"Son arşiv ölçümü: {measured:%d.%m.%Y %H:%M} TRT",
+                 "Facebook ve Instagram video izlenmeleri · toplam / 1 günlük artış / 7 günlük artış", ""]
+        for row in comparison["accounts"]:
+            values = (row["total"], row["daily"]["delta"], row["weekly"]["delta"])
+            display = [number(value) if type(value) is int and value >= 0 else "N/A" for value in values]
+            lines.append(f"{row['account']}: {' / '.join(display)}")
+        lines.extend(["", "N/A: Karşılaştırılabilir ölçüm eksik.",
+                      f"https://github.com/{REPOSITORY}/actions/runs/{int(run_id)}"])
+        return "\n".join(lines)
+    except (RuntimeError, KeyError, TypeError, ValueError, AttributeError):
+        return "İstatistik arşivi şu anda okunamadı. Daha sonra tekrar deneyebilirsin."
+
+
 class Worker:
-    def __init__(self, database, *, evidence_loader=latest_evidence, model=answer, sender=send_telegram, status_loader=load_status):
+    def __init__(self, database, *, evidence_loader=latest_evidence, model=answer, sender=send_telegram,
+                 status_loader=load_status, statistics_loader=load_statistics):
         self.chat = os.getenv("TELEGRAM_CHAT_ID", "")
         self.owner = os.getenv("TELEGRAM_AI_OWNER_ID", "")
         token = os.getenv("TELEGRAM_BOT_TOKEN", "")
@@ -92,6 +125,7 @@ class Worker:
         self.db.commit()
         self.load, self.model, self.send = evidence_loader, model, sender
         self.load_status = status_loader
+        self.load_statistics = statistics_loader
 
     def offset(self):
         row = self.db.execute("SELECT value FROM state WHERE key='offset'").fetchone()
@@ -115,19 +149,22 @@ class Worker:
         text = message.get("text")
         if not isinstance(text, str) or not text.strip():
             return
-        command = text.strip().casefold()
+        command = text.strip().casefold().replace("\u0307", "")
         if command in {'/stok', '/durdur', '/devam'}:
-            self.send('📋 Durum', 'Bu komut kaldırıldı. Yalnız /durum veya durum yazabilirsin.')
+            self.send('📋 Durum', 'Bu komut kaldırıldı. /durum veya /istatistik yazabilirsin.')
             return
         if self.status_only:
             if command in {'/start', '/help'}:
-                self.send('📋 Durum', '/durum veya durum: yayın durumu ve saat tablosu.')
+                self.send('📋 Durum', '/durum: yayın durumu ve saat tablosu.\n/istatistik: son arşiv ölçümü.',
+                          reply_markup=STATISTICS_KEYBOARD)
             elif command in {'/durum', 'durum'}:
                 try:
                     reply = self.load_status()
                 except Exception:
                     reply = 'Yayın durumu şu an okunamadı. Sayı tahmin etmedim; yayın ayarları değiştirilmedi.'
-                self.send('📋 Yayın durumu', reply, parse_mode='HTML')
+                self.send('📋 Yayın durumu', reply, parse_mode='HTML', reply_markup=STATISTICS_KEYBOARD)
+            elif command in {'/istatistik', 'istatistik', STATISTICS_BUTTON.casefold().replace("\u0307", "")}:
+                self.send(STATISTICS_BUTTON, self.load_statistics(), reply_markup=STATISTICS_KEYBOARD)
             return
         if text.strip() in {"/start", "/help"}:
             self.send("🤖 Sosyal medya yardımcısı", "/durum: veri tarihi\n/sifirla: sohbeti unut")
