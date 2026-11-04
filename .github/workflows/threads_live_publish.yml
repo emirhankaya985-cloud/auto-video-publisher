@@ -1,0 +1,112 @@
+name: Publish owned Instagram videos on Threads
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ['Public link Meta automation']
+    types: [completed]
+    branches: [main]
+  push:
+    branches: [main]
+    paths: ['docs/threads-owner-start-2026-11-04.md']
+  pull_request:
+    paths:
+      - 'threads_live_publish.py'
+      - 'test_threads_live_publish.py'
+      - '.github/workflows/threads_live_publish.yml'
+
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: threads-owner-publication
+  cancel-in-progress: false
+
+jobs:
+  regression:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: pip install --require-hashes -r requirements.txt
+      - run: python -m unittest test_threads_live_publish test_threads_accounts test_threads_publisher test_publisher_alert_history
+
+  threads:
+    if: >-
+      github.repository == 'emirhankaya985-cloud/auto-video-publisher' &&
+      github.ref == 'refs/heads/main' && github.event_name != 'pull_request' &&
+      github.run_attempt == 1 && vars.THREADS_PUBLICATION_ENABLED != 'false' &&
+      (github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.event == 'schedule'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 24
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+      META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+      TARLADAKI_THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_TARLADAKI_FASULYE_ACCESS_TOKEN || secrets.TARLADAKI_THREADS_ACCESS_TOKEN }}
+      PENGUEN_THREADS_ACCESS_TOKEN: ${{ secrets.PENGUEN_THREADS_ACCESS_TOKEN || secrets.THREADS_ACCESS_TOKEN }}
+      GONLE_THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_GONLE_DUSEN_ACCESS_TOKEN || secrets.GONLE_THREADS_ACCESS_TOKEN }}
+      DAILY_LAUGH_THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_DAILY_LAUGH_LAB_ACCESS_TOKEN || secrets.DAILY_LAUGH_THREADS_ACCESS_TOKEN }}
+      FILM_THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_FILM_MAGARASI_ACCESS_TOKEN || secrets.FILM_THREADS_ACCESS_TOKEN }}
+      TOONZONE_THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_TOONZONE_ACCESS_TOKEN || secrets.TOONZONE_THREADS_ACCESS_TOKEN }}
+      TARLADAKI_THREADS_USERNAME: ${{ vars.TARLADAKI_THREADS_USERNAME || 'tarladakifasulye_' }}
+      PENGUEN_THREADS_USERNAME: ${{ vars.PENGUEN_THREADS_USERNAME || 'beyinsiz.penguen' }}
+      GONLE_THREADS_USERNAME: ${{ vars.GONLE_THREADS_USERNAME || 'gonl_edusen' }}
+      DAILY_LAUGH_THREADS_USERNAME: ${{ vars.DAILY_LAUGH_THREADS_USERNAME || 'dail.ylaughlab' }}
+      FILM_THREADS_USERNAME: ${{ vars.FILM_THREADS_USERNAME || 'film_magrasi' }}
+      TOONZONE_THREADS_USERNAME: ${{ vars.TOONZONE_THREADS_USERNAME || 'toonzone.tr' }}
+      TARLADAKI_THREADS_USER_ID: ${{ vars.TARLADAKI_THREADS_USER_ID }}
+      PENGUEN_THREADS_USER_ID: ${{ vars.PENGUEN_THREADS_USER_ID }}
+      GONLE_THREADS_USER_ID: ${{ vars.GONLE_THREADS_USER_ID }}
+      DAILY_LAUGH_THREADS_USER_ID: ${{ vars.DAILY_LAUGH_THREADS_USER_ID }}
+      FILM_THREADS_USER_ID: ${{ vars.FILM_THREADS_USER_ID }}
+      TOONZONE_THREADS_USER_ID: ${{ vars.TOONZONE_THREADS_USER_ID }}
+      ENABLE_NEW_META_ROUTES: ${{ vars.ENABLE_NEW_META_ROUTES }}
+      META_NEW_ROUTES_RIGHTS_APPROVED: ${{ vars.META_NEW_ROUTES_RIGHTS_APPROVED }}
+      ENABLE_DAILY_LAUGH_INSTAGRAM_ROUTES: ${{ vars.ENABLE_DAILY_LAUGH_INSTAGRAM_ROUTES }}
+      ENABLE_TP_NORMAL_ROUTES: ${{ vars.ENABLE_TP_NORMAL_ROUTES }}
+      ENABLE_DAILY_LAUGH_NORMAL_ROUTES: ${{ vars.ENABLE_DAILY_LAUGH_NORMAL_ROUTES }}
+      ENABLE_GONLE_NORMAL_ROUTES: ${{ vars.ENABLE_GONLE_NORMAL_ROUTES }}
+      ENABLE_GONLE_INSTAGRAM_ROUTES: ${{ vars.ENABLE_GONLE_INSTAGRAM_ROUTES }}
+      ENABLE_FILM_ROUTES: ${{ vars.ENABLE_FILM_ROUTES }}
+      FILM_RIGHTS_APPROVED: ${{ vars.FILM_RIGHTS_APPROVED }}
+      ENABLE_TOONZONE_ROUTES: ${{ vars.ENABLE_TOONZONE_ROUTES }}
+      ENABLE_TARLADAKI_THREADS: ${{ vars.ENABLE_TARLADAKI_THREADS }}
+      ENABLE_PENGUEN_THREADS: ${{ vars.ENABLE_PENGUEN_THREADS }}
+      ENABLE_GONLE_THREADS: ${{ vars.ENABLE_GONLE_THREADS }}
+      ENABLE_DAILY_LAUGH_THREADS: ${{ vars.ENABLE_DAILY_LAUGH_THREADS }}
+      ENABLE_FILM_THREADS: ${{ vars.ENABLE_FILM_THREADS }}
+      ENABLE_TOONZONE_THREADS: ${{ vars.ENABLE_TOONZONE_THREADS }}
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: pip install --require-hashes -r requirements.txt
+      - name: Verify route and source ownership and reserve one video per account
+        run: python threads_live_publish.py prepare
+      - name: Archive publication reservations before writing
+        id: intent
+        uses: actions/upload-artifact@v4
+        with:
+          name: threads-publish-intent
+          path: threads-runtime/alert-history.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Create and publish each reserved native video once
+        env:
+          THREADS_INTENT_ARCHIVED: ${{ steps.intent.outcome == 'success' && 'true' || 'false' }}
+        run: python threads_live_publish.py publish
+      - name: Preserve post IDs and ambiguous attempts
+        if: always() && steps.intent.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: threads-publish-result
+          path: threads-runtime/alert-history.json
+          if-no-files-found: error
+          retention-days: 90
