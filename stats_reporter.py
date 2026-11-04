@@ -24,7 +24,7 @@ from analytics_github_history import restore_history
 from publication_github_progress import restore_publication_state, ledger_progress
 from meta_report_tables import ntfy_table, publication_telegram
 from ntfy_notifications import send_ntfy
-from telegram_notifications import send_telegram, telegram_configured
+from telegram_notifications import STATISTICS_KEYBOARD, send_telegram, telegram_configured
 from ntfy_phone_report import compact_phone_report
 from publisher_recovery import read_with_retry
 from views_comparison import ViewReport, build_comparison, load_history, telegram_tables, validate_collection
@@ -790,6 +790,8 @@ def notify(message):
             acknowledged = 0
             for part_title, part_body in parts:
                 options = {"parse_mode": "HTML"} if comparison else {}
+                if acknowledged == 0 and os.getenv("TELEGRAM_STATUS_INBOX_ENABLED") == "true":
+                    options["reply_markup"] = STATISTICS_KEYBOARD
                 receipt = send_telegram(part_title, part_body, **options)
                 if receipt["server_ack"] is not True:
                     raise RuntimeError("Telegram report receipt missing")

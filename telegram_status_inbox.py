@@ -4,11 +4,12 @@ import json
 import os
 import sqlite3
 import zipfile
+from functools import cache
 from pathlib import Path
 
 import requests
 
-from telegram_ai_worker import Worker
+from telegram_ai_worker import Worker, load_statistics
 from telegram_notifications import send_telegram
 from telegram_status import status_table
 from publication_github_progress import restore_publication_state
@@ -81,8 +82,13 @@ def prepare(*, session=requests):
         return status_table(state=state, configured=True)
     messages = []
     def reserve(title, message, **kwargs):
-        messages.append({'title': title, 'message': message, 'parse_mode': kwargs.get('parse_mode')})
-    worker = Worker(str(database), sender=reserve, status_loader=status)
+        messages.append({'title': title, 'message': message, **kwargs})
+
+    @cache
+    def statistics():
+        return load_statistics(session=session)
+
+    worker = Worker(str(database), sender=reserve, status_loader=status, statistics_loader=statistics)
     (ROOT/'checkpoint-ready').write_text('valid', encoding='utf-8')
     try:
         if worker.db.execute("SELECT value FROM state WHERE key='inbox_blocked'").fetchone():
@@ -120,7 +126,7 @@ def send():
     messages = json.loads((ROOT/'reserved-replies.json').read_text(encoding='utf-8'))
     count = 0
     for message in messages:
-        send_telegram(message['title'], message['message'], parse_mode=message['parse_mode'])
+        send_telegram(**message)
         count += 1
     print(json.dumps({'server_acks': count, 'phone_delivery_verified': False}))
 

@@ -11,6 +11,12 @@ import requests
 _BOT_TOKEN = re.compile(r"^[0-9]{5,15}:[A-Za-z0-9_-]{20,}$")
 _CHAT_ID = re.compile(r"^-?[0-9]{4,20}$")
 _MAX_TEXT_CHARS = 3900
+STATISTICS_BUTTON = "📊 İstatistik"
+STATISTICS_KEYBOARD = {
+    "keyboard": [[{"text": STATISTICS_BUTTON}]],
+    "resize_keyboard": True,
+    "is_persistent": True,
+}
 
 
 def telegram_configured():
@@ -18,7 +24,7 @@ def telegram_configured():
                 os.getenv("TELEGRAM_CHAT_ID", "").strip())
 
 
-def send_telegram(title, message, *, timeout=20, session=requests, parse_mode=None):
+def send_telegram(title, message, *, timeout=20, session=requests, parse_mode=None, reply_markup=None):
     """One bounded POST, no redirects/retries, no credential-bearing logs."""
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
@@ -48,6 +54,8 @@ def send_telegram(title, message, *, timeout=20, session=requests, parse_mode=No
     payload = {"chat_id": chat_id, "text": body, "disable_web_page_preview": True}
     if parse_mode:
         payload["parse_mode"] = parse_mode
+    if reply_markup is not None:
+        payload["reply_markup"] = reply_markup
     try:
         response = session.post(
             f"https://api.telegram.org/bot{token}/sendMessage",

@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import nvidia_assistant as ai
-from telegram_ai_worker import Worker, compact_history, latest_evidence
+from telegram_ai_worker import Worker, compact_history, latest_evidence, load_statistics
 
 ENV = {"NVIDIA_AI_ENABLED": "true", "NVIDIA_API_KEY": "secret-test-key",
        "TELEGRAM_STATUS_ONLY": "false",
@@ -176,16 +176,26 @@ class AssistantTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 self.worker(tmp)
 
-    def report_session(self, *, branch="main", zip_name="account_views_comparison.json"):
+    def report_session(self, *, branch="main", zip_name="account_views_comparison.json", accounts=None):
         raw = io.BytesIO()
         with zipfile.ZipFile(raw, "w") as archive:
-            archive.writestr(zip_name, json.dumps({"accounts": [], "measured_at": "2026-10-27T23:42:00+03:00"}))
+            archive.writestr(zip_name, json.dumps({"accounts": accounts or [], "measured_at": "2026-10-27T23:42:00+03:00"}))
         session = Mock()
         responses = [Mock(status_code=200), Mock(status_code=200), Mock(status_code=200, content=raw.getvalue())]
         responses[0].json.return_value = {"workflow_runs": [{"id": 42, "head_branch": branch, "conclusion": "success"}]}
         responses[1].json.return_value = {"artifacts": [{"name": "account-views-comparison", "expired": False, "id": 11}]}
         session.get.side_effect = responses
         return session
+
+    def test_statistics_reads_only_the_verified_comparison_and_labels_its_age(self):
+        session = self.report_session(accounts=[{"account": "Film Mağarası", "total": 1000,
+                                                 "daily": {"delta": None}, "weekly": {"delta": 24}}])
+        with patch.dict(os.environ, {"GITHUB_TOKEN": "test-read-token"}):
+            reply = load_statistics(session=session)
+        self.assertIn("27.10.2026 23:42 TRT", reply)
+        self.assertIn("Film Mağarası: 1.000 / N/A / 24", reply)
+        self.assertIn("/actions/runs/42", reply)
+        self.assertEqual(session.get.call_count, 3)
 
     def test_verified_report_source_and_old_measurement_are_preserved(self):
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"GITHUB_TOKEN": "test-read-token"}), patch("telegram_ai_worker.restore_history", return_value={"status": "first_snapshot"}):

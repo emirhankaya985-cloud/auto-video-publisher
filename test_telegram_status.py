@@ -45,4 +45,5 @@ class StatusOnlyWorkerTests(unittest.TestCase):
             model.assert_not_called()
             self.assertEqual(loader.call_count, 2)
             self.assertEqual(send.call_count, 5)
-            self.assertEqual(send.call_args.kwargs, {'parse_mode': 'HTML'})
+            self.assertEqual(send.call_args.kwargs['parse_mode'], 'HTML')
+            self.assertTrue(send.call_args.kwargs['reply_markup']['is_persistent'])

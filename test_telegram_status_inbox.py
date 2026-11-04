@@ -33,6 +33,31 @@ class InboxTests(unittest.TestCase):
             reserved = json.loads((Path(temp)/'reserved-replies.json').read_text())
             self.assertEqual(len(reserved), 1)
             self.assertEqual(reserved[0]['parse_mode'], 'HTML')
+            self.assertTrue(reserved[0]['reply_markup']['is_persistent'])
+
+    def test_statistics_keyboard_respects_owner_and_persisted_offset(self):
+        def update(uid, owner):
+            return {'update_id': uid, 'message': {'chat': {'id': 123456789},
+                    'from': {'id': owner}, 'text': '📊 İstatistik'}}
+
+        session = Mock()
+        accepted = update(6, 123456789)
+        session.get.side_effect = [self.response({'ok': True, 'result': {'url': ''}}),
+                                  self.response({'ok': True, 'result': [update(5, 999), accepted, accepted]})]
+        with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, self.env, clear=True), \
+                patch.object(inbox, 'ROOT', Path(temp)), patch.object(inbox, 'restore_checkpoint'), \
+                patch.object(inbox, 'load_statistics', return_value='Son arşiv ölçümü') as load, \
+                patch.object(inbox, 'send_telegram') as send:
+            inbox.prepare(session=session)
+            send.assert_not_called()
+            load.assert_called_once_with(session=session)
+            with sqlite3.connect(Path(temp)/'telegram.sqlite3') as db:
+                self.assertEqual(db.execute("SELECT value FROM state WHERE key='offset'").fetchone()[0], '7')
+            inbox.send()
+            send.assert_called_once_with(title='📊 İstatistik', message='Son arşiv ölçümü',
+                                         reply_markup={
+                                             'keyboard': [[{'text': '📊 İstatistik'}]],
+                                             'resize_keyboard': True, 'is_persistent': True})
 
     def test_existing_webhook_is_never_deleted_or_consumed(self):
         session = Mock()

@@ -63,7 +63,7 @@ def validate(history):
     return history
 
 
-def restore(*, get=None):
+def restore(*, get=None, names=NAMES, workflow_path='.github/workflows/public_link_schedule.yml'):
     get=get or requests.get
     token=os.getenv('GH_TOKEN') or os.getenv('GITHUB_TOKEN')
     if not token: raise ValueError('alert archive token missing')
@@ -75,18 +75,18 @@ def restore(*, get=None):
         return r
     try:
         candidates=[]
-        for name in NAMES:
+        for name in names:
             body=fetch(f'actions/artifacts?per_page=100&name={name}').json()
             if not isinstance(body,dict) or not isinstance(body.get('artifacts'),list):
                 raise ValueError('invalid alert artifact list')
             candidates.extend(body['artifacts'])
         if not candidates: return {'schema':1,'records':{}}
-        candidates.sort(key=lambda a:(int(a['workflow_run']['id']),a['name']==NAMES[1]),reverse=True)
+        candidates.sort(key=lambda a:(int(a['workflow_run']['id']),a['name']==names[1]),reverse=True)
         a=candidates[0]
         run=fetch(f"actions/runs/{a['workflow_run']['id']}").json()
         if (a.get('expired') or run.get('head_branch')!='main'
                 or run.get('head_repository',{}).get('full_name')!=REPO
-                or run.get('path')!='.github/workflows/public_link_schedule.yml'):
+                or run.get('path')!=workflow_path):
             raise ValueError('unverified alert archive origin')
         response=fetch(f"actions/artifacts/{a['id']}/zip",archive=True)
         if len(response.content)>8_000_000: raise ValueError('alert archive too large')
