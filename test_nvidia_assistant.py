@@ -197,6 +197,24 @@ class AssistantTests(unittest.TestCase):
         self.assertIn("/actions/runs/42", reply)
         self.assertEqual(session.get.call_count, 3)
 
+    def test_statistics_reports_platform_coverage_and_zero_followers(self):
+        def part(platform, total, daily, weekly):
+            return {"platform": platform, "total": total, "daily": {"delta": daily},
+                    "weekly": {"delta": weekly}}
+
+        report = {"measured_at": "2026-11-04T20:15:00+00:00", "accounts": [
+            {"account": "Film", "platforms": [
+                part("Facebook 1", 1000, 10, 30), part("Threads", None, None, None),
+                part("YouTube", 500, 5, None)]}],
+            "followers": [{"account": "Film", "platform": "Facebook 1", "followers": 0},
+                          {"account": "Film", "platform": "YouTube", "followers": 200}]}
+        with patch("telegram_ai_worker.latest_comparison", return_value=(42, report)):
+            reply = load_statistics()
+        self.assertIn("Facebook 1: 1.000 / 10 / 30 · 0 takipçi", reply)
+        self.assertIn("YouTube: 500 / 5 / N/A · 200 abone", reply)
+        self.assertIn("İzlenme (2/3): 1.500 / 15 / N/A", reply)
+        self.assertIn("Takipçi + abone (2/3): 200", reply)
+
     def test_verified_report_source_and_old_measurement_are_preserved(self):
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"GITHUB_TOKEN": "test-read-token"}), patch("telegram_ai_worker.restore_history", return_value={"status": "first_snapshot"}):
             session = self.report_session()

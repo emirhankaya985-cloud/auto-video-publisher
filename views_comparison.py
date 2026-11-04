@@ -177,12 +177,19 @@ def telegram_tables(data):
     if not leaders:
         third.append("Karşılaştırılabilir günlük veri yok.")
     third.append("\n<b>Platform ayrıntısı · toplam / 1g % / 7g %</b>")
+    followers = {(row["account"], row["platform"]): row["followers"]
+                 for row in data.get("followers", [])}
     for row in rows:
         share = f"{row['total'] / data['total'] * 100:.2f}%".replace(".", ",") if data["total"] and row["total"] is not None else "N/A"
         third.append(f"\n<b>{html.escape(row['account'])}</b> · Toplamdaki pay: {share}"
                      f" · Video kaydı: {number(row['videos'])}")
         for part in row["platforms"]:
-            third.append(f"{html.escape(part['platform'])}: {number(part['total'])} / {percentage(part['daily']['percent'])} / {percentage(part['weekly']['percent'])}")
+            platform = part["platform"]
+            count = followers.get((row["account"], platform))
+            label = "abone" if platform == "YouTube" else "takipçi"
+            third.append(f"{html.escape(platform)}: {number(part['total'])} / "
+                         f"{percentage(part['daily']['percent'])} / {percentage(part['weekly']['percent'])}"
+                         f" · {number(count)} {label}")
     third.append("\nN/A: taban eksik, API/kapsam sorunu veya taban sıfır. Sıfırdan büyüme sonsuz yüzde gösterilmez."
                  "\nKapsam: erişilebilir video sayaçları; tekil izleyici değildir. Manuel rapor günün tamamı değildir.")
     messages = [("📊 Hesap tablosu · 1/3", first), ("📅 Haftalık karşılaştırma · 2/3", second),

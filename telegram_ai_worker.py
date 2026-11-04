@@ -86,6 +86,23 @@ def latest_evidence(directory, *, session=requests):
         raise RuntimeError("Verified analytics unavailable; no cached result presented as current") from None
 
 
+def _statistics_totals(platforms, followers):
+    expected = len(platforms)
+    measured = [part for part in platforms if part["total"] is not None]
+    total = sum(part["total"] for part in measured) if measured else None
+    totals = [number(total)]
+    for period in ("daily", "weekly"):
+        deltas = [part[period]["delta"] for part in measured]
+        comparable = deltas and all(delta is not None for delta in deltas)
+        totals.append(number(sum(deltas)) if comparable else "N/A")
+    counted = [value for value in followers if value is not None]
+    follower_total = sum(counted) if counted else None
+    return [
+        f"İzlenme ({len(measured)}/{expected}): {' / '.join(totals)}",
+        f"Takipçi + abone ({len(counted)}/{expected}): {number(follower_total)}",
+    ]
+
+
 def load_statistics(*, session=requests):
     """Render the latest successful nightly measurement without collecting new data."""
     try:
@@ -95,12 +112,34 @@ def load_statistics(*, session=requests):
             raise ValueError("Measurement unavailable")
         measured = measured.astimezone(ZoneInfo("Europe/Istanbul"))
         lines = [f"Son arşiv ölçümü: {measured:%d.%m.%Y %H:%M} TRT",
-                 "Facebook ve Instagram video izlenmeleri · toplam / 1 günlük artış / 7 günlük artış", ""]
+                 "İzlenme · toplam / 1 günlük artış / 7 günlük artış"]
+        followers = {(row["account"], row["platform"]): row.get("followers")
+                     for row in comparison.get("followers", [])}
+        all_platforms = []
+        all_followers = []
         for row in comparison["accounts"]:
-            values = (row["total"], row["daily"]["delta"], row["weekly"]["delta"])
-            display = [number(value) if type(value) is int and value >= 0 else "N/A" for value in values]
-            lines.append(f"{row['account']}: {' / '.join(display)}")
-        lines.extend(["", "N/A: Karşılaştırılabilir ölçüm eksik.",
+            account = row["account"]
+            platforms = row.get("platforms", [])
+            if not platforms:
+                values = (row["total"], row["daily"]["delta"], row["weekly"]["delta"])
+                lines.append(f"{account}: {' / '.join(number(value) for value in values)}")
+                continue
+            lines.extend(["", account])
+            for part in platforms:
+                platform = part["platform"]
+                count = followers.get((account, platform))
+                label = "abone" if platform == "YouTube" else "takipçi"
+                values = (part["total"], part["daily"]["delta"], part["weekly"]["delta"])
+                lines.append(f"• {platform}: {' / '.join(number(value) for value in values)}"
+                             f" · {number(count)} {label}")
+            counts = [followers.get((account, part["platform"])) for part in platforms]
+            lines.extend(_statistics_totals(platforms, counts))
+            all_platforms.extend(platforms)
+            all_followers.extend(counts)
+        if all_platforms:
+            lines.extend(["", "Genel toplam", *_statistics_totals(all_platforms, all_followers),
+                          "", "Threads: video gönderisi görüntülenmeleri. Takipçi ve abone toplamı tekil kişi saymaz."])
+        lines.extend(["", "N/A: veri veya karşılaştırılabilir geçmiş eksik.",
                       f"https://github.com/{REPOSITORY}/actions/runs/{int(run_id)}"])
         return "\n".join(lines)
     except (RuntimeError, KeyError, TypeError, ValueError, AttributeError):
