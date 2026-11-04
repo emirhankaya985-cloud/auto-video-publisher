@@ -24,6 +24,16 @@ class Tests(unittest.TestCase):
    self.assertFalse(route_paused('gonle_ig'))
    self.assertTrue(platform_allowed('gonle', 'instagram'))
 
+ def test_copyright_hold_overrides_activation_and_batch_flags(self):
+  env = {'ENABLE_TOONZONE_ROUTES':'true','ENABLE_NEW_META_ROUTES':'true',
+         'META_NEW_ROUTES_RIGHTS_APPROVED':'true','BATCH_ID':'b',
+         'BATCH_API_URL':'https://x','BATCH_API_TOKEN':'x','BATCH_ALLOWED_ROUTES':'toonzone'}
+  with patch.dict(os.environ, env, clear=True):
+   self.assertTrue(route_paused('toonzone'))
+   self.assertFalse(new_meta_route_enabled('toonzone'))
+   self.assertFalse(batch_exception_allowed('toonzone'))
+
+ @patch('publication_safety.COPYRIGHT_HELD_ROUTES', frozenset())
  def test_new_meta_routes_are_disabled_without_both_explicit_switches(self):
   from publication_safety import route_paused
   with patch.dict(os.environ, {}, clear=True):

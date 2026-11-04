@@ -578,6 +578,7 @@ class RouteTests(unittest.TestCase):
     def test_outside_schedule(self):
         self.assertEqual(route_for_time(datetime(2026, 10, 11, 7, 0)), (None, None))
 
+    @patch('publication_safety.COPYRIGHT_HELD_ROUTES', frozenset())
     def test_toonzone_four_ordered_daily_slots_are_gated(self):
         env = {
             "ENABLE_TOONZONE_ROUTES": "true",
@@ -599,6 +600,7 @@ class RouteTests(unittest.TestCase):
                 "toonzone", {route for route, _ in routes_for_time(datetime(2026, 10, 18, 12, 0))}
             )
 
+    @patch('publication_safety.COPYRIGHT_HELD_ROUTES', frozenset())
     def test_toonzone_due_slots_reach_live_batch_dispatcher_only_when_approved(self):
         now = datetime(2026, 10, 21, 12, 35)
         gate = {
@@ -639,6 +641,7 @@ class RouteTests(unittest.TestCase):
                                     "2026-10-21-12-toonzone-part2"))
         self.assertFalse(slot_is_done(videos, day, "toonzone", "2026-10-21-12-toonzone-part1"))
 
+    @patch('publication_safety.COPYRIGHT_HELD_ROUTES', frozenset())
     def test_next_due_toonzone_part_resumes_after_manual_part_one(self):
         gate = {
             "ENABLE_TOONZONE_ROUTES": "true",
@@ -665,6 +668,7 @@ class RouteTests(unittest.TestCase):
                 ("toonzone", "2026-10-21-12-toonzone-part1"),
             )
 
+    @patch('publication_safety.COPYRIGHT_HELD_ROUTES', frozenset())
     def test_toonzone_new_episode_cannot_replay_part_one_after_part_four_today(self):
         gate = {
             "ENABLE_TOONZONE_ROUTES": "true",
