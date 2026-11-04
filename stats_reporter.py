@@ -729,7 +729,7 @@ def build_report(now=None):
             ])
         all_daily, all_lifetime = [], []
         completed_total = target_total = failed_total = posts_total = expected_posts_total = 0
-        for account, (target, _route, platforms, progress) in report_accounts.items():
+        for account, (target, route, platforms, progress) in report_accounts.items():
             target_total += target
             rows.append(account.upper())
             if progress:
@@ -766,24 +766,12 @@ def build_report(now=None):
                 publication_status = "Yayın: ⚠️ sayaç alınamadı"
                 if progress:
                     route_key = {"Facebook": "fb", "Instagram": "ig", "Facebook 1": "fb_film_1",
-                                 "Facebook 2": "fb_film_2", "YouTube": "yt_daily"}.get(platform)
-                    if route_key and route_key in progress["platforms"]:
-                        stats = progress["platforms"][route_key]
-                        publication_status = (f"Yayın ✅{stats['success']} / ❌{stats['failure']}"
-                                              f" | Eksik: {max(target - stats['success'], 0)} | Belirsiz: {stats.get('uncertain', 0)}"
-                                              f" | Son: {stats['latest_status']}")
-                    elif platform == "YouTube" and account == "🌱 Tarladaki Fasulye":
-                        stats = progress["platforms"]["yt1"]
-                        publication_status = (f"Yayın ✅{stats['success']} / ❌{stats['failure']}"
-                                              f" | Eksik: {max(target - stats['success'], 0)} | Belirsiz: {stats.get('uncertain', 0)}"
-                                              f" | Son: {stats['latest_status']}")
-                    elif platform == "YouTube" and account == "🐧 Beyinsiz Penguen":
-                        stats = progress["platforms"]["yt2"]
-                        publication_status = (f"Yayın ✅{stats['success']} / ❌{stats['failure']}"
-                                              f" | Eksik: {max(target - stats['success'], 0)} | Belirsiz: {stats.get('uncertain', 0)}"
-                                              f" | Son: {stats['latest_status']}")
-                    elif platform == "YouTube" and account == "😂 Daily Laugh Lab":
-                        stats = progress["platforms"]["yt_daily"]
+                                 "Facebook 2": "fb_film_2", "Threads": "threads"}.get(platform)
+                    if platform == "YouTube":
+                        route_key = {"tarladaki": "yt1", "penguen": "yt2",
+                                     "daily_laugh": "yt_daily", "gonle": "yt_gonle"}.get(route)
+                    stats = progress["platforms"].get(route_key)
+                    if stats is not None:
                         publication_status = (f"Yayın ✅{stats['success']} / ❌{stats['failure']}"
                                               f" | Eksik: {max(target - stats['success'], 0)} | Belirsiz: {stats.get('uncertain', 0)}"
                                               f" | Son: {stats['latest_status']}")
