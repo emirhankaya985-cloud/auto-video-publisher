@@ -58,6 +58,23 @@ class ProvenLocalSourceQuarantine(unittest.TestCase):
                 "tarladaki", self.video(), self.state(),
                 ["facebook", "instagram"], "2026-11-02"))
 
+    def test_independently_verified_corrupt_source_stays_held_next_day(self):
+        source = {"id": "1hArLxDecYFwPs9lWQasXaNHK4f0dQ20W", "name": "195.mp4"}
+        state = self.state()
+        state["entries"] = {
+            key.replace("drive-195", source["id"]): dict(entry, day="2026-11-04", run_id="41790686639")
+            for key, entry in state["entries"].items()
+        }
+        platforms = ["facebook", "instagram"]
+        with patch.dict(os.environ, {"GITHUB_RUN_ID": "41799999999"}):
+            self.assertTrue(runtime.quarantined_unordered_local_failure(
+                "tarladaki", source, state, platforms, "2026-11-05"))
+            self.assertFalse(runtime.quarantined_unordered_local_failure(
+                "tarladaki", dict(source, id="replacement"), state, platforms, "2026-11-05"))
+            state["entries"][f"tarladaki:instagram:{source['id']}"]["status"] = "uncertain"
+            self.assertFalse(runtime.quarantined_unordered_local_failure(
+                "tarladaki", source, state, platforms, "2026-11-05"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -988,6 +988,34 @@ class LinkRuntimeSafety(unittest.TestCase):
                 runtime.verify_source_video(Path("private.mp4"))
             self.assertNotIn("private-file-location", str(raised.exception))
 
+    def test_unreadable_download_is_replaced_and_probed_again(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "source.mp4"
+            path.write_bytes(b"1234ftyptruncated")
+
+            def alternate(_file_id, target):
+                self.assertFalse(target.exists())
+                target.write_bytes(b"1234ftypreplacement")
+                return target
+
+            for second_probe_valid in (True, False):
+                with self.subTest(second_probe_valid=second_probe_valid):
+                    path.write_bytes(b"1234ftyptruncated")
+                    valid_media = {"streams": [{"codec_type": "video"}], "format": {"duration": "12"}}
+                    failed_probe = RuntimeError("private-file-location")
+                    with patch.object(runtime, "download", return_value=path), \
+                         patch.object(runtime, "direct_public_drive", side_effect=alternate) as fallback, \
+                         patch.object(runtime, "probe", side_effect=[failed_probe, valid_media if second_probe_valid else failed_probe]) as probe:
+                        if second_probe_valid:
+                            self.assertEqual(runtime.download_verified_publication_video("vid", path), path)
+                            self.assertEqual(path.read_bytes(), b"1234ftypreplacement")
+                        else:
+                            with self.assertRaisesRegex(RuntimeError, "doğrulaması çalıştırılamadı"):
+                                runtime.download_verified_publication_video("vid", path)
+                            self.assertFalse(path.exists())
+                        fallback.assert_called_once_with("vid", path)
+                        self.assertEqual(probe.call_count, 2)
+
     def test_local_ig_prepare_failure_keeps_fb_publishable(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
