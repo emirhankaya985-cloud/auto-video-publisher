@@ -39,4 +39,5 @@ jobs:
           posts.sort(key=lambda x:(x['episode'],x['part']))
           print('FIRST_THREE_LIVE_POSTS '+json.dumps(posts,ensure_ascii=False),flush=True)
           print('FIRST_THREE_LIVE_COUNT '+str(len(posts)),flush=True)
+          print('FIRST_THREE_CONTAINER '+json.dumps(graph_get(page,'17911372950580142','id,status_code,status'),ensure_ascii=False),flush=True)
           PY
