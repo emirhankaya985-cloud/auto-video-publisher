@@ -1,0 +1,65 @@
+name: ToonZone first season on Instagram and Facebook audit
+on:
+  push:
+    branches: [main]
+    paths: ['docs/toonzone-instagram-season-2026-11-05.md']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: public-drive-recovery
+  cancel-in-progress: false
+jobs:
+  season:
+    if: github.repository == 'emirhankaya985-cloud/auto-video-publisher' && github.ref == 'refs/heads/main' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_TOKEN: ${{ github.token }}
+      META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: |
+          pip install --require-hashes -r requirements.txt
+          pip install gdown==6.4.2
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+      - run: python -m unittest test_toonzone_instagram_season test_threads_toonzone_season
+      - name: Verify Instagram identity and reserve ordered first-season parts
+        run: python toonzone_instagram_season.py prepare
+      - name: Persist Instagram reservations before publishing
+        id: intent
+        uses: actions/upload-artifact@v4
+        with:
+          name: toonzone-instagram-season-intent
+          path: toonzone-instagram-season-runtime/alert-history.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Publish and verify Instagram parts sequentially
+        env:
+          INSTAGRAM_SEASON_INTENT_ARCHIVED: ${{ steps.intent.outcome == 'success' && 'true' || 'false' }}
+        run: python toonzone_instagram_season.py publish
+      - name: Preserve Instagram post IDs and unresolved reservations
+        if: always() && steps.intent.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: toonzone-instagram-season-result
+          path: toonzone-instagram-season-runtime/alert-history.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Check Facebook identity and visible first-season posts without publishing
+        if: always()
+        run: python toonzone_instagram_season.py facebook
+      - name: Preserve Facebook audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: toonzone-facebook-audit
+          path: toonzone-instagram-season-runtime/facebook-audit.json
+          if-no-files-found: warn
+          retention-days: 90
