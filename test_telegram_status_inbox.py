@@ -56,7 +56,7 @@ class InboxTests(unittest.TestCase):
             inbox.send()
             send.assert_called_once_with(title='📊 İstatistik', message='Son arşiv ölçümü',
                                          reply_markup={
-                                             'keyboard': [[{'text': '📊 İstatistik'}]],
+                                             'keyboard': [[{'text': '📊 İstatistik'}], [{'text': '🧵 Threads İstatistik'}]],
                                              'resize_keyboard': True, 'is_persistent': True})
 
     def test_existing_webhook_is_never_deleted_or_consumed(self):

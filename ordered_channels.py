@@ -47,6 +47,51 @@ CARTOON_RE = re.compile(
     re.IGNORECASE,
 )
 TOONZONE_PART_MINUTES = {1: 0, 2: 10, 3: 20, 4: 30}
+# Original Turkish-localized episode labels for approved S1/S2 caption templates.
+# Keep source MP4/TXT filenames and their hashes unchanged.
+TOONZONE_TITLES_TR = {
+    (1, 1): "Güç",
+    (1, 2): "Sandalyeleri Diz",
+    (1, 3): "Kafeinli Konser Biletleri",
+    (1, 4): "Ölüm Yumrukları",
+    (1, 5): "Bedava Pasta",
+    (1, 6): "Sosis Ustası",
+    (1, 7): "Izgara Peynir Lüks",
+    (1, 8): "Tekboynuzlar Gitmeli",
+    (1, 9): "Telefon Şakacıları",
+    (1, 10): "Don",
+    (1, 11): "Rigby'nin Bedeni",
+    (1, 12): "Mordecai ve Rigby'ler",
+    (2, 1): "Selam Vali",
+    (2, 2): "Vakit Geldi",
+    (2, 3): "Takdir Günü",
+    (2, 4): "Gözetleyiciler",
+    (2, 5): "Pops'un Konuşması",
+    (2, 6): "Annem",
+    (2, 7): "Yüksek Skor",
+    (2, 8): "Televizyona Öfke",
+    (2, 9): "Parti Pete",
+    (2, 10): "Hafıza Silici",
+    (2, 11): "Benson Gitsin",
+    (2, 12): "Ama Fişim Var",
+    (2, 13): "Bu Benim Şarkım",
+    (2, 14): "Kaslı Kadın",
+    (2, 15): "Geçici İşçi",
+    (2, 16): "Uğursuzluk",
+    (2, 17): "Orada Görüşürüz",
+    (2, 18): "Bana Bir İyilik Yap",
+    (2, 19): "Mezarlık Gecesi",
+    (2, 20): "Gerçek Güreş",
+    (2, 21): "Bilek Güreşi",
+    (2, 22): "Gece Kuşu",
+    (2, 23): "Yavru Ördekler",
+    (2, 24): "Daha Akıllı",
+    (2, 25): "İlk Gün",
+    (2, 26): "Viral Ol",
+    (2, 27): "Kokarcaya Yakalandı",
+    (2, 28): "Karaoke Videosu",
+}
+
 TOONZONE_ETSY_LINK = "https://www.etsy.com/shop/MiroviaStudio?ref=dashboard-header"
 TOONZONE_STATE_KEYS = (
     "claimed_route_slot", "claimed_at", "failed_route_slot",
@@ -75,7 +120,7 @@ def toonzone_metadata(stem):
     season, episode, part, title = order
     if part not in TOONZONE_PART_MINUTES:
         raise ValueError("ToonZone bölümleri yalnızca Part 1-4 olabilir")
-    display_title = title.title()
+    display_title = TOONZONE_TITLES_TR.get((season, episode), title.title())
     episode_copy = (
         f"{display_title} | Sezon {season}, Bölüm {episode}. "
         f"Bu bölümde neler olduğunu yorumlarda paylaş!"

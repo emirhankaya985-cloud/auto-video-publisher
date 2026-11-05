@@ -12,8 +12,9 @@ _BOT_TOKEN = re.compile(r"^[0-9]{5,15}:[A-Za-z0-9_-]{20,}$")
 _CHAT_ID = re.compile(r"^-?[0-9]{4,20}$")
 _MAX_TEXT_CHARS = 3900
 STATISTICS_BUTTON = "📊 İstatistik"
+THREADS_STATISTICS_BUTTON = "🧵 Threads İstatistik"
 STATISTICS_KEYBOARD = {
-    "keyboard": [[{"text": STATISTICS_BUTTON}]],
+    "keyboard": [[{"text": STATISTICS_BUTTON}], [{"text": THREADS_STATISTICS_BUTTON}]],
     "resize_keyboard": True,
     "is_persistent": True,
 }
