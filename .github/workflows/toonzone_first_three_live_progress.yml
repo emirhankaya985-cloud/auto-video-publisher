@@ -1,0 +1,42 @@
+name: ToonZone first-three live publication progress
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/toonzone_first_three_live_progress.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    if: github.repository == 'emirhankaya985-cloud/auto-video-publisher' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: |
+          pip install --require-hashes -r requirements.txt
+          pip install gdown==6.4.2
+      - name: Read actual first-three Instagram post IDs without publication
+        run: |
+          python - <<'PY'
+          import json,re
+          from toonzone_instagram_season import page_for_toonzone,instagram_identity,graph_get
+          page=page_for_toonzone()
+          user=instagram_identity(page)
+          assert user=='17841477404255851'
+          data=graph_get(page,user,'id,media.limit(50){id,caption,permalink,timestamp}')
+          posts=[]
+          for row in data.get('media',{}).get('data',[]):
+              caption=row.get('caption','')
+              match=re.search(r'Sezon 1 • Bölüm ([123]) • Part ([1234])/4',caption)
+              if caption.startswith('🎬 Sürekli Dizi — ') and match:
+                  posts.append(dict(episode=int(match[1]),part=int(match[2]),id=row['id'],permalink=row.get('permalink'),timestamp=row.get('timestamp')))
+          posts.sort(key=lambda x:(x['episode'],x['part']))
+          print('FIRST_THREE_LIVE_POSTS '+json.dumps(posts,ensure_ascii=False),flush=True)
+          print('FIRST_THREE_LIVE_COUNT '+str(len(posts)),flush=True)
+          PY
