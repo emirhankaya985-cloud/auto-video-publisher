@@ -13,7 +13,8 @@ import requests
 
 from analytics_github_history import REPOSITORY, MAX_ARCHIVE_BYTES, restore_history
 from nvidia_assistant import answer, enabled
-from telegram_notifications import STATISTICS_BUTTON, STATISTICS_KEYBOARD, _BOT_TOKEN, _CHAT_ID, send_telegram
+from telegram_notifications import (STATISTICS_BUTTON, THREADS_STATISTICS_BUTTON,
+                                    STATISTICS_KEYBOARD, _BOT_TOKEN, _CHAT_ID, send_telegram)
 from telegram_status import load_status
 from views_comparison import number
 
@@ -146,9 +147,51 @@ def load_statistics(*, session=requests):
         return "İstatistik arşivi şu anda okunamadı. Daha sonra tekrar deneyebilirsin."
 
 
+
+def load_threads_statistics(*, session=requests):
+    """Only Threads rows from the verified nightly archive; no platform writes."""
+    try:
+        run_id, comparison = latest_comparison(session=session)
+        measured = datetime.fromisoformat(comparison["measured_at"])
+        if measured.tzinfo is None or not isinstance(comparison.get("accounts"), list):
+            raise ValueError("Measurement unavailable")
+        measured = measured.astimezone(ZoneInfo("Europe/Istanbul"))
+        followers = {(r.get("account"), r.get("platform")): r.get("followers")
+                     for r in comparison.get("followers", []) if isinstance(r, dict)}
+        lines = [f"🧵 Threads — son ölçüm: {measured:%d.%m.%Y %H:%M} TRT",
+                 "Video görüntülenmeleri: toplam / 1 gün / 7 gün"]
+        found = 0
+        for account in comparison["accounts"]:
+            if not isinstance(account, dict) or not isinstance(account.get("platforms"), list):
+                continue
+            for part in account["platforms"]:
+                if not isinstance(part, dict) or part.get("platform") != "Threads":
+                    continue
+                found += 1
+                daily = part.get("daily") or {}
+                weekly = part.get("weekly") or {}
+                total = part.get("total")
+                values = (total,
+                          daily.get("delta") if isinstance(daily, dict) else None,
+                          weekly.get("delta") if isinstance(weekly, dict) else None)
+                follower = followers.get((account.get("account"), "Threads"))
+                lines.append(f"• {str(account.get('account', 'Hesap'))[:70]}: "
+                             f"{' / '.join(number(value) for value in values)}"
+                             f" · {number(follower)} takipçi")
+        if not found:
+            lines.append("N/A: doğrulanmış raporda Threads hesabı ölçümü bulunmuyor.")
+        lines.extend(["", "N/A: eksik veya karşılaştırılamayan veri; 0 varsayılmadı.",
+                      "Bu sonuç anlık ölçüm değildir. Penguen yetki hatası varsa eski veri güncel sayılmaz.",
+                      f"https://github.com/{REPOSITORY}/actions/runs/{int(run_id)}"])
+        return "\n".join(lines)
+    except (RuntimeError, KeyError, TypeError, ValueError, AttributeError):
+        return "Threads istatistik arşivi şu anda doğrulanamadı. Sayı tahmin edilmedi."
+
+
 class Worker:
     def __init__(self, database, *, evidence_loader=latest_evidence, model=answer, sender=send_telegram,
-                 status_loader=load_status, statistics_loader=load_statistics):
+                 status_loader=load_status, statistics_loader=load_statistics,
+                 threads_statistics_loader=load_threads_statistics):
         self.chat = os.getenv("TELEGRAM_CHAT_ID", "")
         self.owner = os.getenv("TELEGRAM_AI_OWNER_ID", "")
         token = os.getenv("TELEGRAM_BOT_TOKEN", "")
@@ -165,6 +208,7 @@ class Worker:
         self.load, self.model, self.send = evidence_loader, model, sender
         self.load_status = status_loader
         self.load_statistics = statistics_loader
+        self.load_threads_statistics = threads_statistics_loader
 
     def offset(self):
         row = self.db.execute("SELECT value FROM state WHERE key='offset'").fetchone()
@@ -190,11 +234,11 @@ class Worker:
             return
         command = text.strip().casefold().replace("\u0307", "")
         if command in {'/stok', '/durdur', '/devam'}:
-            self.send('📋 Durum', 'Bu komut kaldırıldı. /durum veya /istatistik yazabilirsin.')
+            self.send('📋 Durum', 'Bu komut kaldırıldı. /durum, /istatistik veya /threads yazabilirsin.')
             return
         if self.status_only:
             if command in {'/start', '/help'}:
-                self.send('📋 Durum', '/durum: yayın durumu ve saat tablosu.\n/istatistik: son arşiv ölçümü.',
+                self.send('📋 Durum', '/durum: yayın durumu ve saat tablosu.\n/istatistik: tüm platformlar.\n/threads: yalnız Threads.',
                           reply_markup=STATISTICS_KEYBOARD)
             elif command in {'/durum', 'durum'}:
                 try:
@@ -204,6 +248,13 @@ class Worker:
                 self.send('📋 Yayın durumu', reply, parse_mode='HTML', reply_markup=STATISTICS_KEYBOARD)
             elif command in {'/istatistik', 'istatistik', STATISTICS_BUTTON.casefold().replace("\u0307", "")}:
                 self.send(STATISTICS_BUTTON, self.load_statistics(), reply_markup=STATISTICS_KEYBOARD)
+            elif command in {'/threads', '/threads_istatistik', 'threads',
+                             THREADS_STATISTICS_BUTTON.casefold().replace("\u0307", "")}:
+                try:
+                    reply = self.load_threads_statistics()
+                except Exception:
+                    reply = 'Threads arşivi şu anda okunamadı. Sayı tahmin edilmedi.'
+                self.send(THREADS_STATISTICS_BUTTON, reply, reply_markup=STATISTICS_KEYBOARD)
             return
         if text.strip() in {"/start", "/help"}:
             self.send("🤖 Sosyal medya yardımcısı", "/durum: veri tarihi\n/sifirla: sohbeti unut")

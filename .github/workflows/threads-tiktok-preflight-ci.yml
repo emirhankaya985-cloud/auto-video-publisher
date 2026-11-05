@@ -1,0 +1,38 @@
+name: Threads button and TikTok preflight no-publish CI
+on:
+  pull_request:
+    paths:
+      - 'telegram_notifications.py'
+      - 'telegram_ai_worker.py'
+      - 'telegram_status_inbox.py'
+      - 'ordered_channels.py'
+      - 'tiktok_preflight.py'
+      - 'test_tiktok_preflight.py'
+      - 'test_telegram_threads_stats.py'
+      - 'test_toonzone_translations.py'
+      - 'test_telegram_status_inbox.py'
+      - 'test_views_comparison.py'
+      - '.github/workflows/threads-tiktok-preflight-ci.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'telegram_notifications.py'
+      - 'telegram_ai_worker.py'
+      - 'telegram_status_inbox.py'
+      - 'ordered_channels.py'
+      - 'tiktok_preflight.py'
+      - '.github/workflows/threads-tiktok-preflight-ci.yml'
+permissions:
+  contents: read
+jobs:
+  safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --require-hashes -r requirements.txt
+      - name: Mock-only controls, separate metrics, Turkish labels, no provider writes
+        run: python -m unittest -v test_tiktok_preflight.py test_telegram_threads_stats.py test_toonzone_translations.py test_telegram_status_inbox.py test_nvidia_assistant.py test_views_comparison.py test_telegram_status.py
