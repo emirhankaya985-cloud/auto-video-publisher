@@ -166,6 +166,7 @@ def audit_facebook():
 
 
 if __name__ == '__main__':
+    raise SystemExit('Owner cancelled this season campaign. Publication is disabled.')
     parser = argparse.ArgumentParser()
     parser.add_argument('mode', choices=['prepare', 'publish', 'facebook'])
     mode = parser.parse_args().mode
