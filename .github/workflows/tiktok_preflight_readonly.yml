@@ -5,6 +5,11 @@ on:
     paths:
       - 'tiktok_preflight.py'
       - '.github/workflows/tiktok_preflight_readonly.yml'
+  pull_request:
+    paths:
+      - 'tiktok_preflight.py'
+      - 'test_tiktok_preflight.py'
+      - '.github/workflows/tiktok_preflight_readonly.yml'
   workflow_dispatch:
 permissions:
   contents: read
