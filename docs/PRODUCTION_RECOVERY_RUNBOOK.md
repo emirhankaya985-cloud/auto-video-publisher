@@ -584,3 +584,7 @@ izlenir; bu inceleme test amaçlı gerçek yayın tetiklemedi.
 - Kullanıcının Meta bildiriminde 26 Ekim tarihli Regular Show S01E03, Part 3/4 işaretlendi. Bildirim metni telif gerekçesini gösteriyor. İddia sahibi, kararın kapsamı ve diğer kopyaların durumu henüz doğrulanmadı.
 - ToonZone normal ve manuel yayın ile toplu yayın istisnasına kapatıldı. Durdurma, mevcut etkinleştirme bayraklarından bağımsızdır. Yayın geçmişini koru ve mevcut gönderiyi tekrar sıraya alma.
 - Yeniden açmadan önce hak belgesini doğrula, diğer platformlardaki aynı kaynağı ve serinin kalan kuyruğunu incele. Yerel test, etkinleştirme ve toplu yayın bayraklarının durdurmayı aşamadığını kontrol eder.
+
+### 5 Kasım 2026 — Kullanıcının izin beyanıyla Threads ilk sezon talebi
+
+Kullanıcı hak sahibinden izni olduğunu belirtti ve ilk sezonu Threads'e sırasıyla yayımlamayı açıkça istedi. Belge ve Meta karar ayrıntısı bağımsız doğrulanmadı. Yalnızca bu talep için 48 parçalık ayrı kampanya hazırlandı. Normal ToonZone durdurması korunur. Kampanya kendi kalıcı intent/result kayıtlarını kullanır, Etsy bağlantısı eklemez, bir parça doğrulanmadan sonrakine geçmez ve belirsiz POST'u otomatik yinelemez. Canlı kabul için 48 doğrulanmış gönderi ID'si gerekir.
