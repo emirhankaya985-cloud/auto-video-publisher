@@ -232,9 +232,8 @@ class AssistantTests(unittest.TestCase):
         ]}
         missing = Mock(status_code=200)
         missing.json.return_value = {"artifacts": []}
-        session.get.side_effect = [newer, missing,
-                                   session.get.side_effect[1],
-                                   session.get.side_effect[2]]
+        original = list(session.get.side_effect)
+        session.get.side_effect = [newer, missing, original[1], original[2]]
         with patch.dict(os.environ, {"GITHUB_TOKEN": "test-read-token"}):
             run_id, comparison = __import__("telegram_ai_worker").latest_comparison(session=session)
         self.assertEqual(run_id, 42)
