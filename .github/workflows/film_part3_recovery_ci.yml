@@ -25,6 +25,6 @@ jobs:
       - name: Dependencies
         run: |
           pip install --require-hashes -r requirements.txt
-          pip install PyYAML==6.0.2
+          pip install PyYAML==6.0.2 gdown==6.4.2 pillow==13.0.0
       - name: Run entire test suite without any API credentials
         run: python -m unittest discover -p 'test*.py'
