@@ -107,6 +107,7 @@ def execute(run_id):
 
 
 if __name__ == '__main__':
+    raise SystemExit('Owner cancelled this season campaign. Publication is disabled.')
     parser = argparse.ArgumentParser()
     parser.add_argument('mode', choices=['prepare', 'publish'])
     mode = parser.parse_args().mode
