@@ -52,6 +52,8 @@ def verify_accepted(entry, *, channel_check=check_channel, youtube_build=build):
         if row.get("id") != post_id or (row.get("snippet") or {}).get("channelId") != expected:
             return "youtube_video_identity_mismatch"
         status = row.get("status") or {}
+        if status.get("uploadStatus") in {"failed", "rejected", "deleted"}:
+            return "youtube_upload_" + status["uploadStatus"]
         if status.get("privacyStatus") == "public" and status.get("uploadStatus") == "processed":
             return "public_processed_verified"
         return "youtube_processing_or_visibility_pending"

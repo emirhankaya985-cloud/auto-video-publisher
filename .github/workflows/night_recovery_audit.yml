@@ -1,0 +1,38 @@
+name: Night recovery evidence (read-only)
+on:
+  push:
+    branches: [main]
+    paths: [night_recovery_audit.py, .github/workflows/night_recovery_audit.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: night-recovery-readonly
+  cancel-in-progress: false
+jobs:
+  audit:
+    if: github.repository == 'emirhankaya985-cloud/auto-video-publisher' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+      TOKEN_CHANNEL1_JSON: ${{ secrets.TOKEN_CHANNEL1_JSON }}
+      TOKEN_CHANNEL2_JSON: ${{ secrets.TOKEN_CHANNEL2_JSON }}
+      TOKEN_DAILY_LAUGH_LAB_JSON: ${{ secrets.TOKEN_DAILY_LAUGH_LAB_JSON }}
+      TOKEN_GONLE_DUSEN_JSON: ${{ secrets.TOKEN_GONLE_DUSEN_JSON }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: pip install --require-hashes -r requirements.txt && pip install gdown==6.4.2 pillow==13.0.0
+      - run: python night_recovery_audit.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: night-recovery-audit
+          path: night-recovery-audit.json
+          if-no-files-found: error
+          retention-days: 90

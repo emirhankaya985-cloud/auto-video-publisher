@@ -4,11 +4,19 @@ on:
     branches: [main]
     paths: ['.github/workflows/toonzone_first_three_live_progress.yml']
   workflow_dispatch:
+  workflow_run:
+    workflows: ['ToonZone Instagram first three episodes with real covers']
+    types: [completed]
+    branches: [main]
 permissions:
   contents: read
 jobs:
   audit:
-    if: github.repository == 'emirhankaya985-cloud/auto-video-publisher' && github.ref == 'refs/heads/main'
+    if: >-
+      github.repository == 'emirhankaya985-cloud/auto-video-publisher' && github.ref == 'refs/heads/main' &&
+      (github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.event != 'pull_request'))
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     env:
@@ -55,5 +63,7 @@ jobs:
                   post['cover_verified']=post['cover_distance']<=0.12
           print('FIRST_THREE_LIVE_POSTS '+json.dumps(posts,ensure_ascii=False),flush=True)
           print('FIRST_THREE_LIVE_COUNT '+str(len(posts)),flush=True)
+          assert [(p['episode'],p['part']) for p in posts]==[(e,p) for e in range(1,4) for p in range(1,5)],'twelve_unique_parts_required'
+          assert [p['timestamp'] for p in posts]==sorted(p['timestamp'] for p in posts),'publication_order_mismatch'
           assert all(post['cover_verified'] for post in posts),'live_cover_mismatch'
           PY

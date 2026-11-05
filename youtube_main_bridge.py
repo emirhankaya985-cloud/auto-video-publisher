@@ -111,19 +111,27 @@ def previous_upload(youtube, expected, marker, title):
 
 def verify_saved_upload(youtube, entry, expected):
     """GET-only reconciliation; ordinary processing is pending, never done."""
-    rows = youtube.videos().list(part='snippet,status', id=entry['post_id']).execute().get('items', [])
+    rows = youtube.videos().list(part='snippet,status', id=entry['post_id']).execute(num_retries=2).get('items', [])
+    entry['verification_status'] = 'video_identity_unverified'
     if (len(rows) != 1 or rows[0].get('id') != entry['post_id']
             or rows[0].get('snippet', {}).get('channelId') != expected):
         raise RuntimeError('YouTube upload identity not verified')
     status = rows[0].get('status', {})
     entry.update(privacy_status=status.get('privacyStatus'), upload_status=status.get('uploadStatus'))
+    if entry['upload_status'] in {'failed', 'rejected', 'deleted'}:
+        # Definitive provider result; preserve the accepted ID and never
+        # upload this source again. The initial failed check remains visible.
+        entry.update(status='held', verification_status='upload_' + entry['upload_status'])
+        raise RuntimeError('YouTube terminal upload state; ID preserved, no retry')
     if entry['privacy_status'] == 'public' and entry['upload_status'] == 'processed':
-        entry['status'] = 'done'
+        entry.update(status='done', verification_status='public_processed_verified')
         return
     if entry['privacy_status'] == 'public' and entry['upload_status'] == 'uploaded':
+        entry['verification_status'] = 'accepted_processing_pending'
         print(json.dumps({'platform': 'youtube', 'route': entry['route'],
                           'status': 'accepted_processing_pending', 'post_id': entry['post_id']}), flush=True)
         return
+    entry['verification_status'] = 'processing_or_visibility_unverified'
     raise RuntimeError('YouTube processing or visibility not verified')
 
 
@@ -180,7 +188,8 @@ def publish():
                          route=entry.get('route'), platform='youtube',
                          error=RuntimeError(type(exc).__name__))
             print(json.dumps({'platform': 'youtube', 'route': entry.get('route'),
-                              'status': entry.get('status'), 'error_type': type(exc).__name__}), flush=True)
+                              'status': entry.get('status'), 'error_type': type(exc).__name__,
+                              'verification_status': entry.get('verification_status', 'read_or_auth_failed')}), flush=True)
         finally:
             save(STATE, state)
     if failed:
