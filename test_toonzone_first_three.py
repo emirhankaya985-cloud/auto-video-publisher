@@ -79,3 +79,26 @@ class Tests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+class RecoveryTests(unittest.TestCase):
+    def test_finished_probe_requires_exact_source_cover_caption_and_no_publish(self):
+        prior=dict(file='first.mp4',user_id='7',source_id='video',source_sha256='source-hash',cover_id='cover',cover_sha256='cover-hash',caption='caption',upload_sha256='old-upload',diagnostic={'container_id':'111'})
+        candidate=dict(prior,status='finished_upload_only',publish_allowed=False,candidate_profile='toonzone_compact',previous_container_id='111',candidate_container_id='222',candidate_upload_sha256='new-upload')
+        with patch.object(batch.archive,'restore',return_value={'schema':1,'records':{'0'*64:candidate}}):
+            self.assertEqual(batch.recovery_candidate(prior)['candidate_container_id'],'222')
+            candidate['source_sha256']='different-source'
+            with self.assertRaisesRegex(RuntimeError,'does_not_match_failed_part'): batch.recovery_candidate(prior)
+
+    def test_resume_publishes_the_verified_existing_container_without_reupload(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);key='d'*64
+            name='S01E01_Title_Part1.mp4';frame=root/'previews'/'S01E01_Title_Part1-prepared.jpg'
+            record=dict(status='reserved',intent_run_id='42',user_id=batch.EXPECTED_INSTAGRAM_ID,source_id='source',file=name,caption='text',cover_sha256='hash',last_seen='2026-11-05T12:00:00+00:00',resume_container_id='222',probe_frame_sha256='hash')
+            item=dict(key=key,id='source',name=name,text='text',cover_path='cover.png',resume_frame=str(frame))
+            batch.archive.save(root/'history.json',{'schema':1,'records':{key:record}})
+            batch.archive.save(root/'plan.json',{'run_id':'42','user_id':batch.EXPECTED_INSTAGRAM_ID,'plans':[item]})
+            with patch.object(batch,'ROOT',root),patch.object(batch,'HISTORY',root/'history.json'),patch.object(batch,'PLAN',root/'plan.json'),patch.object(batch,'page_for_toonzone'),patch.object(batch,'instagram_identity',return_value=batch.EXPECTED_INSTAGRAM_ID),patch.object(batch,'digest',return_value='hash'),patch.object(batch,'cover_distance',return_value=0),patch.object(batch,'thumbnail',return_value={'id':'123','caption':'text','media_type':'VIDEO','permalink':'https://www.instagram.com/reel/test/'}),patch('cloud_omnichannel_publisher.upload_instagram_reel') as upload,patch('cloud_omnichannel_publisher.resume_instagram_container',return_value='123') as resume,patch('public_link_runtime.download_verified_publication_video') as download,patch('telegram_notifications.send_telegram'),patch.dict(os.environ,{'FIRST_THREE_INTENT_ARCHIVED':'true'}):
+                batch.execute('42')
+                upload.assert_not_called();download.assert_not_called()
+                self.assertEqual(resume.call_args.args[1],'222')
+            self.assertEqual(batch.archive.read(root/'history.json')['records'][key]['status'],'verified')

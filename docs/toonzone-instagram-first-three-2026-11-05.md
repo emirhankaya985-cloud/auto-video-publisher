@@ -7,3 +7,5 @@ Use only the matching prepared Drive PNG for each exact MP4 stem. Read-only run 
 This campaign stops after the first twelve parts. Later episodes require their own owner instruction. Previous season-wide jobs remain disabled. A full credential-free regression must pass before the publisher job starts. Publication and notification receipts are preserved separately, and an ambiguous upload is never blindly retried.
 
 Runner recovery: replace run 42099396893 only while it is still in dependency setup, confirm it completed with zero reservation artifacts, then use Ubuntu 24.04 and installed FFmpeg where available. Stop if the prior worker advanced.
+
+Recovery continues only after the compact upload-only probe completed FINISHED on run 42103999147, container 17911374060580142. The first part must publish that exact source/cover-bound container once, without re-upload. The remaining eleven reserved parts use the same compact profile. Previous failed attempt evidence is retained. Live thumbnail verification and the twelve-part ceiling remain mandatory.
