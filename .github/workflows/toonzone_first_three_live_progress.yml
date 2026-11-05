@@ -20,11 +20,15 @@ jobs:
           python-version: '3.12'
       - run: |
           pip install --require-hashes -r requirements.txt
-          pip install gdown==6.4.2
+          pip install gdown==6.4.2 pillow==13.0.0
       - name: Read actual first-three Instagram post IDs without publication
         run: |
           python - <<'PY'
-          import json,re
+          import json,re,tempfile
+          from pathlib import Path
+          from PIL import Image,ImageOps
+          import toonzone_instagram_first_three as batch
+          from public_link_runtime import FOLDERS,inventory,download
           from toonzone_instagram_season import page_for_toonzone,instagram_identity,graph_get
           page=page_for_toonzone()
           user=instagram_identity(page)
@@ -37,7 +41,19 @@ jobs:
               if caption.startswith('🎬 Sürekli Dizi — ') and match:
                   posts.append(dict(episode=int(match[1]),part=int(match[2]),id=row['id'],permalink=row.get('permalink'),timestamp=row.get('timestamp')))
           posts.sort(key=lambda x:(x['episode'],x['part']))
+          covers=inventory(FOLDERS['covers']) if posts else {}
+          with tempfile.TemporaryDirectory() as directory:
+              root=Path(directory)
+              for post in posts:
+                  matches=[row for name,row in covers.items() if name.startswith(f"S01E{post['episode']:02d}_") and name.endswith(f"_Part{post['part']}.png")]
+                  if len(matches)!=1: raise RuntimeError('live_audit_exact_cover_missing')
+                  expected=download(matches[0]['id'],root/'cover.png')
+                  with Image.open(expected) as source:
+                      ImageOps.pad(source.convert('RGB'),(720,1280),color=(0,0,0)).save(root/'expected.jpg')
+                  batch.thumbnail(page,post['id'],root/'actual.jpg')
+                  post['cover_distance']=round(batch.cover_distance(root/'expected.jpg',root/'actual.jpg',reference_is_frame=True),4)
+                  post['cover_verified']=post['cover_distance']<=0.12
           print('FIRST_THREE_LIVE_POSTS '+json.dumps(posts,ensure_ascii=False),flush=True)
           print('FIRST_THREE_LIVE_COUNT '+str(len(posts)),flush=True)
-          print('FIRST_THREE_CONTAINER '+json.dumps(graph_get(page,'17911372950580142','id,status_code,status'),ensure_ascii=False),flush=True)
+          assert all(post['cover_verified'] for post in posts),'live_cover_mismatch'
           PY
