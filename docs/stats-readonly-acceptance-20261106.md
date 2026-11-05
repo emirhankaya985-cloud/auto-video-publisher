@@ -1,0 +1,3 @@
+# Read-only live statistics acceptance, 6 November 2026
+
+This is not a scheduled second daily report. A main push of this workflow runs exactly one measurement for audit. No provider content writes and no Telegram/ntfy sends are invoked. It uses the same read-only source credentials as the daily report and preserves only aggregate measurement-availability indicators, never secret values. It does not replace the normal 23:15 TRT reporting workflow, its historical baselines or its GitHub artifact. Partial coverage remains explicitly partial, not zero. The normal daily scheduled reporting run still requires independent live acceptance.
