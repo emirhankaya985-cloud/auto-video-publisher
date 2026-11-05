@@ -9,6 +9,7 @@ on:
     branches: [main]
     paths:
       - 'toonzone_episodes_4_8.py'
+      - '.github/workflows/toonzone_episodes_4_8.yml'
       - 'docs/toonzone-episodes-4-8-release-2026-11-06.md'
   workflow_dispatch:
     inputs:
@@ -53,6 +54,12 @@ jobs:
       - run: |
           pip install --require-hashes -r requirements.txt
           pip install gdown==6.4.2 pillow==13.0.0
+          if ! command -v ffmpeg >/dev/null || ! command -v ffprobe >/dev/null; then
+            printf '%s\\n' 'https://archive.ubuntu.com/ubuntu' | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
+            printf '%s\\n' 'https://security.ubuntu.com/ubuntu' | sudo tee /etc/apt/apt-mirrors-security.txt >/dev/null
+            sudo apt-get -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 -o Acquire::Retries=1 update -qq
+            sudo apt-get -o Acquire::http::Timeout=20 -o Acquire::Retries=1 install -y --no-install-recommends ffmpeg
+          fi
       - name: Check verified live media history and twenty exact Drive covers - NO POSTS
         run: python toonzone_episodes_4_8.py audit
       - if: always()
@@ -89,6 +96,12 @@ jobs:
       - run: |
           pip install --require-hashes -r requirements.txt
           pip install gdown==6.4.2 pillow==13.0.0
+          if ! command -v ffmpeg >/dev/null || ! command -v ffprobe >/dev/null; then
+            printf '%s\\n' 'https://archive.ubuntu.com/ubuntu' | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
+            printf '%s\\n' 'https://security.ubuntu.com/ubuntu' | sudo tee /etc/apt/apt-mirrors-security.txt >/dev/null
+            sudo apt-get -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 -o Acquire::Retries=1 update -qq
+            sudo apt-get -o Acquire::http::Timeout=20 -o Acquire::Retries=1 install -y --no-install-recommends ffmpeg
+          fi
       - name: Reserve 20 exact sources before any Meta POST
         run: python toonzone_episodes_4_8.py reserve
       - name: Persist all intents
