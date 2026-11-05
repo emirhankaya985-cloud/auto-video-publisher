@@ -588,3 +588,11 @@ izlenir; bu inceleme test amaçlı gerçek yayın tetiklemedi.
 ### 5 Kasım 2026 — Kullanıcının izin beyanıyla Threads ilk sezon talebi
 
 Kullanıcı hak sahibinden izni olduğunu belirtti ve ilk sezonu Threads'e sırasıyla yayımlamayı açıkça istedi. Belge ve Meta karar ayrıntısı bağımsız doğrulanmadı. Yalnızca bu talep için 48 parçalık ayrı kampanya hazırlandı. Normal ToonZone durdurması korunur. Kampanya kendi kalıcı intent/result kayıtlarını kullanır, Etsy bağlantısı eklemez, bir parça doğrulanmadan sonrakine geçmez ve belirsiz POST'u otomatik yinelemez. Canlı kabul için 48 doğrulanmış gönderi ID'si gerekir.
+
+
+### 5 Kasım 2026 — Threads Telegram bildirim gecikmesi
+
+- Kullanıcı Threads bildirimlerinin gelmediğini bildirdi. [42009147207](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/42009147207) notify işi 13:15 TRT'de 4 Telegram sunucu alındısı, 0 gönderim hatası kaydetti; Penguen feed okuması HTTP 401 döndü. Sunucu alındısı cihaz teslimi değildir.
+- Bildirim workflow'u yalnız yarım saatlik schedule/push ile çalışıyordu; normal Threads yayıncısı ve ayrı ToonZone sezon işi tamamlanmasıyla tetiklenmiyordu. Her iki yayın işinin main/aynı depo tamamlanma olayını ekle. Başarısız işte de doğrulanmış kısmi yayınları oku. PR kaynaklarını reddet, ortak concurrency ve mevcut kalıcı tekilleştirmeyi koru.
+- Yarım saatlik schedule yedek olarak kalır. API kimlik GET, post ID ve timestamp doğrulaması korunur; sosyal medya yayını yeniden tetiklenmez. Penguen yetki sorunu bu zamanlama düzeltmesiyle çözülmez.
+- Test: mevcut platform bildirim ve kalıcı geçmiş regresyonları. Canlı kabul: yeni main workflow'unda Telegram sunucu alındısı ve yayın sonrasındaki workflow_run tetiklenmesi ayrı kontrol edilir. Geri alma: yalnız bu workflow tetikleme değişikliğini geri al; geçmiş kayıtlarını silme.
