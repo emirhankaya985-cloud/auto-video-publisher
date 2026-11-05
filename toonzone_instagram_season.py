@@ -18,6 +18,7 @@ HISTORY = ROOT / 'alert-history.json'
 PLAN = ROOT / 'plan.json'
 NAMES = ('toonzone-instagram-season-intent', 'toonzone-instagram-season-result')
 CAMPAIGN = 'toonzone-instagram-season-one-2026-11-05'
+AUDITED_PREWRITE_RUN = '42011620370'
 
 
 def page_for_toonzone():
@@ -65,6 +66,14 @@ def prepare(run_id):
     for item in catalog:
         key = archive.identity(CAMPAIGN, 'toonzone', 'instagram', item['id'])
         prior = history['records'].get(key)
+        recovered = False
+        if (prior and prior.get('intent_run_id') == AUDITED_PREWRITE_RUN
+                and prior.get('status') == 'reserved' and prior.get('user_id') == user_id
+                and prior.get('source_id') == item['id'] and prior.get('file') == item['name']):
+            # This exact run stopped at the first local cover-name check.
+            # No upload or media_publish call was reached for any of its 48 parts.
+            recovered = True
+            prior = None
         if prior:
             if (prior.get('status') != 'verified' or prior.get('user_id') != user_id
                     or prior.get('file') != item['name'] or not prior.get('post_id')):
@@ -74,6 +83,8 @@ def prepare(run_id):
         history['records'][key] = dict(route='toonzone', platform='instagram',
             source_id=item['id'], file=item['name'], user_id=user_id,
             marker=marker, caption=text, status='reserved', last_seen=now, intent_run_id=run_id)
+        if recovered:
+            history['records'][key]['audited_prewrite_run'] = AUDITED_PREWRITE_RUN
         plans.append(dict(key=key, text=text, **item))
     archive.save(HISTORY, archive.validate(history))
     archive.save(PLAN, dict(run_id=run_id, plans=plans, user_id=user_id,
@@ -104,7 +115,7 @@ def execute(run_id):
                 source = download_verified_publication_video(item['id'], temp / 'source.mp4')
                 with source.open('rb') as handle:
                     record['source_sha256'] = hashlib.file_digest(handle, 'sha256').hexdigest()
-                cover = generate_part_cover(source, item['name'], temp / 'cover.png')
+                cover = generate_part_cover(source, item['name'], temp / (Path(item['name']).stem + '.png'))
                 covered = create_instagram_cover_video(source, cover, temp / 'covered.mp4')
                 video = prepare_instagram_upload(covered, temp / 'instagram.mp4', toonzone_compact=True)
                 record['status'] = 'attempted'
