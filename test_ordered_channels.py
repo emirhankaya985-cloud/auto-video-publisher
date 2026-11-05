@@ -23,8 +23,8 @@ class OrderedChannelTests(unittest.TestCase):
     def test_toonzone_metadata_uses_ten_minute_part_slots(self):
         self.assertEqual(toonzone_metadata("S01E01_The_Power_Part1"), {
             "season": 1, "episode": 1, "part": 1,
-            "title": "The Power — Part 1",
-            "description": "The Power | Sezon 1, Bölüm 1. Bu bölümde neler olduğunu yorumlarda paylaş!\n\n#RegularShow #ToonZone #ÇizgiFilm #Cartoon #S01E01\n\nEtsy: https://www.etsy.com/shop/MiroviaStudio?ref=dashboard-header",
+            "title": "Güç — Part 1",
+            "description": "Güç | Sezon 1, Bölüm 1. Bu bölümde neler olduğunu yorumlarda paylaş!\n\n#RegularShow #ToonZone #ÇizgiFilm #Cartoon #S01E01\n\nEtsy: https://www.etsy.com/shop/MiroviaStudio?ref=dashboard-header",
             "minute": 0,
         })
         self.assertEqual(toonzone_metadata("S01E01_The_Power_Part4")["minute"], 30)
