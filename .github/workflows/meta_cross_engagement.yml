@@ -97,6 +97,7 @@ jobs:
       - name: Execute supported operations once; preserve ambiguous results
         run: python meta_cross_engagement.py execute
       - name: Preserve independent engagement ledger including partial results
+        id: verified_ledger
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -104,6 +105,16 @@ jobs:
           path: cross-engagement/engagement.json
           if-no-files-found: ignore
           retention-days: 90
+      - name: Send one separate Telegram receipt only for genuinely accepted likes
+        if: >-
+          success() &&
+          steps.verified_ledger.outcome == 'success' &&
+          (env.ENGAGEMENT_MODE == 'apply' || env.ENGAGEMENT_MODE == 'single_like')
+        env:
+          ENGAGEMENT_RESULT_ARCHIVED: 'true'
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python meta_cross_engagement_receipts.py
       - name: Preserve operation support and permission report
         if: always()
         uses: actions/upload-artifact@v4
