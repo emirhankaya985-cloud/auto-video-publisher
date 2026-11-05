@@ -72,7 +72,7 @@ def audit(state, *, verifier=verify_accepted):
     for key, entry in entries.items():
         if not isinstance(key, str) or not isinstance(entry, dict):
             raise ValueError("invalid archived entry")
-        if entry.get("status") != "accepted":
+        if entry.get("status") not in {"accepted", "held"}:
             continue
         reason = verifier(entry)
         results.append({
@@ -84,7 +84,8 @@ def audit(state, *, verifier=verify_accepted):
     confirmed = sum(x["status"] == "public_processed_verified" for x in results)
     return {
         "status": "all_accepted_verified" if confirmed == len(results) else "pending_confirmation",
-        "accepted_checked": len(results),
+        "accepted_checked": sum(row.get("status") == "accepted" for row in entries.values()),
+        "held_checked": len(results) - sum(row.get("status") == "accepted" for row in entries.values()),
         "public_processed_verified": confirmed,
         "unverified": len(results) - confirmed,
         "posts": results,

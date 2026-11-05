@@ -10,10 +10,27 @@ from toonzone_instagram_season import graph_get
 from youtube_accepted_audit import audit as youtube_audit
 
 
+def cancelled_instagram_posts():
+    """Read only the cancelled campaign's exact IDs; never call cleanup DELETE."""
+    import toonzone_season_cleanup as cleanup
+    _base, _token, user_id, context = cleanup.connection('instagram')
+    history = cleanup.archive.restore(names=cleanup.instagram_campaign.NAMES,
+                                      workflow_path=cleanup.instagram_campaign.WORKFLOW)
+    selected = cleanup.targets(history, 'instagram', user_id)
+    visible = {str(row['id']) for row in cleanup.owned_posts('instagram', context)}
+    return {'status': 'checked', 'campaign_posts': len(selected),
+            'still_visible': sum(row['post_id'] in visible for row in selected),
+            'deletions_attempted': 0}
+
+
 def main():
     state = restore()
     report = {'uploads_attempted': 0, 'publication_state_modified': False,
               'youtube': youtube_audit(state), 'instagram_containers': [], 'film_sources': []}
+    try:
+        report['cancelled_instagram_campaign'] = cancelled_instagram_posts()
+    except Exception:
+        report['cancelled_instagram_campaign'] = {'status': 'read_failed', 'deletions_attempted': 0}
     pages = {p['page_name']: p for p in load_meta_auth()['pages']}
     for row in state['entries'].values():
         failure = row.get('failure') or {}

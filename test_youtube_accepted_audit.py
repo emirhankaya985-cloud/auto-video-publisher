@@ -19,6 +19,16 @@ def entry(**kwargs):
 
 
 class AcceptedReadOnlyTests(unittest.TestCase):
+    def test_held_unavailable_id_remains_in_independent_audit(self):
+        state = {'schema': 1, 'youtube_entries': {'tarladaki:source': entry(
+            status='held', verification_status='video_unavailable')}}
+        before = json.dumps(state)
+        result = audit.audit(state, verifier=lambda _: 'youtube_video_unavailable')
+        self.assertEqual(result['held_checked'], 1)
+        self.assertEqual(result['unverified'], 1)
+        self.assertEqual(result['status'], 'pending_confirmation')
+        self.assertEqual(json.dumps(state), before)
+
     def test_exact_public_processed_id_and_channel_are_required(self):
         youtube = Mock()
         youtube.videos().list().execute.return_value = {
