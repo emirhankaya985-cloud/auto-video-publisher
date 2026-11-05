@@ -16,6 +16,13 @@ STATE = Path('link-runtime/state.json')
 PLAN = Path('link-runtime/plan.json')
 
 
+class YouTubeVideoHeld(RuntimeError):
+    """A verified GET cannot confirm this saved ID; never authorizes insert."""
+
+
+HELD_VERIFICATIONS = {'video_unavailable', 'upload_failed', 'upload_rejected', 'upload_deleted'}
+
+
 def save(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding='utf-8')
@@ -111,18 +118,25 @@ def previous_upload(youtube, expected, marker, title):
 
 def verify_saved_upload(youtube, entry, expected):
     """GET-only reconciliation; ordinary processing is pending, never done."""
-    rows = youtube.videos().list(part='snippet,status', id=entry['post_id']).execute(num_retries=2).get('items', [])
+    payload = youtube.videos().list(part='snippet,status', id=entry['post_id']).execute(num_retries=2)
+    rows = payload.get('items') if isinstance(payload, dict) else None
     entry['verification_status'] = 'video_identity_unverified'
-    if (len(rows) != 1 or rows[0].get('id') != entry['post_id']
+    if rows == []:
+        # A valid owner-authenticated empty result is an unavailable video,
+        # not a new upload opportunity or proof of deletion. Keep the ID held
+        # and visible in the independent audit instead of failing every tick.
+        entry.update(status='held', verification_status='video_unavailable')
+        raise YouTubeVideoHeld('YouTube video unavailable; original ID held, no retry')
+    if (not isinstance(rows, list) or len(rows) != 1 or rows[0].get('id') != entry['post_id']
             or rows[0].get('snippet', {}).get('channelId') != expected):
         raise RuntimeError('YouTube upload identity not verified')
     status = rows[0].get('status', {})
-    entry.update(privacy_status=status.get('privacyStatus'), upload_status=status.get('uploadStatus'))
+    entry.update(status='accepted', privacy_status=status.get('privacyStatus'), upload_status=status.get('uploadStatus'))
     if entry['upload_status'] in {'failed', 'rejected', 'deleted'}:
         # Definitive provider result; preserve the accepted ID and never
         # upload this source again. The initial failed check remains visible.
         entry.update(status='held', verification_status='upload_' + entry['upload_status'])
-        raise RuntimeError('YouTube terminal upload state; ID preserved, no retry')
+        raise YouTubeVideoHeld('YouTube terminal upload state; ID preserved, no retry')
     if entry['privacy_status'] == 'public' and entry['upload_status'] == 'processed':
         entry.update(status='done', verification_status='public_processed_verified')
         return
@@ -143,7 +157,9 @@ def publish():
     run = os.environ['GITHUB_RUN_ID']
     failed = bool(state.get('youtube_prepare_errors'))
     for key, entry in ledger.items():
-        reconciling = entry.get('status') == 'accepted' and bool(entry.get('post_id'))
+        prior_hold = entry.get('verification_status') if entry.get('status') == 'held' else None
+        reconciling = (bool(entry.get('post_id')) and (entry.get('status') == 'accepted'
+                       or prior_hold in HELD_VERIFICATIONS))
         if not reconciling and (entry.get('status') != 'intent' or entry.get('run_id') != run
                 or entry.get('attempt') != os.getenv('GITHUB_RUN_ATTEMPT', '1')):
             continue
@@ -183,10 +199,13 @@ def publish():
                 print(json.dumps({'platform': 'youtube', 'route': entry['route'], 'post_id': post,
                                   'privacy_status': entry['privacy_status']}), flush=True)
         except Exception as exc:
-            failed = True
-            record_error('youtube_publish', 'youtube_publication_unverified',
-                         route=entry.get('route'), platform='youtube',
-                         error=RuntimeError(type(exc).__name__))
+            unchanged_hold = (isinstance(exc, YouTubeVideoHeld)
+                              and prior_hold == entry.get('verification_status'))
+            if not unchanged_hold:
+                failed = True
+                record_error('youtube_publish', 'youtube_publication_unverified',
+                             route=entry.get('route'), platform='youtube',
+                             error=RuntimeError(type(exc).__name__))
             print(json.dumps({'platform': 'youtube', 'route': entry.get('route'),
                               'status': entry.get('status'), 'error_type': type(exc).__name__,
                               'verification_status': entry.get('verification_status', 'read_or_auth_failed')}), flush=True)

@@ -143,11 +143,52 @@ class BridgeTests(unittest.TestCase):
         youtube = Mock()
         youtube.videos().list().execute.return_value = {'items': []}
         entry = {'post_id': 'abcdefghijk', 'route': 'tarladaki', 'status': 'accepted'}
+        with self.assertRaisesRegex(RuntimeError, 'unavailable'):
+            bridge.verify_saved_upload(youtube, entry, 'expected')
+        self.assertEqual(entry['status'], 'held')
+        self.assertEqual(entry['verification_status'], 'video_unavailable')
+        youtube.videos().insert.assert_not_called()
+
+    def test_malformed_saved_video_response_remains_a_failure_without_reclassification(self):
+        youtube = Mock()
+        youtube.videos().list().execute.return_value = {}
+        entry = {'post_id': 'abcdefghijk', 'route': 'tarladaki', 'status': 'accepted'}
         with self.assertRaisesRegex(RuntimeError, 'identity'):
             bridge.verify_saved_upload(youtube, entry, 'expected')
         self.assertEqual(entry['status'], 'accepted')
-        self.assertEqual(entry['verification_status'], 'video_identity_unverified')
-        youtube.videos().insert.assert_not_called()
+
+    def test_unavailable_id_rechecked_without_reupload_or_repeated_error_and_can_recover(self):
+        expected = bridge.ROUTES['tarladaki'][2]
+        entry = {'status': 'accepted', 'route': 'tarladaki', 'post_id': 'abcdefghijk',
+                 'channel_id': expected}
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp)/'state.json'
+            state.write_text(json.dumps({'youtube_entries': {'tarladaki:source': entry}}))
+            youtube = Mock()
+            youtube.videos().list().execute.return_value = {'items': []}
+            with patch.object(bridge, 'STATE', state), patch.dict(os.environ, {
+                'YOUTUBE_PUBLISHING_ENABLED': 'true', 'YOUTUBE_INTENT_ARCHIVED': 'true',
+                'GITHUB_RUN_ID': '1', 'TOKEN_CHANNEL1_JSON': '{}'}, clear=True), \
+                patch.object(bridge, 'check_channel', return_value={'status':'verified','channel_id':expected}), \
+                patch.object(bridge.Credentials, 'from_authorized_user_info'), \
+                patch.object(bridge, 'build', return_value=youtube), \
+                patch.object(bridge, 'record_error') as journal, \
+                patch.object(bridge, 'upload_video') as upload:
+                with self.assertRaises(SystemExit):
+                    bridge.publish()
+                bridge.publish()
+                journal.assert_called_once()
+                youtube.videos().list().execute.return_value = {'items': [{
+                    'id':'abcdefghijk', 'snippet':{'channelId':expected},
+                    'status':{'privacyStatus':'public','uploadStatus':'uploaded'}}]}
+                bridge.publish()
+                self.assertEqual(json.loads(state.read_text())['youtube_entries']['tarladaki:source']['status'], 'accepted')
+                youtube.videos().list().execute.return_value = {'items': [{
+                    'id':'abcdefghijk', 'snippet':{'channelId':expected},
+                    'status':{'privacyStatus':'public','uploadStatus':'processed'}}]}
+                bridge.publish()
+                self.assertEqual(json.loads(state.read_text())['youtube_entries']['tarladaki:source']['status'], 'done')
+                upload.assert_not_called()
 
 
 
