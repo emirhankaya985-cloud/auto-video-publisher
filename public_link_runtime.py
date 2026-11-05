@@ -817,7 +817,7 @@ def quarantine_unordered_ig_source(route, platform, item, entry, cap_hash):
     failure = entry.get("failure")
     if not isinstance(failure, dict):
         return False
-    return (route in {"tarladaki", "penguen"} and platform == "instagram"
+    return (route in {"tarladaki", "penguen", "gonle", "daily_laugh"} and platform == "instagram"
             and entry.get("route") == route and entry.get("platform") == platform
             and entry.get("file") == item["name"]
             and entry.get("caption_hash") == cap_hash
@@ -1309,10 +1309,12 @@ def plan(audit=False):
                             "EXISTING VERIFIED: exact Film post ID, remote "
                             "timestamp and caption match; no new upload.")
                         continue
-                    if source in {"humor", "gonle", "daily_laugh"} and not existing:
+                    if (source in {"humor", "gonle", "daily_laugh"}
+                            and existing.get("status") not in {"intent", "uncertain", "held"}):
                         # Several real posts use this caption, but none proves
-                        # which Drive file was sent. Never republish or invent
-                        # a result ID; simply look for another eligible clip.
+                        # which Drive file was sent. Even a partial existing
+                        # ledger must not stop unrelated unordered candidates.
+                        # Preserve its evidence; never invent or replace an ID.
                         report.append(f"SKIP {page_name} {item['name']} {p}: repeated remote caption; source unverified.")
                         skip_unproven_candidate = True
                     else:
@@ -1424,6 +1426,14 @@ def plan(audit=False):
                         # both platforms. No retry, resume or intent deletion.
                         skip_unproven_candidate = True
                         report.append("QUARANTINE: exact unresolved humor source; look for another unique clip.")
+                    elif (source in {"gonle", "daily_laugh"}
+                            and existing.get("status") == "held"
+                            and (existing.get("failure") or {}).get("external_post_attempted") is False):
+                        # These feeds have no episode order. An old unresolved
+                        # source is protected on both platforms, while another
+                        # independently deduped clip may fill the daily slot.
+                        skip_unproven_candidate = True
+                        report.append("QUARANTINE: unresolved unordered source preserved; inspect next candidate.")
                     elif facebook_can_continue_past_ig_rejection(route, p, existing):
                         # After a proven failed binary upload with its one safe
                         # IG retry consumed, keep IG in its original blocked

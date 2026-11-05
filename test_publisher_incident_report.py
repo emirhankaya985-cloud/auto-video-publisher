@@ -5,6 +5,16 @@ from publisher_incident_report import build_incident_report
 
 
 class IncidentReportTests(unittest.TestCase):
+    def test_visual_hold_remains_visible_without_breaking_incident_writer(self):
+        result = build_incident_report({'entries': {'x': {
+            'run_id': '300', 'status': 'held', 'route': 'film', 'platform': 'facebook',
+            'failure': {'reason': 'visual_duplicate_review'}}}}, '300',
+            step_outcomes={'youtube_publish': 'failure', 'post_verification': 'success'})
+        self.assertEqual(result['held_for_review'], 1)
+        self.assertEqual(result['confirmed_new_posts'], 0)
+        self.assertEqual(result['incidents'][0]['action'], 'source_review_required_no_repost')
+        self.assertEqual(result['step_outcomes']['youtube_publish'], 'failure')
+
     def test_only_current_run_is_counted(self):
         state = {"entries": {
             "fb": {"run_id": "200", "status": "done", "route": "film", "platform": "facebook", "post_id": "77"},

@@ -15,8 +15,9 @@ _SAFE_REASONS = {
     "source_or_cover_preparation_failed", "media_preparation_failed",
     "credentials_or_permissions", "rate_limit", "meta_server_or_network",
     "invalid_media_or_graph_request", "unclassified_upload_result",
+    "visual_duplicate_review",
 }
-_SAFE_STATUSES = {"done", "ready", "uncertain", "intent"}
+_SAFE_STATUSES = {"done", "ready", "uncertain", "intent", "held"}
 
 
 def build_incident_report(state, run_id, *, plan_text="", errors=None, step_outcomes=None, state_available=True):
@@ -53,6 +54,7 @@ def build_incident_report(state, run_id, *, plan_text="", errors=None, step_outc
                     "platform": row.get("platform") if row.get("platform") in ("facebook", "instagram") else "unknown",
                     "status": status, "reason": reason,
                     "action": "remote_reconciliation_required" if status in ("intent", "uncertain") else
+                              "source_review_required_no_repost" if status == "held" else
                               "safe_to_reprepare_next_tick"}
         for field in ("http_status", "graph_code", "graph_subcode"):
             value = detail.get(field)
@@ -74,7 +76,7 @@ def build_incident_report(state, run_id, *, plan_text="", errors=None, step_outc
     # Never persist raw provider responses or secret-bearing tracebacks.
     events = [event for event in (errors or []) if event.get("run_id") == run_id]
     outcomes = {k: v for k, v in (step_outcomes or {}).items()
-                if k in ("preflight", "verify", "plan", "publish", "notify")
+                if k in ("preflight", "verify", "plan", "publish", "youtube_prepare", "youtube_publish", "post_verification", "notify")
                 and v in ("success", "failure", "skipped", "cancelled")}
     # An early credential gate can fail before any ledger exists. Never present
     # an empty incident list as proof of a healthy publication run.
@@ -89,7 +91,7 @@ def build_incident_report(state, run_id, *, plan_text="", errors=None, step_outc
     previous_held = [
         row for row in state["entries"].values()
         if isinstance(row, dict)
-        and row.get("status") in ("intent", "uncertain")
+        and row.get("status") in ("intent", "uncertain", "held")
         and str(row.get("run_id", "")) != str(run_id)
     ]
     safe_routes = {"tarladaki", "penguen", "gonle", "daily_laugh",
@@ -105,6 +107,7 @@ def build_incident_report(state, run_id, *, plan_text="", errors=None, step_outc
         "confirmed_new_posts": counts["done"],
         "unverified_done_entries": counts["unverified_done"],
         "safe_pre_upload_retries": counts["ready"],
+        "held_for_review": counts["held"],
         "uncertain_pending_reconciliation": counts["intent"] + counts["uncertain"],
         "previous_unreconciled_intents": len(previous_held),
         "previous_unreconciled_by_route": previous_held_routes,
@@ -126,7 +129,7 @@ def main():
     report_path = ROOT / "report.md"
     plan_text = report_path.read_text(encoding="utf-8") if report_path.is_file() else ""
     outcomes = {key: os.getenv("OUTCOME_" + key.upper(), "")
-                for key in ("preflight", "verify", "plan", "publish", "notify")}
+                for key in ("preflight", "verify", "plan", "publish", "youtube_prepare", "youtube_publish", "post_verification", "notify")}
     summary = build_incident_report(
         state, run_id, plan_text=plan_text,
         errors=read_errors(run_id=run_id), step_outcomes=outcomes,

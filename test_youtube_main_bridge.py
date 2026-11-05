@@ -92,7 +92,7 @@ class BridgeTests(unittest.TestCase):
             state = Path(tmp) / 'state.json'
             state.write_text(json.dumps({'youtube_entries': {'tarladaki:source': entry}}))
             youtube = Mock()
-            def fail_read():
+            def fail_read(**kwargs):
                 saved = json.loads(state.read_text())['youtube_entries']['tarladaki:source']
                 self.assertEqual((saved['status'], saved['post_id']), ('accepted', post))
                 raise RuntimeError('temporary GET failure')
@@ -124,6 +124,30 @@ class BridgeTests(unittest.TestCase):
         youtube.videos().list().execute.return_value['items'][0]['id'] = 'wrong-video'
         with self.assertRaisesRegex(RuntimeError, 'identity'):
             bridge.verify_saved_upload(youtube, entry, 'expected')
+
+    def test_terminal_provider_result_keeps_id_and_holds_without_reupload(self):
+        for status in ('failed', 'rejected', 'deleted'):
+            youtube = Mock()
+            entry = {'post_id': 'abcdefghijk', 'route': 'tarladaki', 'status': 'accepted'}
+            youtube.videos().list().execute.return_value = {'items': [{
+                'id': entry['post_id'], 'snippet': {'channelId': 'expected'},
+                'status': {'privacyStatus': 'public', 'uploadStatus': status}}]}
+            with self.assertRaisesRegex(RuntimeError, 'terminal'):
+                bridge.verify_saved_upload(youtube, entry, 'expected')
+            self.assertEqual(entry['status'], 'held')
+            self.assertEqual(entry['post_id'], 'abcdefghijk')
+            self.assertEqual(entry['verification_status'], 'upload_' + status)
+            youtube.videos().insert.assert_not_called()
+
+    def test_missing_saved_video_is_neither_done_nor_permission_to_reupload(self):
+        youtube = Mock()
+        youtube.videos().list().execute.return_value = {'items': []}
+        entry = {'post_id': 'abcdefghijk', 'route': 'tarladaki', 'status': 'accepted'}
+        with self.assertRaisesRegex(RuntimeError, 'identity'):
+            bridge.verify_saved_upload(youtube, entry, 'expected')
+        self.assertEqual(entry['status'], 'accepted')
+        self.assertEqual(entry['verification_status'], 'video_identity_unverified')
+        youtube.videos().insert.assert_not_called()
 
 
 

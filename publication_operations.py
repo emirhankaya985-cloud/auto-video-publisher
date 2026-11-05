@@ -9,8 +9,9 @@ import io
 import json
 import os
 import re
+import time
 import zipfile
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -148,6 +149,22 @@ def verify_publications(state, run_id, read_history):
     return result
 
 
+def verify_publications_with_retry(state, run_id, read_history, *, sleep=time.sleep):
+    results = verify_publications(state, run_id, read_history)
+    retryable = {'history_unavailable', 'not_observed_in_history_no_repost'}
+    for delay in (5, 15):
+        pending = {row['key']: state['entries'][row['key']] for row in results
+                   if row['reason'] in retryable}
+        if not pending:
+            break
+        sleep(delay)
+        updated = {row['key']: row for row in verify_publications(
+            {**state, 'entries': pending}, run_id, read_history
+        )}
+        results = [updated.get(row['key'], row) for row in results]
+    return results
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--root', type=Path, default=Path('link-runtime'))
@@ -179,12 +196,16 @@ def main():
             if pages is None:
                 pages = {p['page_name']: p for p in load_meta_auth()['pages']}
             return graph_rows(pages[ROUTES[route][1]], platform)
-        report['verification'] = verify_publications(state, os.environ['GITHUB_RUN_ID'], history)
+        report['verification'] = verify_publications_with_retry(
+            state, os.environ['GITHUB_RUN_ID'], history
+        )
     report['checked_at'] = datetime.now(timezone.utc).isoformat()
     (args.root / 'operations-report.json').write_text(
         json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
     if any(r['status'] != 'verified' for r in report['verification']):
-        raise SystemExit('Publication verification incomplete; state preserved, no repost')
+        reasons = Counter(row['reason'] for row in report['verification']
+                          if row['status'] != 'verified')
+        raise SystemExit(f'Publication verification incomplete; state preserved, no repost: {dict(reasons)}')
 
 
 if __name__ == '__main__':
