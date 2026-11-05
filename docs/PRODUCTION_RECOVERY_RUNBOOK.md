@@ -606,3 +606,9 @@ Instagram run 42011620370 failed before upload on the first part with ValueError
 ### 5 Kasım 2026 — Kullanıcının sezon kampanyalarını iptali ve geri alma talebi
 
 Kullanıcı kapak ve profil sırasını reddetti, yeni sezon yayınlarının hemen durmasını ve bu çalışmaların yayımladığı gönderilerin silinmesini istedi. İki sezon workflow'u kapatıldı, iki script'in normal komut satırı yayın girişi durduruldu. Normal ToonZone rotası zaten durdurulmuş durumda. Silme kapsamı iki kampanyanın kayıtlarındaki 11 doğrulanmış Instagram ve 48 Threads gönderisidir. Önceden var olan gönderileri bu kampanyaya dahil etme. Platformun DELETE kabulünü ve kalan profil kayıtlarını ayrı doğrula. Yayın geçmişini sıfırlama.
+
+### 5 Kasım 2026 — İlk üç bölüm için doğru Drive kapakları
+
+Kullanıcı ilk üç bölümün her birinde Part 1–4 sırasını açıkça istedi. Salt-okunur 42073054186 çalışması 48 birebir PNG eşleşmesini ve hâlâ görünen önceki 11 Instagram gönderisini doğruladı. Kapağın tam görseli 1086×1448, yani 3:4 oranında. Önceki genel kapak işlevi kapağı 9:16 kırpıp yatay videonun boyutundaki tuvale bindiriyordu. Bu, bölüm/part yazılarını kesebilir. İsteğe bağlı tam-kapak yolunda hem video hem kapak 1080×1920 tuvale sığdırılır ve kapağın bütünü korunur. Varsayılan eski çağrı davranışı korunur.
+
+Kullanıcıya önceki 11 gönderinin hâlâ durduğu ve bu isteğin yeni kapaklı yeniden yayın olarak uygulanacağı söylendi. Yeni iş yalnız 12 parçaya sınırlıdır, gerçek PNG hash'lerini kaydeder ve ilk kare ile gerçek Instagram thumbnail sonucunu karşılaştırır. Her gönderi doğrulanmadan sonrakine geçmez. Eski 48 parçalık işler kapalı kalır. Yayın öncesinde tam regresyon ve gerçek FFmpeg ilk-kare testi gerekir. CI'daki gdown eksikliği ve yalnız pytest için eklenmiş assert bağımlılığı da test yolunda giderilir.

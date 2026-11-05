@@ -1,0 +1,85 @@
+name: ToonZone Instagram first three episodes with real covers
+on:
+  push:
+    branches: [main]
+    paths: ['docs/toonzone-instagram-first-three-2026-11-05.md']
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'toonzone_instagram_first_three.py'
+      - 'test_toonzone_first_three.py'
+      - 'cloud_omnichannel_publisher.py'
+      - '.github/workflows/toonzone_instagram_first_three.yml'
+permissions:
+  contents: read
+  actions: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: |
+          pip install --require-hashes -r requirements.txt
+          pip install gdown==6.4.2 pillow==13.0.0 PyYAML==6.0.2
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+      - run: python migration_985_tests.py
+  publish:
+    needs: verify
+    if: github.repository == 'emirhankaya985-cloud/auto-video-publisher' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    concurrency:
+      group: toonzone-instagram-owner-publication
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: |
+          pip install --require-hashes -r requirements.txt
+          pip install gdown==6.4.2 pillow==13.0.0
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+      - name: Verify twelve exact Drive covers and reserve ordered parts
+        run: python toonzone_instagram_first_three.py prepare
+      - name: Persist reservations before Instagram writes
+        id: intent
+        uses: actions/upload-artifact@v4
+        with:
+          name: toonzone-first-three-intent
+          path: toonzone-first-three-runtime/alert-history.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Publish each part and verify the actual Instagram thumbnail before continuing
+        env:
+          FIRST_THREE_INTENT_ARCHIVED: ${{ steps.intent.outcome == 'success' && 'true' || 'false' }}
+        run: python toonzone_instagram_first_three.py publish
+      - name: Preserve post IDs and uncertain attempts
+        if: always() && steps.intent.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: toonzone-first-three-result
+          path: toonzone-first-three-runtime/alert-history.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Preserve prepared and actual Instagram cover previews
+        if: always() && steps.intent.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: toonzone-first-three-cover-evidence
+          path: |
+            toonzone-first-three-runtime/previews/
+            toonzone-first-three-runtime/plan.json
+          if-no-files-found: warn
+          retention-days: 14

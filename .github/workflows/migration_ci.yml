@@ -45,7 +45,7 @@ jobs:
       - name: Install locked runtime dependencies
         run: |
           python -m pip install --require-hashes -r requirements.txt
-          python -m pip install PyYAML==6.0.2
+          python -m pip install PyYAML==6.0.2 gdown==6.4.2 pillow==13.0.0
       - name: Python regression tests without production credentials
         run: python migration_985_tests.py
       - name: Scheduler regression tests with mocked APIs

@@ -515,16 +515,26 @@ def upload_facebook_reel(page, video_path: str, caption: str):
     _graph_json(requests.post(finish_url, data=finish_data, timeout=30))
     return video_id
 
-def create_instagram_cover_video(video_path: Path, cover_path: Path, output_path: Path) -> Path:
-    """İlk 0,25 saniyede marka kapağını gösterir; Reels kapağı bu kareden seçilir."""
+def create_instagram_cover_video(
+    video_path: Path, cover_path: Path, output_path: Path, *, preserve_full_cover=False,
+) -> Path:
+    """Overlay the opening cover, optionally fitting the complete image to a portrait canvas."""
+    filters = (
+        "[1:v]scale=1080:1920:force_original_aspect_ratio=increase,"
+        "crop=1080:1920,setsar=1[cover];"
+        "[0:v][cover]overlay=0:0:enable='between(t,0,0.25)'[v]"
+    )
+    if preserve_full_cover:
+        filters = (
+            "[0:v]scale=1080:1920:force_original_aspect_ratio=decrease:force_divisible_by=2,"
+            "pad=1080:1920:(ow-iw)/2:(oh-ih)/2,setsar=1[base];"
+            "[1:v]scale=1080:1920:force_original_aspect_ratio=decrease:force_divisible_by=2,"
+            "pad=1080:1920:(ow-iw)/2:(oh-ih)/2,setsar=1[cover];"
+            "[base][cover]overlay=0:0:shortest=1:enable='between(t,0,0.5)'[v]"
+        )
     cmd = [
         "ffmpeg", "-y", "-i", str(video_path), "-loop", "1", "-i", str(cover_path),
-        "-filter_complex",
-        (
-            "[1:v]scale=1080:1920:force_original_aspect_ratio=increase,"
-            "crop=1080:1920,setsar=1[cover];"
-            "[0:v][cover]overlay=0:0:enable='between(t,0,0.25)'[v]"
-        ),
+        "-filter_complex", filters,
         "-map", "[v]", "-map", "0:a?",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
         "-pix_fmt", "yuv420p", "-movflags", "+faststart",
@@ -640,7 +650,7 @@ def _upload_instagram_binary(upload_uri: str, page_token: str, video_path: str, 
 
 def upload_instagram_reel(
     page, video_path: str, caption: str, append_store_link: bool = True,
-    publish: bool = True, forbidden_container_ids=None, user_tags=None,
+    publish: bool = True, forbidden_container_ids=None, user_tags=None, thumb_offset=None,
 ):
     ig_user_id = page.get("instagram_id")
     if not ig_user_id:
@@ -654,6 +664,10 @@ def upload_instagram_reel(
         "access_token": page_token, "upload_type": "resumable",
         "media_type": "REELS", "caption": caption
     }
+    if thumb_offset is not None:
+        if type(thumb_offset) is not int or thumb_offset < 0:
+            raise ValueError("Instagram thumbnail offset must be a nonnegative integer")
+        container_data["thumb_offset"] = thumb_offset
     if user_tags:
         # Reels accepts username-only tags; x/y coordinates are for images.
         # Validate *before* the first Meta write. Never tag all videos globally.
