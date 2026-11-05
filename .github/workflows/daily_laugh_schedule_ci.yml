@@ -32,7 +32,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --require-hashes -r requirements.txt
-          pip install PyYAML==6.0.2
+          pip install PyYAML==6.0.2 gdown==6.4.2 pillow==13.0.0
       - name: All unittest regression tests (no posting)
         run: python -m unittest discover -p 'test*.py'
       - name: Function-style daily report tests (no posting)

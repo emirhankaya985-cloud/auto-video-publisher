@@ -421,7 +421,7 @@ def test_late_scheduled_report_retains_previous_date_but_refuses_daily_gains():
 
 
 def test_threads_snapshot_keeps_followers_when_video_insights_are_unavailable():
-    import pytest
+    import unittest
     from stats_reporter import threads_video_snapshot
 
     followers = Mock()
@@ -435,7 +435,7 @@ def test_threads_snapshot_keeps_followers_when_video_insights_are_unavailable():
                 {"id": "2", "media_type": "TEXT_POST"},
                 {"id": "3", "media_type": "VIDEO"},
             ]), patch("threads_live_publish.graph", side_effect=replies) as graph:
-        with pytest.raises(RuntimeError, match="threads_video_views_unavailable"):
+        with unittest.TestCase().assertRaisesRegex(RuntimeError, "threads_video_views_unavailable"):
             threads_video_snapshot("film", on_followers=followers)
     followers.assert_called_once_with(0)
     assert [call.args[1] for call in graph.call_args_list] == ["1/threads_insights", "3/insights"]

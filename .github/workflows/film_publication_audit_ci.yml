@@ -23,5 +23,5 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install --require-hashes -r requirements.txt
-      - run: pip install PyYAML==6.0.2
+      - run: pip install PyYAML==6.0.2 gdown==6.4.2 pillow==13.0.0
       - run: python -m unittest discover -p 'test*.py'
