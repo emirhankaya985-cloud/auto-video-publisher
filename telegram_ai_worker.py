@@ -282,7 +282,13 @@ class Worker:
                     reply = 'Yayın durumu şu an okunamadı. Sayı tahmin etmedim; yayın ayarları değiştirilmedi.'
                 self.send('📋 Yayın durumu', reply, parse_mode='HTML', reply_markup=STATISTICS_KEYBOARD)
             elif command in {'/istatistik', 'istatistik', STATISTICS_BUTTON.casefold().replace("\u0307", "")}:
-                self.send(STATISTICS_BUTTON, self.load_statistics(), reply_markup=STATISTICS_KEYBOARD)
+                try:
+                    reply = self.load_statistics()
+                except Exception:
+                    # The inbox offset was already durably reserved; never crash
+                    # the whole owner poll or misrepresent missing archive as 0.
+                    reply = 'Genel istatistik arşivi şu anda doğrulanamadı. Sayı tahmin edilmedi.'
+                self.send(STATISTICS_BUTTON, reply, reply_markup=STATISTICS_KEYBOARD)
             elif command in {'/threads', '/threads_istatistik', 'threads',
                              THREADS_STATISTICS_BUTTON.casefold().replace("\u0307", "")}:
                 try:
