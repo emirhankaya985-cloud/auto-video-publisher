@@ -1,0 +1,55 @@
+name: Remove owner-cancelled ToonZone season posts
+on:
+  push:
+    branches: [main]
+    paths: ['docs/toonzone-owner-cleanup-2026-11-05.md']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: toonzone-owner-cleanup
+  cancel-in-progress: false
+jobs:
+  cleanup:
+    if: github.repository == 'emirhankaya985-cloud/auto-video-publisher' && github.ref == 'refs/heads/main' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_TOKEN: ${{ github.token }}
+      META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+      TOONZONE_THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_TOONZONE_ACCESS_TOKEN || secrets.TOONZONE_THREADS_ACCESS_TOKEN }}
+      TOONZONE_THREADS_USERNAME: ${{ vars.TOONZONE_THREADS_USERNAME || 'toonzone.tr' }}
+      TOONZONE_THREADS_USER_ID: ${{ vars.TOONZONE_THREADS_USER_ID }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: |
+          pip install --require-hashes -r requirements.txt
+          pip install gdown==6.4.2
+      - run: python -m unittest test_toonzone_season_cleanup
+      - name: Bind exact campaign post IDs to verified accounts
+        run: python toonzone_season_cleanup.py prepare
+      - name: Archive exact deletion targets before writes
+        id: intent
+        uses: actions/upload-artifact@v4
+        with:
+          name: toonzone-owner-delete-intent
+          path: toonzone-cleanup-runtime/deletion-manifest.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Delete the owner-rejected campaign posts once
+        env:
+          TOONZONE_DELETE_INTENT_ARCHIVED: ${{ steps.intent.outcome == 'success' && 'true' || 'false' }}
+        run: python toonzone_season_cleanup.py delete
+      - name: Preserve delete acknowledgements and remaining post IDs
+        if: always() && steps.intent.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: toonzone-owner-delete-result
+          path: toonzone-cleanup-runtime/deletion-result.json
+          if-no-files-found: error
+          retention-days: 90
