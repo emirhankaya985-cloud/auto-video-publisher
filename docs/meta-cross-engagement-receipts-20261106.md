@@ -1,0 +1,3 @@
+# Cross-account Meta receipts — 2026-11-06
+
+This notifier is **not** a growth/engagement automation. It only reports existing, individually verified API acknowledgements when the separate owner-permitted workflow has executed a real supported action. Scheduled jobs remain `dry_run` with **zero writes**, so successful Actions jobs cannot be reported as actual likes. Automatic cross-account mass-liking, unsupported Instagram saves, or unsupported TikTok/Threads/YouTube likes are not enabled. Notification groups actions by acting account and platform, with exact verified recipients, never asserts 'all accounts' absent proof. No notification fires when nothing has been accepted or when a provider restriction is present.
