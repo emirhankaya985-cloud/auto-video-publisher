@@ -33,7 +33,7 @@ def compact_history(path):
 
 
 def latest_comparison(*, session=requests):
-    """Read only the fixed production repo, workflow and main branch artifacts."""
+    """Read the newest valid main-branch report, ignoring incomplete artifacts."""
     token = os.getenv("GITHUB_TOKEN", "")
     if not token:
         raise RuntimeError("Analytics access is not configured")
@@ -41,32 +41,45 @@ def latest_comparison(*, session=requests):
     base = "https://api.github.com/repos/" + REPOSITORY
     try:
         result = session.get(base + "/actions/workflows/daily_stats.yml/runs",
-            headers=headers, params={"branch": "main", "status": "success", "per_page": 1},
+            headers=headers, params={"branch": "main", "status": "success", "per_page": 5},
             timeout=25, allow_redirects=False)
         if result.status_code != 200:
             raise ValueError("Report listing unavailable")
-        run = result.json()["workflow_runs"][0]
-        if run.get("head_branch") != "main" or run.get("conclusion") != "success":
-            raise ValueError("Report identity invalid")
-        artifacts = session.get(base + f"/actions/runs/{int(run['id'])}/artifacts",
-            headers=headers, timeout=25, allow_redirects=False)
-        if artifacts.status_code != 200:
-            raise ValueError("Artifact listing unavailable")
-        matches = [a for a in artifacts.json()["artifacts"]
-                   if a.get("name") == "account-views-comparison" and a.get("expired") is False]
-        if len(matches) != 1:
-            raise ValueError("Comparison unavailable")
-        data = session.get(base + f"/actions/artifacts/{int(matches[0]['id'])}/zip",
-                           headers=headers, timeout=35, allow_redirects=True)
-        if data.status_code != 200 or len(data.content) > MAX_ARCHIVE_BYTES:
-            raise ValueError("Comparison download unavailable")
-        with zipfile.ZipFile(io.BytesIO(data.content)) as archive:
-            if archive.namelist() != ["account_views_comparison.json"] or archive.infolist()[0].file_size > MAX_ARCHIVE_BYTES:
-                raise ValueError("Comparison layout invalid")
-            comparison = json.loads(archive.read("account_views_comparison.json"))
-        if not isinstance(comparison, dict) or not isinstance(comparison.get("accounts"), list) or not comparison.get("measured_at"):
-            raise ValueError("Comparison invalid")
-        return run["id"], comparison
+        runs = result.json().get("workflow_runs")
+        if not isinstance(runs, list):
+            raise ValueError("Report list malformed")
+        for run in runs:
+            if not isinstance(run, dict) or run.get("head_branch") != "main" or run.get("conclusion") != "success":
+                continue
+            if type(run.get("id")) is not int:
+                continue
+            artifacts = session.get(base + f"/actions/runs/{run['id']}/artifacts",
+                headers=headers, timeout=25, allow_redirects=False)
+            if artifacts.status_code != 200:
+                continue
+            names = artifacts.json().get("artifacts")
+            if not isinstance(names, list):
+                continue
+            matches = [a for a in names if isinstance(a, dict) and
+                       a.get("name") == "account-views-comparison" and a.get("expired") is False
+                       and type(a.get("id")) is int]
+            if len(matches) != 1:
+                continue
+            data = session.get(base + f"/actions/artifacts/{int(matches[0]['id'])}/zip",
+                headers=headers, timeout=35, allow_redirects=True)
+            if data.status_code != 200 or len(data.content) > MAX_ARCHIVE_BYTES:
+                continue
+            try:
+                with zipfile.ZipFile(io.BytesIO(data.content)) as archive:
+                    if archive.namelist() != ["account_views_comparison.json"] or archive.infolist()[0].file_size > MAX_ARCHIVE_BYTES:
+                        continue
+                    comparison = json.loads(archive.read("account_views_comparison.json"))
+            except (zipfile.BadZipFile, ValueError, TypeError, KeyError):
+                continue
+            if (isinstance(comparison, dict) and isinstance(comparison.get("accounts"), list)
+                    and isinstance(comparison.get("measured_at"), str) and comparison["measured_at"]):
+                return run["id"], comparison
+        raise ValueError("No valid current report archive")
     except (requests.RequestException, ValueError, KeyError, TypeError, IndexError,
             zipfile.BadZipFile, OSError):
         raise RuntimeError("Verified analytics unavailable; no cached result presented as current") from None
@@ -88,20 +101,36 @@ def latest_evidence(directory, *, session=requests):
 
 
 def _statistics_totals(platforms, followers):
+    """Missing platforms must not masquerade as a complete growth calculation."""
     expected = len(platforms)
-    measured = [part for part in platforms if part["total"] is not None]
+    measured = [part for part in platforms if isinstance(part, dict)
+                and type(part.get("total")) is int and part["total"] >= 0]
     total = sum(part["total"] for part in measured) if measured else None
     totals = [number(total)]
     for period in ("daily", "weekly"):
-        deltas = [part[period]["delta"] for part in measured]
-        comparable = deltas and all(delta is not None for delta in deltas)
+        deltas = [(part.get(period) or {}).get("delta") for part in measured]
+        comparable = (expected > 0 and len(measured) == expected
+                      and all(type(delta) is int for delta in deltas))
         totals.append(number(sum(deltas)) if comparable else "N/A")
-    counted = [value for value in followers if value is not None]
+    counted = [value for value in followers if type(value) is int and value >= 0]
     follower_total = sum(counted) if counted else None
     return [
         f"İzlenme ({len(measured)}/{expected}): {' / '.join(totals)}",
         f"Takipçi + abone ({len(counted)}/{expected}): {number(follower_total)}",
     ]
+
+
+def report_freshness(measured, *, now=None):
+    """Timestamp and staleness warning, never imply an old archive is live."""
+    now = now or datetime.now(ZoneInfo("Europe/Istanbul"))
+    if measured.tzinfo is None:
+        raise ValueError("Unzoned measurement")
+    age = (now - measured.astimezone(now.tzinfo)).total_seconds()
+    if age > 36 * 3600:
+        return "⚠️ Son doğrulanmış rapor 36 saatten eski; güncel görüntülenme/takipçi N/A."
+    if age < -600:
+        return "⚠️ Rapor tarihi gelecekte görünüyor; güncel sayılmadı."
+    return None
 
 
 def load_statistics(*, session=requests):
@@ -112,8 +141,11 @@ def load_statistics(*, session=requests):
         if measured.tzinfo is None or not comparison["accounts"]:
             raise ValueError("Measurement unavailable")
         measured = measured.astimezone(ZoneInfo("Europe/Istanbul"))
+        warning = report_freshness(measured)
         lines = [f"Son arşiv ölçümü: {measured:%d.%m.%Y %H:%M} TRT",
                  "İzlenme · toplam / 1 günlük artış / 7 günlük artış"]
+        if warning:
+            lines.append(warning)
         followers = {(row["account"], row["platform"]): row.get("followers")
                      for row in comparison.get("followers", [])}
         all_platforms = []
@@ -160,6 +192,9 @@ def load_threads_statistics(*, session=requests):
                      for r in comparison.get("followers", []) if isinstance(r, dict)}
         lines = [f"🧵 Threads — son ölçüm: {measured:%d.%m.%Y %H:%M} TRT",
                  "Video görüntülenmeleri: toplam / 1 gün / 7 gün"]
+        warning = report_freshness(measured)
+        if warning:
+            lines.append(warning)
         found = 0
         for account in comparison["accounts"]:
             if not isinstance(account, dict) or not isinstance(account.get("platforms"), list):

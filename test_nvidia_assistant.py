@@ -212,8 +212,41 @@ class AssistantTests(unittest.TestCase):
             reply = load_statistics()
         self.assertIn("Facebook 1: 1.000 / 10 / 30 · 0 takipçi", reply)
         self.assertIn("YouTube: 500 / 5 / N/A · 200 abone", reply)
-        self.assertIn("İzlenme (2/3): 1.500 / 15 / N/A", reply)
+        self.assertIn("İzlenme (2/3): 1.500 / N/A / N/A", reply)
         self.assertIn("Takipçi + abone (2/3): 200", reply)
+
+    def test_partial_account_must_not_claim_daily_growth(self):
+        from telegram_ai_worker import _statistics_totals
+        platforms = [
+            {"total": 100, "daily": {"delta": 12}, "weekly": {"delta": 25}},
+            {"total": None, "daily": {"delta": None}, "weekly": {"delta": None}},
+        ]
+        self.assertIn("100 / N/A / N/A", _statistics_totals(platforms, [55, None])[0])
+
+    def test_read_report_falls_back_from_missing_latest_artifact(self):
+        session = self.report_session(accounts=[{"account": "T", "total": 100}])
+        newer = Mock(status_code=200)
+        newer.json.return_value = {"workflow_runs": [
+            {"id": 100, "head_branch": "main", "conclusion": "success"},
+            {"id": 42, "head_branch": "main", "conclusion": "success"},
+        ]}
+        missing = Mock(status_code=200)
+        missing.json.return_value = {"artifacts": []}
+        session.get.side_effect = [newer, missing,
+                                   session.get.side_effect[1],
+                                   session.get.side_effect[2]]
+        with patch.dict(os.environ, {"GITHUB_TOKEN": "test-read-token"}):
+            run_id, comparison = __import__("telegram_ai_worker").latest_comparison(session=session)
+        self.assertEqual(run_id, 42)
+        self.assertEqual(comparison["accounts"][0]["total"], 100)
+
+    def test_old_archive_warns_without_claiming_live_counters(self):
+        from telegram_ai_worker import report_freshness
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        measured = datetime(2026, 10, 28, tzinfo=ZoneInfo("Europe/Istanbul"))
+        now = datetime(2026, 11, 6, tzinfo=ZoneInfo("Europe/Istanbul"))
+        self.assertIn("36 saatten eski", report_freshness(measured, now=now))
 
     def test_verified_report_source_and_old_measurement_are_preserved(self):
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"GITHUB_TOKEN": "test-read-token"}), patch("telegram_ai_worker.restore_history", return_value={"status": "first_snapshot"}):

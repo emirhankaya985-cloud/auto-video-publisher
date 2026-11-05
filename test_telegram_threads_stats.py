@@ -22,6 +22,14 @@ class ThreadsStatusTests(unittest.TestCase):
         self.assertNotIn("987", report)
         self.assertIn("/actions/runs/42", report)
 
+    def test_old_threads_measurement_is_visible_as_stale(self):
+        with patch("telegram_ai_worker.latest_comparison", return_value=(42, {
+            "measured_at": "2026-10-20T23:15:00+03:00",
+            "accounts": [{"account": "ToonZone", "platforms": [
+                {"platform": "Threads", "total": 2, "daily": {"delta": None},
+                 "weekly": {"delta": None}}]}]})):
+            self.assertIn("36 saatten eski", load_threads_statistics())
+
     def test_missing_threads_measurements_never_fake_zero(self):
         with patch("telegram_ai_worker.latest_comparison", return_value=(42, {
             "measured_at": "2026-11-05T23:15:00+03:00",
