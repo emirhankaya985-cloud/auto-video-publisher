@@ -46,6 +46,37 @@ class StockTests(unittest.TestCase):
         self.assertEqual(row['completed'], 0)
         self.assertEqual(row['held'], 1)
 
+    def test_generated_exact_txt_counts_as_stock_only_for_its_source(self):
+        with tempfile.TemporaryDirectory() as folder:
+            captions = Path(folder)
+            (captions / '1.txt').write_text('Caption', encoding='utf-8')
+            (captions / '2 (1).txt').write_text('Other caption', encoding='utf-8')
+            files = {f'{i}.mp4': {'id': str(i), 'name': f'{i}.mp4'} for i in (1, 2)}
+            rows = build_stock(
+                {'daily_laugh': files, 'gonle': files}, {'entries': {}},
+                {'daily_laugh': ('daily_laugh', 'Daily Laugh'), 'gonle': ('gonle', 'Gönle')},
+                {'daily_laugh': 8, 'gonle': 5}, generated_caption_dirs={'daily_laugh': captions},
+            )
+            self.assertEqual([(r['remaining'], r['missing_txt']) for r in rows],
+                             [(1, 1), (1, 1), (0, 2), (0, 2)])
+
+    def test_toonzone_generated_txt_preserves_serial_and_state_checks(self):
+        names = [f'S01E03_Caffeinated_Concert_Tickets_Part{i}' for i in (1, 2, 3)]
+        files = {f'{name}.mp4': {'id': str(i), 'name': f'{name}.mp4'}
+                 for i, name in enumerate(names)}
+        entries = {'toonzone:facebook:0': {'status': 'done', 'post_id': 'confirmed'},
+                   'toonzone:facebook:1': {'status': 'uncertain'}}
+        with tempfile.TemporaryDirectory() as folder:
+            captions = Path(folder)
+            for name in names:
+                (captions / f'{name}.txt').write_text('Caption', encoding='utf-8')
+            facebook, instagram = build_stock(
+                {'toonzone': files}, {'entries': entries}, {'toonzone': ('toonzone', 'ToonZone')},
+                {'toonzone': 4}, generated_caption_dirs={'toonzone': captions},
+            )
+        self.assertEqual((facebook['remaining'], facebook['completed'], facebook['held']), (1, 1, 1))
+        self.assertEqual(instagram['remaining'], 3)
+
     def test_missing_source_part_is_detected(self):
         files = {f'Movie_Part_{i}.mp4': {'id': str(i), 'name': f'Movie_Part_{i}.mp4'}
                  for i in (1, 3)}

@@ -714,6 +714,12 @@ Run 42103999147: full exact Drive cover plus compact profile created 13739862-by
 - Ayrı GET audit42252785759/job12801212721216:29:42UTC önceki10 uncertain işaretini bulamadı; kesin yokluk/silindi kanıtı değildir, state_modified=false/uploads0. GönleJkZNRKgKdXw ve DailyLaughNf4cp4qfipE public_processed_verified; genelFAIL bunları gizlemez. Bu audit282uncertain oluşmadan önceydi;11. kaydı kontrol etti denmez. Penguen_AM9pIBNCmY16:35UTC accepted_processing_pending; güncel public GET kanıtı ayrıca değerlendirilir.
 - Engagement42256223321/job12802410814716:52:02UTC11aktör/38kaynak/209aday/all/dry_run/writes0;418saveunsupported/repostdisabled ve368hold sürüyor. Inbox42256315037/job12802433283216:52:10UTC0reserved/0ACK. Yeni ToonZone4–8 dispatch/hak onayı yok. Erişilebilir yeni kod arızası veya kesin zorunlu insan adımı saptanmadı; bilinen engeller tekrar bildirilmedi. Hak, secret, state/claim/ledger veya yayın kapıları değiştirilmedi; yeni yayın zorla tetiklenmedi.
 
+### 7 Kasım 2026 — Üretilen TXT'lerin stok sayımında görünmemesi
+
+- Normal publisher run [42295538387](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/42295538387) 2026-11-07 00:18 TRT stok raporu ToonZone için 159 yerel TXT üretilmiş olmasına rağmen `remaining=0`, `missing_txt=113` gösterdi; Daily Laugh için 117 üretilen TXT'ye rağmen 20 eksik TXT sayıldı. `content_stock.build_stock` yalnız Drive kataloğundaki TXT'leri sayıyordu.
+- Güvenli düzeltme: sadece aynı kaynak rotasına ait üretilmiş klasördeki MP4 ile tam aynı adlı TXT'yi say; dosya yoksa eksik tut. Sıra, uzak gönderi geçmişi, belirsiz intent ve kaynak/kapak kalite kontrolleri değişmez.
+- PR #92 eski base'e dayandığı için güncel main'e doğrudan alınamadı. Düzeltme güncel main üzerine yeniden tabanlandı; yalnız yerel birim testleri ve GitHub CI geçerse kabul edilir. Kod değişikliği hak onayı veya yayın kapılarını açmaz; canlı stok kabulü sonraki normal koşumda doğrulanmalıdır.
+
 
 ### 7 Kasım 2026 — Değişmeyen engelin günlük bildirim tekrarı
 
