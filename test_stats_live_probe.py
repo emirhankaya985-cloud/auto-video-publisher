@@ -17,6 +17,21 @@ class LiveProbeTests(unittest.TestCase):
         self.assertEqual(data["telegram_messages_sent"], 0)
         self.assertEqual(data["publisher_writes"], 0)
 
+    def test_gap_labels_are_bounded_and_never_copy_provider_errors(self):
+        known = next(iter(stats_live_probe.stats_reporter.ACCOUNT_TARGETS))
+        report = Mock(comparison={"measured_at": "2026-11-06T02:00:00+03:00",
+            "accounts": [{"account": known, "platforms": [
+                {"platform": "Threads", "total": None},
+                {"platform": "Facebook", "total": 3},
+            ]}], "collection_errors": [
+                "provider said PRIVATE_TOKEN_123 should never appear in telemetry",
+            ]})
+        result = stats_live_probe.summarize(report)
+        self.assertEqual(result["missing_view_counters"],
+                         [{"account": known, "platform": "Threads",
+                           "reason": "view_counter_unavailable"}])
+        self.assertNotIn("PRIVATE_TOKEN_123", str(result))
+
     def test_no_report_fails_closed(self):
         with self.assertRaisesRegex(RuntimeError, "invalid_comparison"):
             stats_live_probe.summarize(Mock(comparison=None))

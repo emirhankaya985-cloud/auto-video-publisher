@@ -24,12 +24,36 @@ def summarize(report):
         "threads_view_totals_measured": sum(p.get("platform") == "Threads" and type(p.get("total")) is int for p in rows),
         "youtube_platforms_reported": sum(p.get("platform") == "YouTube" for p in rows),
     }
+    # Never export untrusted provider error text or access credentials.
+    # Show only the project-owned account/platform labels for missing counters.
+    known_accounts = set(stats_reporter.ACCOUNT_TARGETS)
+    known_platforms = {"Facebook", "Facebook 1", "Facebook 2", "Instagram", "Threads", "YouTube"}
+    missing_counters = []
+    for account in accounts:
+        if not isinstance(account, dict):
+            continue
+        canonical = account.get("account")
+        canonical = canonical if canonical in known_accounts else "N/A"
+        for platform in account.get("platforms", []):
+            if not isinstance(platform, dict):
+                continue
+            kind = platform.get("platform")
+            if kind not in known_platforms:
+                kind = "N/A"
+            count = platform.get("total")
+            if type(count) is not int or count < 0:
+                missing_counters.append({
+                    "account": canonical, "platform": kind, "reason": "view_counter_unavailable"
+                })
+    if len(missing_counters) > 64:
+        raise RuntimeError("invalid_metric_coverage")
     meta = comparison.get("meta_collection")
     return {
         "status": "measured_partial_or_complete",
         "measurement_at": comparison.get("measured_at"),
         "account_count": len(accounts),
         "counts": counts,
+        "missing_view_counters": missing_counters,
         "meta_collection": meta if isinstance(meta, dict) else {"status": "unverified"},
         "collection_errors_count": len(comparison.get("collection_errors", []))
             if isinstance(comparison.get("collection_errors"), list) else None,

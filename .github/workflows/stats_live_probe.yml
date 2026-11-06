@@ -4,6 +4,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/stats_live_probe.yml'
+      - 'stats_live_probe.py'
   pull_request:
     paths:
       - 'stats_live_probe.py'
