@@ -38,6 +38,28 @@ class ThreadsStatusTests(unittest.TestCase):
         self.assertIn("N/A", report)
         self.assertNotIn("• Film:", report)
 
+    def test_general_statistics_failure_does_not_break_owner_inbox(self):
+        env = {"TELEGRAM_STATUS_ONLY": "true", "TELEGRAM_BOT_TOKEN": "123456:" + "A" * 30,
+               "TELEGRAM_CHAT_ID": "123456789", "TELEGRAM_AI_OWNER_ID": "123456789"}
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, env, clear=True):
+            send = Mock()
+            stats = Mock(side_effect=RuntimeError("Missing analytics artifact"))
+            threads = Mock(return_value="Threads ok")
+            worker = Worker(str(Path(tmp) / "store.sqlite3"), sender=send,
+                            statistics_loader=stats, threads_statistics_loader=threads)
+            try:
+                for uid, cmd in [(11, "/istatistik"), (12, "/threads")]:
+                    worker.handle({"update_id": uid, "message": {
+                        "chat": {"id": 123456789}, "from": {"id": 123456789}, "text": cmd}})
+                self.assertEqual(stats.call_count, 1)
+                self.assertEqual(threads.call_count, 1)
+                self.assertEqual(send.call_count, 2)
+                self.assertIn("Sayı tahmin edilmedi", send.call_args_list[0].args[1])
+                self.assertEqual(send.call_args_list[1].args[1], "Threads ok")
+                self.assertEqual(worker.offset(), 13)
+            finally:
+                worker.db.close()
+
     def test_owner_only_threads_command_and_separate_button(self):
         env = {"TELEGRAM_STATUS_ONLY": "true", "TELEGRAM_BOT_TOKEN": "123456:" + "A" * 30,
                "TELEGRAM_CHAT_ID": "123456789", "TELEGRAM_AI_OWNER_ID": "123456789"}
