@@ -32,6 +32,15 @@ def verify_accepted(entry, *, channel_check=check_channel, youtube_build=build):
     """One YouTube videos.list GET; no videos.insert or metadata writes."""
     route = entry.get("route")
     post_id = entry.get("post_id")
+    # A positively bound pre-upload source hold is not a missing Google ID.
+    # Never contact Google or release the hold merely to classify it.
+    source = entry.get("source_id")
+    if (route in ROUTES and entry.get("status") == "held" and post_id is None
+            and entry.get("verification_status") == "source_local_preparation_failed"
+            and entry.get("external_post_attempted") is False
+            and isinstance(source, str) and SOURCE_ID.fullmatch(source)
+            and entry.get("channel_id") == ROUTES[route][2]):
+        return "youtube_source_local_preparation_held"
     if route not in ROUTES or not isinstance(post_id, str) or not VIDEO_ID.fullmatch(post_id):
         return "invalid_archived_identity"
     target, secret, expected = ROUTES[route]

@@ -149,6 +149,63 @@ def verify_saved_upload(youtube, entry, expected):
     raise RuntimeError('YouTube processing or visibility not verified')
 
 
+def current_local_preparation_failure(key, entry, state, run):
+    """Positive current-plan proof only; never release or retry an upload.
+
+    Meta preparation includes shared-source and cover checks. A failure does
+    not prove the whole MP4 is corrupt, but a new fanout must preserve that
+    local hold instead of uploading the same source to YouTube unchecked.
+    """
+    route, source, filename = entry.get('route'), entry.get('source_id'), entry.get('file')
+    if (route not in ROUTES or not isinstance(source, str)
+            or not re.fullmatch(r'[A-Za-z0-9_-]+', source)
+            or entry.get('channel_id') != ROUTES[route][2]
+            or key != f'{route}:{source}' or not isinstance(filename, str)
+            or entry.get('run_id') != run or entry.get('status') != 'intent'
+            or entry.get('post_id') is not None):
+        return None
+    rows = state.get('entries', {})
+    if not isinstance(rows, dict):
+        return None
+
+    def locally_failed(platform):
+        row = rows.get(f'{route}:{platform}:{source}')
+        if not isinstance(row, dict):
+            return False
+        failure = row.get('failure')
+        return (row.get('route') == route and row.get('platform') == platform
+                and row.get('file') == filename and row.get('run_id') == run
+                and row.get('status') == 'ready' and row.get('post_id') is None
+                and isinstance(failure, dict)
+                and failure.get('reason') == 'source_or_cover_preparation_failed'
+                and failure.get('safe_to_repost') is True)
+
+    # Existing accepted/legacy uploads do not need a current plan. Read it
+    # only when exact new-intent local-failure evidence is present.
+    if not any(locally_failed(p) for p in ('facebook', 'instagram')):
+        return None
+    try:
+        plans = json.loads(PLAN.read_text())
+        if not isinstance(plans, list):
+            raise ValueError
+        matching = [p for p in plans if isinstance(p, dict)
+                    and p.get('route') == route and p.get('id') == source]
+        if len(matching) != 1 or matching[0].get('name') != filename:
+            raise ValueError
+        item = matching[0]
+        platforms = item.get('platforms')
+        if (item.get('resume_container_id') or not isinstance(platforms, list)
+                or not platforms or len(set(platforms)) != len(platforms)
+                or any(p not in ('facebook', 'instagram') for p in platforms)):
+            raise ValueError
+    except (OSError, ValueError, TypeError):
+        raise RuntimeError('YouTube local preparation plan unverified') from None
+    if not all(locally_failed(p) for p in platforms):
+        return None
+    return {'run_id': run, 'route': route, 'source_id': source, 'file': filename,
+            'platforms': sorted(platforms)}
+
+
 def publish():
     if os.getenv('YOUTUBE_PUBLISHING_ENABLED') != 'true' or os.getenv('YOUTUBE_INTENT_ARCHIVED') != 'true':
         raise RuntimeError('YouTube publication requires enabled, archived intent')
@@ -164,6 +221,16 @@ def publish():
                 or entry.get('attempt') != os.getenv('GITHUB_RUN_ATTEMPT', '1')):
             continue
         try:
+            if not reconciling:
+                proof = current_local_preparation_failure(key, entry, state, run)
+                if proof:
+                    entry.update(status='held', verification_status='source_local_preparation_failed',
+                                 external_post_attempted=False,
+                                 source_local_preparation_proof=proof)
+                    print(json.dumps({'platform': 'youtube', 'route': entry['route'],
+                                      'status': 'held', 'verification_status': entry['verification_status'],
+                                      'external_post_attempted': False}), flush=True)
+                    continue
             target, secret, expected = ROUTES[entry['route']]
             identity = check_channel(target)
             if identity.get('status') != 'verified' or identity.get('channel_id') != expected or entry['channel_id'] != expected:

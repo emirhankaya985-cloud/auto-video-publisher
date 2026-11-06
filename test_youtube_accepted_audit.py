@@ -19,6 +19,29 @@ def entry(**kwargs):
 
 
 class AcceptedReadOnlyTests(unittest.TestCase):
+    def test_local_source_hold_is_named_without_google_calls_or_mutation(self):
+        row = entry(status='held', post_id=None, source_id='source278',
+                    verification_status='source_local_preparation_failed',
+                    external_post_attempted=False)
+        before = json.loads(json.dumps(row))
+        checker, builder = Mock(), Mock()
+        self.assertEqual(audit.verify_accepted(row, channel_check=checker,
+                                              youtube_build=builder),
+                         'youtube_source_local_preparation_held')
+        checker.assert_not_called()
+        builder.assert_not_called()
+        self.assertEqual(row, before)
+        result = audit.audit({'schema': 1, 'youtube_entries': {'gonle:source278': row}})
+        self.assertEqual(result['status'], 'pending_confirmation')
+        self.assertEqual(result['held_checked'], 1)
+        self.assertEqual(result['unverified'], 1)
+        for change in ({'external_post_attempted': True}, {'channel_id': 'other'},
+                       {'verification_status': 'video_unavailable'}):
+            self.assertEqual(audit.verify_accepted(dict(row, **change),
+                                                  youtube_build=builder),
+                             'invalid_archived_identity')
+        builder.assert_not_called()
+
     def test_held_unavailable_id_remains_in_independent_audit(self):
         state = {'schema': 1, 'youtube_entries': {'tarladaki:source': entry(
             status='held', verification_status='video_unavailable')}}
