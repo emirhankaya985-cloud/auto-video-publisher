@@ -993,12 +993,12 @@ _CONFIRMED_UNREADABLE_SHARED_SOURCES = {
 def quarantined_unordered_local_failure(route, item, state, platforms, day):
     """Skip an already proven pre-upload-broken clip, never an uncertain POST.
 
-    Limit this to unordered shared-humor sources. Normally the hold lasts one
+    Limit this to unordered feeds. Normally the hold lasts one
     publication day; an independently verified corrupt source can stay held.
     Every active platform must have an exact prior source, file and local-only
     failure record. Do not alter those records or release any old intents.
     """
-    if route not in {"tarladaki", "penguen"} or not platforms:
+    if route not in {"tarladaki", "penguen", "gonle", "daily_laugh"} or not platforms:
         return False
     confirmed_run = _CONFIRMED_UNREADABLE_SHARED_SOURCES.get((route, item["id"], item["name"]))
     for platform in platforms:
