@@ -417,6 +417,130 @@ class EngagementTests(unittest.TestCase):
         tasks,_=m.build_plan(posts,actors(),ledger,"200","100",now=NOW)
         self.assertEqual({t["source_run_id"] for t in tasks},{"100","99"})
 
+    def fallback_fixture(self):
+        run = {"id": 101, "path": m.SOURCE_WORKFLOW, "head_branch": "main",
+               "head_repository": {"full_name": m.REPO}, "status": "completed",
+               "conclusion": "failure", "created_at": (NOW-timedelta(minutes=10)).isoformat()}
+        earlier = dict(run, id=100, conclusion="success",
+                       created_at=(NOW-timedelta(hours=1)).isoformat())
+        conclusions = {
+            "Fail early on invalid Meta credentials before any video work": "success",
+            "Install media runtime only after Meta preflight passed": "failure",
+            "Verify state, account and caption safety without API writes": "skipped",
+            "Check public folders, captions, histories and prepare intent": "skipped",
+            "Prepare verified YouTube channel intents for current plans": "skipped",
+            "Persist intent before any Meta upload": "skipped",
+            "Publish explicitly planned Meta videos": "skipped",
+            "Publish planned YouTube videos with archived intent": "skipped",
+        }
+        return {
+            "actions/workflows/public_link_schedule.yml/runs?branch=main&per_page=30": {
+                "workflow_runs": [earlier, run]},
+            "actions/runs/101/artifacts?per_page=100": {"total_count": 0, "artifacts": []},
+            "actions/runs/100/artifacts?per_page=100": {"total_count": 1, "artifacts": [
+                {"id": 900, "name": "link-state-result", "expired": False}]},
+            "actions/runs/101/jobs?per_page=100": {"total_count": 1, "jobs": [{
+                "name": "meta", "run_id": 101, "status": "completed", "conclusion": "failure",
+                "steps": [{"name": name, "status": "completed", "conclusion": conclusion}
+                          for name, conclusion in conclusions.items()]}]},
+        }
+
+    def choose_fallback(self, data, *, allow=True):
+        visited, skipped = [], []
+        def get(path):
+            visited.append(path)
+            response = Mock()
+            value = data[path]
+            if isinstance(value, Exception):
+                raise value
+            response.json.return_value = value
+            return response
+        with patch.object(m, "github", side_effect=get):
+            rid = m.latest_source_id(now=NOW, allow_prestate_fallback=allow, skipped_runs=skipped)
+        return rid, skipped, visited
+
+    def test_readonly_fallback_requires_proven_prestate_failure_and_reports_skipped_run(self):
+        data = self.fallback_fixture()
+        rid, skipped, visited = self.choose_fallback(data)
+        self.assertEqual(rid, "100")
+        self.assertEqual(skipped, ["101"])
+        self.assertIn("actions/runs/101/jobs?per_page=100", visited)
+        # Default selection, used by apply/manual paths, retains newest then fails closed.
+        rid, skipped, visited = self.choose_fallback(data, allow=False)
+        self.assertEqual(rid, "101")
+        self.assertEqual(skipped, [])
+        self.assertEqual(len(visited), 1)
+
+    def test_fallback_never_skips_expired_duplicate_or_intent_artifact(self):
+        for artifacts in (
+            [{"name": "link-state-result", "expired": True}],
+            [{"name": "link-state-result", "expired": False}] * 2,
+            [{"name": "link-state-intent", "expired": False}],
+        ):
+            data = self.fallback_fixture()
+            data["actions/runs/101/artifacts?per_page=100"] = {
+                "total_count": len(artifacts), "artifacts": artifacts}
+            with self.subTest(artifacts=artifacts), self.assertRaises(ValueError):
+                self.choose_fallback(data)
+
+    def test_fallback_does_not_hide_auth_malformed_or_incomplete_artifact_reads(self):
+        for body in (ValueError("GitHub read failed"), None, {"artifacts": []},
+                     {"total_count": 1, "artifacts": []},
+                     {"total_count": 1, "artifacts": [None]}):
+            data = self.fallback_fixture()
+            data["actions/runs/101/artifacts?per_page=100"] = body
+            with self.subTest(body=body), self.assertRaises(ValueError):
+                self.choose_fallback(data)
+
+    def test_fallback_never_skips_unknown_or_publishing_job_states(self):
+        base = self.fallback_fixture()
+        for mutation in ("missing_setup", "setup_success", "plan_started", "publish_started",
+                         "wrong_job", "wrong_run", "extra_job", "missing_steps", "jobs_read_failed"):
+            data = copy.deepcopy(base)
+            job = data["actions/runs/101/jobs?per_page=100"]["jobs"][0]
+            if mutation == "missing_setup": job["steps"].pop(1)
+            if mutation == "setup_success": job["steps"][1]["conclusion"] = "success"
+            if mutation == "plan_started": job["steps"][3]["conclusion"] = "failure"
+            if mutation == "publish_started": job["steps"][6]["conclusion"] = "success"
+            if mutation == "wrong_job": job["name"] = "foreign"
+            if mutation == "wrong_run": job["run_id"] = 999
+            if mutation == "extra_job": data["actions/runs/101/jobs?per_page=100"]["total_count"] = 2
+            if mutation == "missing_steps": job["steps"] = None
+            if mutation == "jobs_read_failed":
+                data["actions/runs/101/jobs?per_page=100"] = ValueError("GitHub read failed")
+            with self.subTest(mutation=mutation), self.assertRaises(ValueError):
+                self.choose_fallback(data)
+
+    def test_main_allows_fallback_only_for_scheduled_readonly_recent_latest(self):
+        for mode, event, scope, source, allowed in (
+            ("dry_run", "schedule", "recent_window", "latest", True),
+            ("apply", "schedule", "recent_window", "latest", False),
+            ("dry_run", "push", "recent_window", "latest", False),
+            ("dry_run", "workflow_dispatch", "recent_window", "latest", False),
+            ("dry_run", "schedule", "single_run", "latest", False),
+            ("dry_run", "schedule", "recent_window", "100", False),
+        ):
+            with self.subTest(mode=mode, event=event, scope=scope, source=source), \
+                 patch.dict(m.os.environ, {"GITHUB_REPOSITORY": m.REPO, "GITHUB_RUN_ID": "200",
+                    "SOURCE_RUN_ID": source, "ENGAGEMENT_MODE": mode, "GITHUB_EVENT_NAME": event,
+                    "ENGAGEMENT_SCOPE": scope, "META_CROSS_ENGAGEMENT_ENABLED": "true",
+                    "META_AUDIT_FOCUS": ""}), \
+                 patch("sys.argv", ["meta_cross_engagement.py", "plan"]), \
+                 patch.object(m, "load_meta_auth", return_value={}), \
+                 patch.object(m, "accounts", return_value=actors()), \
+                 patch.object(m, "latest_source_id", return_value="100") as choose, \
+                 patch.object(m, "restore", return_value={"schema": 1, "actions": {}}), \
+                 patch.object(m, "read_source", side_effect=ValueError("stop before plan")), \
+                 patch.object(m, "save") as save, patch.object(m, "perform") as post:
+                with self.assertRaisesRegex(ValueError, "stop before plan"):
+                    m.main()
+                if source == "latest":
+                    self.assertEqual(choose.call_args.kwargs["allow_prestate_fallback"], allowed)
+                else:
+                    choose.assert_not_called()
+                save.assert_not_called()
+                post.assert_not_called()
+
     def test_unavailable_provenance_stops_batch_before_claiming(self):
         state={"entries":{"a":dict(status="done",run_id="99",day="2026-10-30",
                route="tarladaki",platform="facebook",post_id="123")}}
