@@ -22,7 +22,7 @@ from toonzone_instagram_first_three import text_for, digest, cover_distance, thu
 WORKFLOW = ".github/workflows/toonzone_episodes_4_8.yml"
 NAMES = ("toonzone-4-8-intent", "toonzone-4-8-result")
 ROOT = Path("toonzone-4-8-runtime")
-HISTORY = ROOT / "history.json"
+HISTORY = ROOT / "alert-history.json"
 PLAN = ROOT / "plan.json"
 REPORT = ROOT / "audit.json"
 CAMPAIGN = "toonzone-instagram-s01e04-s01e08-20261106"
@@ -144,7 +144,8 @@ def audit(run_id, *, reserve=False):
         records[item["key"]] = {"status": "reserved", "intent_run_id": run_id,
             "user_id": user_id, "platform": "instagram", "route": "toonzone",
             "source_id": item["id"], "file": item["name"], "cover_id": item["cover_id"],
-            "cover_sha256": item["cover_sha256"], "caption": item["text"]}
+            "cover_sha256": item["cover_sha256"], "caption": item["text"],
+            "last_seen": history.now_utc().isoformat()}
     history.save(HISTORY, history.validate(archive))
     history.save(PLAN, {"run_id": run_id, "user_id": user_id, "plans": prepared})
     print(json.dumps({**report, "status": "reserved_no_provider_writes"}), flush=True)
