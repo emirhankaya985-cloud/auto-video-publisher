@@ -641,3 +641,12 @@ Run 42103999147: full exact Drive cover plus compact profile created 13739862-by
 - Aynı audit Daily Laugh192 container18153199159523437 IN_PROGRESS; Tarladaki192/194 ve Penguen193 eski container'ları EXPIRED gördü. Bunlar otomatik yayın/retry yetkisi değildir. Gönderi ve intent delilleri korunur.
 - Film kaynaklarının tam baytları: Part3 ve `(1)` hash `dd025d4e163a467696fc55d7c4e1ed0f7d323ddb2e3ebd751c4c79ac30f4635d`, 11426135bayt; Part8 ve `(1)` hash `2366ca629ae0a41577e4f89b36f07f3367937971de969a846abea9702f273813`, 11434180bayt. Yerel FFmpeg ile15/60/120/165s kareleri görsel olarak karşılaştırıldı: aynı sahneler, yalnız Part3/Part8 üst yazısı farklı. Bu nedenle görsel koruma doğru bir kaynak tekrarını durduruyor; kod kilidini kaldırma. Katalogdaki iki Part8 sürümü aynı baytları taşıyor; bu katalogda doğru Part8 alternatifi doğrulanmadı. Doğru kaynak kullanıcı tarafından sağlanmadan bölüm atlama veya önceki sahneleri yeniden yayınlama yok.
 - Penguen Threads401 ve önceki11 Instagram silme code10 engelleri önceki canlı kayıtlardan hâlâ ayrı çözüm gerektirir. Token değerleri okunmaz/değiştirilmez; kod başarılı diye bu hesap izinlerinin düzeldiği söylenmez.
+
+
+### 6 Kasım 2026 06:53 TRT — sırasız yerel hazırlık hatası kuyruğu
+
+- Yeni gerçek run42156394826/job127691459502 Daily Laugh195.mp4 için FFprobe CalledProcessError ile ilk Meta POST öncesinde durdu; incident iki ready kayıt,0 yeni post ve0 yeni uncertain kaydetti. Eski192/193/194 Instagram intentleri korunuyor.
+- Kök kod açığı: aynı gün yerel-only ready hatasını atlayan mevcut yardımcı yalnız Tarladaki/Penguen kabul ediyordu; Daily Laugh/Gönle aynı dosyada her tick tekrar takılabiliyordu. Aynı dar kanıt koşulları bu iki sırasız feed için de uygulanır: tam kaynak ID/ad/route/platform eşleşmesi, önceki run, her aktif platform ready, aynı yerel gün, source_or_cover_preparation_failed ve safe_to_repost=true. Böylece başka temiz aday incelenebilir.
+- Mevcut kayıt değiştirilmez; kesin bozuk kaynak iddiası veya kalıcı karantina yok. Ertesi yerel gün eski davranış korunur. Film/ToonZone ve belirsiz POST kapsam dışıdır. Normal schedule dışında yayın tetiklenmez.
+- Güncel tüm-hesap engagement audit42159138525:11 aktör,36 kaynak,199 aday; dry_run/writes=0, save unsupported, repost disabled ve368hold korunuyor. Inbox42156714869 reserved_replies=0/server_acks=0; butona basıldı iddiası yok.
+- Geri alma yalnız bu iki route eklemesini revert etmek; state/intent/claim/artifact silinmez. CI ve sonraki normal schedule kaynak/post kanıtı ayrı değerlendirilir.
