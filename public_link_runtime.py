@@ -530,12 +530,13 @@ def generate_daily_laugh_txts(files, output_dir):
 
 
 def clean_caption_ui(raw):
-    """Remove only a recognized standalone UI line; never invent video copy."""
-    pattern = r"(?im)^[ \t]*view[ \t]+all[ \t]+[\d,]+[ \t]+comments?[ \t]*$"
-    cleaned = re.sub(pattern, "", raw).strip()
-    if cleaned != raw.strip() and not re.search(r"[^\W\d_]", cleaned, re.UNICODE):
-        raise RuntimeError("TXT yalnızca sosyal medya arayüz metni içeriyor")
-    return cleaned
+    """Fail closed on scraped comment UI before creating a publication intent."""
+    # A count is optional: live 155.mp4 TXT contained "View all comments".
+    # Removing only the UI line can still publish unrelated scraped article text.
+    pattern = r"(?im)^[ \t]*view[ \t]+all(?:[ \t]+[\d,]+)?[ \t]+comments?[ \t]*$"
+    if re.search(pattern, raw):
+        raise RuntimeError("Eşleşen TXT sosyal medya arayüz metni içeriyor; yayın durduruldu")
+    return raw.strip()
 
 
 def copies(route, item, files, temp, use_txt=True):
