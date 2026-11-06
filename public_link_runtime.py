@@ -983,10 +983,18 @@ def quarantine_weak_caption_aliases(state):
             entry["reconciliation_conflict"] = "post_id_belongs_to_other_source"
 
 
-# Exact Drive source independently read in full after production run #371.
+# Exact Drive sources independently read in full after local-only failures.
 # A corrected upload with a new Drive ID is eligible as a separate source.
+# A valid MP4 can also lack a decodable frame on its advertised timeline;
+# never weaken visual dedupe or fingerprint its attached cover to accept it.
 _CONFIRMED_UNREADABLE_SHARED_SOURCES = {
-    ("tarladaki", "1hArLxDecYFwPs9lWQasXaNHK4f0dQ20W", "195.mp4"): "41790686639",
+    ("tarladaki", "1hArLxDecYFwPs9lWQasXaNHK4f0dQ20W", "195.mp4"): {
+        "run_id": "41790686639",
+    },
+    ("penguen", "1lBoXFmmxvlfL6lUhxk4Qc_eZ6WHANb2I", "250.mp4"): {
+        "run_id": "42175366213",
+        "sha256": "513d67961759f96a7e64196bf2adbe4d8ce01f0acb3b0257a5acce71a27ea1b0",
+    },
 }
 
 
@@ -994,13 +1002,14 @@ def quarantined_unordered_local_failure(route, item, state, platforms, day):
     """Skip an already proven pre-upload-broken clip, never an uncertain POST.
 
     Limit this to unordered feeds. Normally the hold lasts one
-    publication day; an independently verified corrupt source can stay held.
+    publication day; an independently verified local source failure can stay held.
     Every active platform must have an exact prior source, file and local-only
     failure record. Do not alter those records or release any old intents.
     """
     if route not in {"tarladaki", "penguen", "gonle", "daily_laugh"} or not platforms:
         return False
-    confirmed_run = _CONFIRMED_UNREADABLE_SHARED_SOURCES.get((route, item["id"], item["name"]))
+    confirmed = _CONFIRMED_UNREADABLE_SHARED_SOURCES.get(
+        (route, item["id"], item["name"]), {})
     for platform in platforms:
         if platform not in {"facebook", "instagram"}:
             return False
@@ -1010,7 +1019,11 @@ def quarantined_unordered_local_failure(route, item, state, platforms, day):
         if not (
             entry.get("route") == route and entry.get("platform") == platform
             and entry.get("file") == item["name"]
-            and (entry.get("day") == day or str(entry.get("run_id")) == confirmed_run)
+            and (entry.get("day") == day or (
+                str(entry.get("run_id")) == confirmed.get("run_id")
+                and (not confirmed.get("sha256")
+                     or entry.get("source_sha256") == confirmed["sha256"])
+            ))
             and entry.get("status") == "ready"
             and isinstance(failure, dict)
             and failure.get("reason") == "source_or_cover_preparation_failed"
