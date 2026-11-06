@@ -1,9 +1,11 @@
 import json
+import io
 import os
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
+from googleapiclient.errors import ResumableUploadError
 import youtube_main_bridge as bridge
 
 
@@ -190,6 +192,146 @@ class BridgeTests(unittest.TestCase):
                 self.assertEqual(json.loads(state.read_text())['youtube_entries']['tarladaki:source']['status'], 'done')
                 upload.assert_not_called()
 
+
+
+class UploadErrorEvidenceTests(unittest.TestCase):
+    @staticmethod
+    def error(content, status=403):
+        return ResumableUploadError(Mock(status=status, reason='PRIVATE-HEADER'), content,
+                                    uri='https://private.invalid/?access_token=PRIVATE-TOKEN')
+
+    @staticmethod
+    def body(*reasons):
+        return json.dumps({'error': {'message': 'PRIVATE-BODY', 'errors': [
+            {'reason': reason, 'message': 'PRIVATE-MESSAGE', 'location': 'PRIVATE-URL'}
+            for reason in reasons]}}).encode()
+
+    def test_canonical_quota_auth_limit_reasons_only(self):
+        for status, reason in ((403, 'quotaExceeded'), (401, 'authError'),
+                               (403, 'uploadLimitExceeded'), (429, 'rateLimitExceeded'),
+                               (500, 'backendError')):
+            with self.subTest(reason=reason):
+                self.assertEqual(bridge.sanitized_upload_error(self.error(self.body(reason), status)),
+                                 {'http_status': status, 'reasons': [reason],
+                                  'unrecognized_reason': False})
+
+    def test_mixed_reasons_retain_only_exact_allowlist_and_flag_unknown(self):
+        proof = bridge.sanitized_upload_error(self.error(self.body(
+            'quotaExceeded', 'PRIVATE-TOKEN', 'quotaExceeded PRIVATE-URL',
+            'authError', 'quotaExceeded', {'reason': 'forbidden'})))
+        self.assertEqual(proof, {'http_status': 403, 'reasons': ['authError', 'quotaExceeded'],
+                                 'unrecognized_reason': True})
+        self.assertNotIn('PRIVATE', json.dumps(proof))
+
+    def test_malformed_unknown_oversized_content_never_leaks(self):
+        contents = [self.body('PRIVATE-TOKEN'), self.body('invalidCredentials'),
+                    b'PRIVATE-NOT-JSON', b'\xff', b'[]',
+                    b'{"error":null}', b'{"error":{"errors":{}}}',
+                    b'{"error":{"errors":[]}}',
+                    b'{"error":{"errors":[null,{"reason":false}]}}',
+                    b' ' * bridge.UPLOAD_ERROR_CONTENT_LIMIT + self.body('quotaExceeded'),
+                    '\u00e9' * bridge.UPLOAD_ERROR_CONTENT_LIMIT,
+                    b'[' * 2000 + b']' * 2000, None]
+        for content in contents:
+            # The library constructor itself parses content; malformed values
+            # are assigned afterward to exercise the diagnostic boundary.
+            error = self.error(self.body('quotaExceeded'))
+            error.content = content
+            with self.subTest(content_type=type(content).__name__):
+                proof = bridge.sanitized_upload_error(error)
+                self.assertEqual(proof, {'http_status': 403, 'reasons': [],
+                                         'unrecognized_reason': True})
+                self.assertNotIn('PRIVATE', json.dumps(proof))
+
+    def test_status_must_be_exact_error_integer_and_metadata_access_is_safe(self):
+        for status in ('403', True, 399, 600, None):
+            proof = bridge.sanitized_upload_error(self.error(self.body('quotaExceeded'), status))
+            self.assertNotIn('http_status', proof)
+        class UnreadableError(Exception):
+            @property
+            def resp(self):
+                raise RuntimeError('PRIVATE-RESP')
+            @property
+            def content(self):
+                raise RuntimeError('PRIVATE-CONTENT')
+        self.assertEqual(bridge.sanitized_upload_error(UnreadableError('PRIVATE')),
+                         {'reasons': [], 'unrecognized_reason': True})
+
+    def run_failure(self, phase, error=None):
+        expected = bridge.ROUTES['tarladaki'][2]
+        entry = {'status': 'intent', 'run_id': '1', 'attempt': '1', 'route': 'tarladaki',
+                 'source_id': 'source', 'file': 'video.mp4', 'channel_id': expected,
+                 'title': 'title', 'caption': 'caption'}
+        if error is None:
+            error = self.error(self.body('quotaExceeded', 'PRIVATE-TOKEN'))
+        if phase == 'saved_get':
+            entry.update(status='accepted', post_id='abcdefghijk')
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp)/'state.json'
+            old = {'status': 'uncertain', 'run_id': 'old', 'route': 'tarladaki',
+                   'source_id': 'old-source'}
+            state.write_text(json.dumps({'youtube_entries': {
+                'tarladaki:source': entry, 'tarladaki:old-source': old}}))
+            output = io.StringIO()
+            youtube = Mock()
+            youtube.videos().list().execute.side_effect = error
+            with patch.object(bridge, 'STATE', state), patch.dict(os.environ, {
+                'YOUTUBE_PUBLISHING_ENABLED': 'true', 'YOUTUBE_INTENT_ARCHIVED': 'true',
+                'GITHUB_RUN_ID': '1', 'TOKEN_CHANNEL1_JSON': '{}'}, clear=True), \
+                patch.object(bridge, 'check_channel', side_effect=error if phase == 'identity' else None,
+                             return_value={'status': 'verified', 'channel_id': expected}), \
+                patch.object(bridge.Credentials, 'from_authorized_user_info'), \
+                patch.object(bridge, 'build', return_value=youtube), \
+                patch.object(bridge, 'previous_upload', return_value=None), \
+                patch.object(bridge, 'download', side_effect=error if phase == 'download' else None,
+                             return_value=Path(tmp)/'video.mp4'), \
+                patch.object(bridge, 'verify_source_video'), \
+                patch.object(bridge, 'record_error') as record, \
+                patch.object(bridge, 'upload_video', side_effect=error if phase == 'upload' else None,
+                             return_value='abcdefghijk') as upload, \
+                patch('sys.stdout', output):
+                with self.assertRaises(SystemExit):
+                    bridge.publish()
+                first = json.loads(state.read_text())['youtube_entries']['tarladaki:source']
+                if phase == 'upload':
+                    bridge.publish()  # uncertain is skipped even in the same run
+                    with patch.dict(os.environ, {'GITHUB_RUN_ATTEMPT': '2'}):
+                        bridge.publish()
+                    self.assertEqual(first, json.loads(state.read_text())['youtube_entries']['tarladaki:source'])
+                upload_calls = upload.call_count
+                journal = str(record.call_args_list)
+                self.assertEqual(json.loads(state.read_text())['youtube_entries']['tarladaki:old-source'], old)
+        self.assertNotIn('PRIVATE', json.dumps(first) + output.getvalue() + journal)
+        return first, output.getvalue(), upload_calls
+
+    def test_actual_failed_upload_persists_sanitized_proof_uncertain_and_never_replays(self):
+        saved, output, calls = self.run_failure('upload')
+        self.assertEqual(saved['status'], 'uncertain')
+        self.assertNotIn('post_id', saved)
+        self.assertEqual(saved['upload_error'], {'http_status': 403, 'reasons': ['quotaExceeded'],
+                                                'unrecognized_reason': True})
+        summary = json.loads(output)
+        self.assertEqual(summary['verification_status'], 'upload_unverified')
+        self.assertEqual(summary['upload_error'], saved['upload_error'])
+        self.assertEqual(calls, 1)
+
+    def test_unknown_upload_exception_stays_uncertain_with_no_cause_or_replay(self):
+        saved, output, calls = self.run_failure('upload', RuntimeError('PRIVATE-TOKEN'))
+        self.assertEqual(saved['status'], 'uncertain')
+        self.assertNotIn('post_id', saved)
+        self.assertEqual(saved['upload_error'], {'reasons': [], 'unrecognized_reason': True})
+        self.assertEqual(json.loads(output)['verification_status'], 'upload_unverified')
+        self.assertEqual(calls, 1)
+
+    def test_identity_download_and_saved_id_get_errors_are_not_upload_failures(self):
+        for phase in ('identity', 'download', 'saved_get', 'new_upload_get'):
+            with self.subTest(phase=phase):
+                saved, output, calls = self.run_failure(phase)
+                self.assertNotIn('upload_error', saved)
+                self.assertNotIn('upload_error', json.loads(output))
+                self.assertNotIn('upload_unverified', output)
+                self.assertEqual(calls, int(phase == 'new_upload_get'))
+                self.assertEqual(saved['status'], 'accepted' if phase.endswith('get') else 'intent')
 
 
 class LocalPreparationGateTests(unittest.TestCase):
