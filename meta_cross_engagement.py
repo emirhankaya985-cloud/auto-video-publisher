@@ -466,17 +466,67 @@ def source_run_valid(run, now):
         return False
 
 
-def latest_source_id(*, now):
+def failed_before_source_state(run_id):
+    """Positive job evidence for one specific setup failure, never an upload."""
+    body = github(f"actions/runs/{run_id}/jobs?per_page=100").json()
+    jobs = body.get("jobs") if isinstance(body, dict) else None
+    if (not isinstance(jobs, list) or len(jobs) != 1
+            or type(body.get("total_count")) is not int
+            or body.get("total_count") != 1 or not isinstance(jobs[0], dict)):
+        return False
+    job = jobs[0]
+    if (str(job.get("run_id")) != str(run_id)
+            or job.get("name") != "meta" or job.get("status") != "completed"
+            or job.get("conclusion") != "failure" or not isinstance(job.get("steps"), list)):
+        return False
+    steps = job["steps"]
+    expected = {
+        "Fail early on invalid Meta credentials before any video work": "success",
+        "Install media runtime only after Meta preflight passed": "failure",
+        "Verify state, account and caption safety without API writes": "skipped",
+        "Check public folders, captions, histories and prepare intent": "skipped",
+        "Prepare verified YouTube channel intents for current plans": "skipped",
+        "Persist intent before any Meta upload": "skipped",
+        "Publish explicitly planned Meta videos": "skipped",
+        "Publish planned YouTube videos with archived intent": "skipped",
+    }
+    for name, conclusion in expected.items():
+        rows = [step for step in steps if isinstance(step, dict) and step.get("name") == name]
+        if (len(rows) != 1 or rows[0].get("status") != "completed"
+                or rows[0].get("conclusion") != conclusion):
+            return False
+    return True
+
+
+def latest_source_id(*, now, allow_prestate_fallback=False, skipped_runs=None):
     body = github("actions/workflows/public_link_schedule.yml/runs?branch=main&per_page=30").json()
     if not isinstance(body.get("workflow_runs"), list):
         raise ValueError("invalid publisher run list")
     valid = [r for r in body["workflow_runs"] if source_run_valid(r, now)]
     if not valid:
         raise ValueError("no recent completed publisher run")
-    newest = max(valid, key=lambda r: stamp(r["created_at"]))
-    if not str(newest.get("id", "")).isdigit():
-        raise ValueError("invalid source run ID")
-    return str(newest["id"])
+    for run in sorted(valid, key=lambda r: stamp(r["created_at"]), reverse=True):
+        rid = str(run.get("id", ""))
+        if not rid.isdigit():
+            raise ValueError("invalid source run ID")
+        if not allow_prestate_fallback:
+            return rid
+        body = github(f"actions/runs/{rid}/artifacts?per_page=100").json()
+        artifacts = body.get("artifacts") if isinstance(body, dict) else None
+        if (not isinstance(artifacts, list) or type(body.get("total_count")) is not int
+                or body.get("total_count") != len(artifacts)
+                or any(not isinstance(a, dict) or not isinstance(a.get("name"), str)
+                       for a in artifacts)):
+            raise ValueError("invalid source artifact list")
+        results = [a for a in artifacts if a["name"] == "link-state-result"]
+        if len(results) == 1 and results[0].get("expired") is False:
+            return rid  # read_source still verifies and decodes the actual archive.
+        if (results or any(a["name"] == "link-state-intent" for a in artifacts)
+                or run.get("conclusion") != "failure" or not failed_before_source_state(rid)):
+            raise ValueError("source result unavailable")
+        if skipped_runs is not None:
+            skipped_runs.append(rid)
+    raise ValueError("no recent completed publisher run")
 
 
 def recent_posts(state, anchor_id, actors, *, now):
@@ -601,8 +651,13 @@ def main():
     if not actors:
         raise ValueError("no verified enabled accounts")
     if args.action == "plan":
+        skipped_sources = []
         if source_id == "latest":
-            source_id = latest_source_id(now=now)
+            source_id = latest_source_id(now=now,
+                allow_prestate_fallback=(mode == "dry_run" and not live
+                    and os.getenv("GITHUB_EVENT_NAME") == "schedule"
+                    and os.getenv("ENGAGEMENT_SCOPE") == "recent_window"),
+                skipped_runs=skipped_sources)
         ledger = restore()
         state = read_source(source_id, now=now)
         posts = (recent_posts(state, source_id, actors, now=now)
@@ -619,6 +674,7 @@ def main():
         save(PLAN, tasks)
         save(REPORT, {"mode": "apply" if live else "dry_run", "planned": len(tasks),
                       "source_run_id": source_id, "source_posts": len(posts),
+                      "source_fallback_skipped_runs": skipped_sources,
                       "verified_accounts": len(actors), **focus_info,
                       "blocked": report, "blocked_counts": blocked_counts,
                       "provider_holds": ledger.get("provider_holds", {})})
@@ -626,6 +682,7 @@ def main():
             save(STATE, ledger)
         print(json.dumps({"mode": "apply" if live else "dry_run", "planned": len(tasks),
                           "source_posts": len(posts), "verified_accounts": len(actors),
+                          "source_fallback_skipped_runs": skipped_sources,
                           **focus_info,
                           "blocked": len(report), "blocked_counts": blocked_counts,
                           "provider_holds": ledger.get("provider_holds", {})}))

@@ -99,7 +99,15 @@ jobs:
         timeout-minutes: 5
         run: |
           pip install gdown==6.4.2
-          command -v ffmpeg && command -v ffprobe || (sudo apt-get update -qq && sudo apt-get install -y ffmpeg)
+          if ! command -v ffmpeg >/dev/null || ! command -v ffprobe >/dev/null; then
+            # Reuse the bounded official-mirror setup from the ToonZone jobs.
+            # A slow Azure mirror must not consume every pre-publication slot.
+            echo 'https://archive.ubuntu.com/ubuntu' | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
+            echo 'https://security.ubuntu.com/ubuntu' | sudo tee /etc/apt/apt-mirrors-security.txt >/dev/null
+            sudo apt-get -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 -o Acquire::Retries=1 update -qq
+            sudo apt-get -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 -o Acquire::Retries=1 install -y --no-install-recommends ffmpeg
+          fi
+          command -v ffmpeg && command -v ffprobe
       - name: Verify one-shot commit authorization without any Meta writes
         id: release_gate
         env:
