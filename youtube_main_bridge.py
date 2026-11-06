@@ -21,6 +21,54 @@ class YouTubeVideoHeld(RuntimeError):
 
 
 HELD_VERIFICATIONS = {'video_unavailable', 'upload_failed', 'upload_rejected', 'upload_deleted'}
+UPLOAD_ERROR_CONTENT_LIMIT = 16_384
+# Canonical labels only: youtube/v3/docs/errors, youtube/v3/docs/videos/insert
+# and youtube/data/reference/rest/v3/core_errors on developers.google.com.
+UPLOAD_ERROR_REASONS = frozenset({
+    'authError', 'insufficientPermissions', 'forbidden',
+    'quotaExceeded', 'dailyLimitExceeded', 'rateLimitExceeded',
+    'userRateLimitExceeded', 'uploadLimitExceeded', 'backendError',
+})
+
+
+def sanitized_upload_error(exc):
+    """Bounded provider evidence, not a diagnosis or permission to retry.
+
+    Never stringify the exception or retain its message, headers, URL or body.
+    Unknown/malformed reasons remain explicitly unknown, including alongside
+    recognized reasons; only exact canonical allowlist values can leave here.
+    """
+    proof = {'reasons': [], 'unrecognized_reason': True}
+    try:
+        status = getattr(getattr(exc, 'resp', None), 'status', None)
+        if type(status) is int and 400 <= status <= 599:
+            proof['http_status'] = status
+    except Exception:
+        pass
+    try:
+        content = getattr(exc, 'content', None)
+        if type(content) not in (bytes, str) or len(content) > UPLOAD_ERROR_CONTENT_LIMIT:
+            return proof
+        if isinstance(content, str):
+            content = content.encode('utf-8')
+        if len(content) > UPLOAD_ERROR_CONTENT_LIMIT:
+            return proof
+        payload = json.loads(content.decode('utf-8'))
+        errors = payload.get('error', {}).get('errors')
+        if not isinstance(errors, list) or not errors:
+            return proof
+        reasons = set()
+        unknown = False
+        for row in errors:
+            reason = row.get('reason') if isinstance(row, dict) else None
+            if type(reason) is str and reason in UPLOAD_ERROR_REASONS:
+                reasons.add(reason)
+            else:
+                unknown = True
+        proof.update(reasons=sorted(reasons), unrecognized_reason=unknown)
+    except Exception:
+        pass
+    return proof
 
 
 def save(path, value):
@@ -220,6 +268,7 @@ def publish():
         if not reconciling and (entry.get('status') != 'intent' or entry.get('run_id') != run
                 or entry.get('attempt') != os.getenv('GITHUB_RUN_ATTEMPT', '1')):
             continue
+        upload_in_progress = False
         try:
             if not reconciling:
                 proof = current_local_preparation_failure(key, entry, state, run)
@@ -253,8 +302,12 @@ def publish():
                 verify_source_video(video)
                 entry['status'] = 'uncertain'
                 save(STATE, state)  # point of no blind retry before videos.insert
-                post = upload_video(youtube, video, entry['title'], entry['caption'] + '\n\n' + marker,
+                upload_title = entry['title']
+                upload_caption = entry['caption'] + '\n\n' + marker
+                upload_in_progress = True
+                post = upload_video(youtube, video, upload_title, upload_caption,
                                     privacy_status='public')
+                upload_in_progress = False
                 if not isinstance(post, str) or not re.fullmatch(r'[A-Za-z0-9_-]{11}', post):
                     raise RuntimeError('YouTube returned no valid video ID')
                 # Persist the accepted ID before any subsequent network read.
@@ -266,6 +319,10 @@ def publish():
                 print(json.dumps({'platform': 'youtube', 'route': entry['route'], 'post_id': post,
                                   'privacy_status': entry['privacy_status']}), flush=True)
         except Exception as exc:
+            upload_error = None
+            if upload_in_progress and entry.get('status') == 'uncertain' and not entry.get('post_id'):
+                upload_error = sanitized_upload_error(exc)
+                entry['upload_error'] = upload_error
             unchanged_hold = (isinstance(exc, YouTubeVideoHeld)
                               and prior_hold == entry.get('verification_status'))
             if not unchanged_hold:
@@ -273,9 +330,13 @@ def publish():
                 record_error('youtube_publish', 'youtube_publication_unverified',
                              route=entry.get('route'), platform='youtube',
                              error=RuntimeError(type(exc).__name__))
-            print(json.dumps({'platform': 'youtube', 'route': entry.get('route'),
-                              'status': entry.get('status'), 'error_type': type(exc).__name__,
-                              'verification_status': entry.get('verification_status', 'read_or_auth_failed')}), flush=True)
+            summary = {'platform': 'youtube', 'route': entry.get('route'),
+                       'status': entry.get('status'), 'error_type': type(exc).__name__,
+                       'verification_status': ('upload_unverified' if upload_error is not None else
+                                               entry.get('verification_status', 'read_or_auth_failed'))}
+            if upload_error is not None:
+                summary['upload_error'] = upload_error
+            print(json.dumps(summary), flush=True)
         finally:
             save(STATE, state)
     if failed:
