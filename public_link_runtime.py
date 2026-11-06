@@ -995,6 +995,10 @@ _CONFIRMED_UNREADABLE_SHARED_SOURCES = {
         "run_id": "42175366213",
         "sha256": "513d67961759f96a7e64196bf2adbe4d8ce01f0acb3b0257a5acce71a27ea1b0",
     },
+    ("tarladaki", "1T3nTIgRJwmgeQOkCwZrvezl61tic3aI2", "278.mp4"): {
+        "run_id": "42222196393",
+        "sha256": "dba86d78a9590d17c129d80b49c62d8f0441cd1839c1b2a8c105c05ea0f983dd",
+    },
 }
 
 

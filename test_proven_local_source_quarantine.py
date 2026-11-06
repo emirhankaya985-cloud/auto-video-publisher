@@ -88,6 +88,33 @@ class ProvenLocalSourceQuarantine(unittest.TestCase):
         }}
         return source, state
 
+    def test_audited_tarladaki_278_requires_both_exact_local_records_next_day(self):
+        source = {'id': '1T3nTIgRJwmgeQOkCwZrvezl61tic3aI2', 'name': '278.mp4'}
+        state = {'entries': {
+            f"tarladaki:{p}:{source['id']}": dict(
+                self.state()['entries'][f'tarladaki:{p}:drive-195'],
+                file='278.mp4', day='2026-11-06',
+                run_id='42222196393',
+                source_sha256='dba86d78a9590d17c129d80b49c62d8f0441cd1839c1b2a8c105c05ea0f983dd')
+            for p in ('facebook', 'instagram')}}
+        original = copy.deepcopy(state)
+        with patch.dict(os.environ, {'GITHUB_RUN_ID': '42300000000'}):
+            self.assertTrue(runtime.quarantined_unordered_local_failure(
+                'tarladaki', source, state, ['facebook', 'instagram'], '2026-11-07'))
+            self.assertEqual(state, original)
+            for change in ({'source_sha256': 'other'}, {'run_id': '42222196394'},
+                           {'status': 'uncertain'}, {'file': '279.mp4'}):
+                changed = copy.deepcopy(state)
+                changed['entries'][f"tarladaki:instagram:{source['id']}"].update(change)
+                self.assertFalse(runtime.quarantined_unordered_local_failure(
+                    'tarladaki', source, changed, ['facebook', 'instagram'], '2026-11-07'))
+            self.assertFalse(runtime.quarantined_unordered_local_failure(
+                'tarladaki', dict(source, id='replacement'), state,
+                ['facebook', 'instagram'], '2026-11-07'))
+            del state['entries'][f"tarladaki:facebook:{source['id']}"]
+            self.assertFalse(runtime.quarantined_unordered_local_failure(
+                'tarladaki', source, state, ['facebook', 'instagram'], '2026-11-07'))
+
     def test_audited_video_timeline_failure_stays_held_without_mutation(self):
         source, state = self.penguen_timeline_fixture()
         old = copy.deepcopy(state)
