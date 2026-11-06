@@ -44,6 +44,59 @@ class ToonZoneBatchTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "missing_from_live"):
             target.conflicts([], {"key": row})
 
+    def test_live_reservation_writes_archive_compatible_with_restore_schema(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import Mock
+
+        import publisher_alert_history as history
+        from public_link_runtime import FOLDERS
+
+        with tempfile.TemporaryDirectory() as d:
+            folder = Path(d)
+            cover_files = {
+                Path(row["name"]).stem + ".png": {"id": "cover-" + row["id"]}
+                for row in self.catalog() if 4 <= row["episode"] <= 8
+            }
+            def download_cover(file_id, output):
+                path = Path(output)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(("cover=" + file_id).encode("utf-8"))
+                return path
+
+            with patch.dict(os.environ, {"TOONZONE_RIGHTS_APPROVED": "true",
+                                         "TOONZONE_RELEASE_4_8": "true"}, clear=True), \\
+                 patch.object(target, "ROOT", folder), \\
+                 patch.object(target, "HISTORY", folder / "alert-history.json"), \\
+                 patch.object(target, "PLAN", folder / "plan.json"), \\
+                 patch.object(target, "REPORT", folder / "audit.json"), \\
+                 patch.object(target, "page_for_toonzone", return_value={"page_id": "123"}), \\
+                 patch.object(target, "instagram_identity", return_value=target.ACCOUNT_ID), \\
+                 patch.object(target, "ordered_catalog", return_value=self.catalog()), \\
+                 patch.object(target, "text_for", side_effect=lambda x: f"S01E{x['episode']:02d} Part{x['part']}"), \\
+                 patch.object(history, "restore", return_value={"schema": 1, "records": {}}), \\
+                 patch("public_link_runtime.inventory", side_effect=lambda x: cover_files if x == FOLDERS["covers"] else {}), \\
+                 patch("public_link_runtime.graph_rows", return_value=[]), \\
+                 patch("public_link_runtime.download", side_effect=download_cover), \\
+                 patch("public_link_runtime.probe", return_value={"streams": [{"codec_type": "video", "width": 720}]}):
+                result = target.audit("20261106", reserve=True)
+            validated = history.validate(json.loads((folder / "alert-history.json").read_text()))
+            self.assertEqual(result["prepared_parts"], 20)
+            self.assertEqual(len(validated["records"]), 20)
+            self.assertTrue(all(record["last_seen"].endswith("+00:00")
+                                for record in validated["records"].values()))
+            self.assertEqual(len(json.loads((folder / "plan.json").read_text())["plans"]), 20)
+
+    def test_artifact_contract_persists_exact_history_member_separately(self):
+        from pathlib import Path
+        content = Path(".github/workflows/toonzone_episodes_4_8.yml").read_text()
+        self.assertIn("name: toonzone-4-8-intent", content)
+        self.assertIn("name: toonzone-4-8-result", content)
+        self.assertIn("name: toonzone-4-8-summary", content)
+        self.assertEqual(content.count("path: toonzone-4-8-runtime/alert-history.json"), 2)
+        self.assertNotIn("toonzone-4-8-runtime/history.json", content)
+
     def test_release_needs_archived_intent_before_any_api_write(self):
         with patch.dict(os.environ, {"TOONZONE_INTENT_ARCHIVED": "false"}, clear=True), \
              self.assertRaisesRegex(RuntimeError, "not_archived"):
