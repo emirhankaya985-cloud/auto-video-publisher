@@ -20,14 +20,73 @@ def observe(h,rid='100',now=NOW):a.observe(h,descriptors(),{'entries':{}},rid,no
 
 
 class AlertHistoryTests(unittest.TestCase):
-    def test_same_incident_is_reserved_once_with_daily_info_reminder(self):
+    def test_unchanged_incident_is_not_reserved_again_after_hours_or_days(self):
         h=history();observe(h)
         msg=a.reserve(h,'🚨 error','body',descriptors(),'100',now=NOW)
         self.assertIsNotNone(msg)
-        observe(h,'101',NOW+timedelta(hours=1))
-        self.assertIsNone(a.reserve(h,'🚨 error','body',descriptors(),'101',now=NOW+timedelta(hours=1)))
-        reminder=a.reserve(h,'🚨 error','body',descriptors(),'102',now=NOW+timedelta(hours=24))
-        self.assertTrue(reminder['title'].startswith('ℹ️'))
+        a.mark_ack(h,msg,'telegram');a.mark_ack(h,msg,'ntfy')
+        original=copy.deepcopy(next(iter(h['records'].values())))
+        for index,hours in enumerate((1,24,25,48,168),101):
+            later=NOW+timedelta(hours=hours);rid=str(index)
+            observe(h,rid,later)
+            before=copy.deepcopy(h)
+            self.assertIsNone(a.reserve(h,'🚨 error','body',descriptors(),rid,now=later))
+            self.assertEqual(h,before)  # no new intent or ACK reset
+            row=next(iter(h['records'].values()))
+            for field in ('last_intent','intent_run_id','server_acks','attempted_channels'):
+                self.assertEqual(row[field],original[field])
+            self.assertIn(rid,row['observed_runs'])
+            self.assertFalse(row['resolved'])
+
+    def test_distinct_incident_is_eligible_while_known_incident_remains_suppressed(self):
+        h=history();observe(h)
+        first=a.reserve(h,'error','body',descriptors(),'100',now=NOW)
+        a.mark_ack(h,first,'telegram')
+        original=copy.deepcopy(h['records'][first['keys'][0]])
+        distinct=a.incident_descriptors([dict(EVENT,video='Part11.mp4')])
+        later=NOW+timedelta(days=3)
+        a.observe(h,distinct,{'entries':{}},'200',now=later)
+        msg=a.reserve(h,'new incident','new body',distinct,'200',now=later)
+        self.assertEqual(msg,{'title':'new incident','body':'new body','keys':list(distinct)})
+        self.assertEqual(h['records'][first['keys'][0]],original)
+        self.assertIsNone(a.reserve(h,'old incident','body',descriptors(),'200',now=later))
+
+    def test_confirmed_resolution_then_recurrence_notifies_once_again(self):
+        h=history();observe(h)
+        first=a.reserve(h,'error','body',descriptors(),'100',now=NOW)
+        a.mark_ack(h,first,'telegram')
+        resolved=NOW+timedelta(days=1)
+        done={'route':'film','platform':'instagram','file':'Part10.mp4',
+              'status':'done','post_id':'123','run_id':'200'}
+        a.observe(h,{}, {'entries':{'confirmed':done}},'200',now=resolved)
+        key=first['keys'][0]
+        self.assertTrue(h['records'][key]['resolved'])
+        observe(h,'201',resolved+timedelta(minutes=1))
+        recurrence=a.reserve(h,'recurrence','body',descriptors(),'201',now=resolved+timedelta(minutes=1))
+        self.assertIsNotNone(recurrence)
+        self.assertEqual(recurrence['title'],'recurrence')
+        self.assertEqual(h['records'][key]['intent_run_id'],'201')
+        self.assertEqual(h['records'][key]['server_acks'],[])
+        self.assertFalse(h['records'][key]['resolved'])
+        a.mark_ack(h,recurrence,'ntfy')
+        observe(h,'202',resolved+timedelta(days=5))
+        before=copy.deepcopy(h)
+        self.assertIsNone(a.reserve(h,'recurrence','body',descriptors(),'202',now=resolved+timedelta(days=5)))
+        self.assertEqual(h,before)
+
+    def test_ambiguous_attempt_without_ack_does_not_authorize_daily_retry(self):
+        h=history();observe(h)
+        msg=a.reserve(h,'error','body',descriptors(),'100',now=NOW)
+        row=h['records'][msg['keys'][0]]
+        row['attempted_channels']=['telegram']
+        for days in (1,2,7):
+            later=NOW+timedelta(days=days)
+            observe(h,str(100+days),later)
+            before=copy.deepcopy(h)
+            self.assertIsNone(a.reserve(h,'error','body',descriptors(),str(100+days),now=later))
+            self.assertEqual(h,before)
+            self.assertEqual(row['server_acks'],[])
+            self.assertEqual(row['attempted_channels'],['telegram'])
 
     def test_held_intent_and_media_error_have_same_identity(self):
         held=dict(EVENT,stage='previous_intent_hold',reason='unreconciled_previous_intent')

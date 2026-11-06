@@ -144,12 +144,10 @@ def reserve(history, title, body, descriptors, run_id, *, now):
     keys=list(descriptors)
     if not keys: raise ValueError('notification identity missing')
     fresh=any(not records.get(k,{}).get('last_intent') for k in keys)
-    is_post=all(d['kind']=='post' for d in descriptors.values())
-    due=fresh or (not is_post and any(now-stamp(records[k]['last_intent'])>=timedelta(hours=24) for k in keys))
-    if not due: return None
-    if not fresh and not is_post:
-        title='ℹ️ Yayın engeli devam ediyor'
-        body='ℹ️ Önceden bildirilen olayın günlük hatırlatması.\n'+body
+    # An unresolved incident is not new merely because another day passed.
+    # observe() clears last_intent only after a confirmed resolution recurs.
+    # Preserve existing intents and ACKs, including ambiguous attempted sends.
+    if not fresh: return None
     for k,d in descriptors.items():
         row=records.setdefault(k,dict(d,last_seen=now.isoformat(),observed_runs=[run_id],resolved=False))
         row.update(last_intent=now.isoformat(),intent_run_id=run_id,server_acks=[],attempted_channels=[])
