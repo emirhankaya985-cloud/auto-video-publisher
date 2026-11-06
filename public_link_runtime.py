@@ -1482,6 +1482,14 @@ def plan(audit=False):
                 continue
             if not pending:
                 continue
+            if quarantined_unordered_local_failure(
+                    route, item, state, pending, clock.date().isoformat()):
+                # Quotas or an existing publication can leave only a subset
+                # of route platforms pending. Preserve the exact local-only
+                # failure after every history/uncertain-intent guard above;
+                # do not reserve the same broken preparation again.
+                report.append("QUARANTINE: exact pending platforms failed local preparation in a prior run; inspect another unordered source.")
+                continue
             # Dedupe with the original TXT first; decorate only genuinely new
             # intents, before their exact publication hashes are persisted.
             for p in pending:
