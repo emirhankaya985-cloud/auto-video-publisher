@@ -91,6 +91,16 @@ class QuotaReadOnlyTests(unittest.TestCase):
         self.assertEqual(fb['failed_local_preparation_sources'], 1)
         self.assertFalse(fb['safe_to_auto_repost'])
 
+    def test_same_day_full_gap_is_provisional_last_new_york_day_final(self):
+        state = {'schema': 1, 'entries': {}}
+        report = quota_evidence(state, now=self.NOW)
+        self.assertEqual(report['accounts'][0]['platforms'][0]['scheduled_target'], 5)
+        self.assertEqual(report['accounts'][0]['platforms'][0]['not_recorded_against_target'], 5)
+        self.assertFalse(report['accounts'][0]['platforms'][0]['full_day_gap_is_final'])
+        daily = next(r for r in report['accounts'] if r['account'] == 'Daily Laugh Lab')
+        self.assertTrue(daily['platforms'][0]['full_day_gap_is_final'])
+        self.assertEqual(daily['day'], '2026-11-06')
+
     def test_bad_or_unverified_done_id_cannot_increment_success(self):
         state = {"schema": 1, "entries": {
             "tarladaki:facebook:1234567890abcdef": {
