@@ -1,4 +1,4 @@
-"""One-time LOCAL YouTube OAuth setup for three channels (never uploads media).
+"""One-time LOCAL YouTube OAuth setup for four channels (never uploads media).
 
 Run on a trusted computer with a browser. The resulting authorized-user JSON
 goes to GitHub Actions Secrets, NOT to Git. The scheduled runtime stays in cloud.
@@ -17,6 +17,7 @@ TOKEN_PATHS = {
     "channel1": "token_channel1.json",
     "channel2": "token_channel2.json",
     "daily_laugh": "token_daily_laugh_lab.json",
+    "gonle_dusen": "token_gonle_dusen.json",
 }
 ROOT = Path(__file__).resolve().parent
 

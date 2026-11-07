@@ -83,7 +83,8 @@ def send_telegram(title, message, *, timeout=20, session=requests, parse_mode=No
                 not isinstance(payload.get("result"), dict) or
                 type(payload["result"].get("message_id")) is not int):
             raise RuntimeError("telegram server receipt mismatch")
-        return {"http_status": code, "server_ack": True}
+        return {"http_status": code, "server_ack": True,
+                "message_id": payload["result"]["message_id"]}
     except requests.RequestException as exc:
         status = getattr(getattr(exc, "response", None), "status_code", None)
         suffix = f" HTTP {status}" if isinstance(status, int) else ""

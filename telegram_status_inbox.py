@@ -135,6 +135,7 @@ def prepare(*, session=requests):
 def send(*, session=requests):
     messages = json.loads((ROOT/'reserved-replies.json').read_text(encoding='utf-8'))
     count = callback_count = callback_failures = 0
+    reply_message_ids = []
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     from telegram_notifications import _BOT_TOKEN
     if any(isinstance(m, dict) and m.get('kind') == 'callback_ack' for m in messages):
@@ -164,10 +165,13 @@ def send(*, session=requests):
     for message in messages:
         if isinstance(message, dict) and message.get('kind') == 'callback_ack':
             continue
-        send_telegram(**message)
+        receipt = send_telegram(**message)
+        if isinstance(receipt, dict) and type(receipt.get("message_id")) is int:
+            reply_message_ids.append(receipt["message_id"])
         count += 1
     print(json.dumps({'server_acks': count, 'callback_server_acks': callback_count,
                       'callback_receipt_failures': callback_failures,
+                      'reply_message_ids': reply_message_ids,
                       'phone_delivery_verified': False}))
 
 

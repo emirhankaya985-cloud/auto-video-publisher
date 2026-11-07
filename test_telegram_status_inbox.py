@@ -1,9 +1,11 @@
+import io
 import json
 import os
 import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from contextlib import redirect_stdout
 from unittest.mock import Mock, patch
 
 import telegram_status_inbox as inbox
@@ -81,7 +83,11 @@ class InboxTests(unittest.TestCase):
             sender_response = Mock(status_code=200)
             sender_response.json.return_value = {"ok": True, "result": True}
             session.post.return_value = sender_response
-            inbox.send(session=session)
+            sender.return_value = {"http_status": 200, "server_ack": True, "message_id": 321}
+            captured = io.StringIO()
+            with redirect_stdout(captured):
+                inbox.send(session=session)
+            self.assertEqual(json.loads(captured.getvalue())["reply_message_ids"], [321])
             session.post.assert_called_once()
             self.assertTrue(session.post.call_args.args[0].endswith("/answerCallbackQuery"))
             sender.assert_called_once()
