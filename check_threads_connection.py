@@ -3,6 +3,8 @@
 No media, container or publish requests. Logs never show access tokens.
 """
 import os
+import json
+from pathlib import Path
 
 from threads_accounts import THREADS_ROUTE_PREFIXES, threads_account_config
 from threads_publisher import validate_threads_identity
@@ -50,6 +52,7 @@ def main():
 
     routes = tuple(THREADS_ROUTE_PREFIXES) if selected == "all" else (selected,)
     failures = []
+    records = []
     for route in routes:
         try:
             identity = verify_route(route)
@@ -61,9 +64,23 @@ def main():
             safe_status = "; ".join(f"{key}={value}" for key, value in evidence.items())
             print(f"FAIL: route={route}; {safe_status}; no post.", flush=True)
             failures.append(route)
+            records.append({"route": route, "status": evidence["reason"],
+                            "http_status": evidence.get("http_status", "N/A"),
+                            "graph_code": evidence.get("graph_code", "N/A"),
+                            "identity_verified": False})
         else:
+            records.append({"route": route, "status": "verified",
+                            "identity_verified": True,
+                            "http_status": 200, "graph_code": "N/A"})
             print(f"PASS: route={route}, username=@{identity['username']}; no upload or post.", flush=True)
 
+    # Persist only allowlisted route names and numeric Graph status/code.
+    # A failing one-account login does not erase proof for other five.
+    report = {"status": "all_verified" if not failures else "partial_authorization",
+              "routes_checked": len(routes), "verified_routes": len(routes) - len(failures),
+              "accounts": records, "provider_posts": 0, "secret_values_exported": 0}
+    Path("threads-connection-readonly.json").write_text(
+        json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     if failures:
         raise RuntimeError("Threads read-only verification failed for routes: " + ", ".join(failures))
 
