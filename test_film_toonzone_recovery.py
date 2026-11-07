@@ -156,16 +156,15 @@ class FilmToonZoneRecoveryTests(unittest.TestCase):
                 self.assertEqual(state[f"{route}:facebook:clip"]["status"], "done")
                 self.assertIn("RECOVERY:", report)
 
-    def test_third_profile_is_bounded_and_non_audited_override_stays_blocked(self):
+    def test_no_fourth_try_and_no_non_audited_video_override(self):
         for route, filename in (
             ("film", "Yoksul_1986_Part_16.mp4"),
             ("toonzone", "S01E03_Caffeinated_Concert_Tickets_Part3.mp4"),
         ):
             plans, state, report = self._run(
                 route, filename, retry_count=2, run_id="40224351466")
-            self.assertEqual(len(plans), 1)
-            self.assertEqual(state[f"{route}:instagram:clip"]["status"], "intent")
-            self.assertEqual(state[f"{route}:instagram:clip"]["prepublish_retry_count"], 2)
+            self.assertEqual(plans, [])
+            self.assertEqual(state[f"{route}:instagram:clip"]["status"], "uncertain")
         wrong = {"status": "uncertain", "run_id": "40224351466",
                  "prepublish_retry_count": 1,
                  "failure": {"stage": "Instagram media_publish", "http_status": 400}}
