@@ -73,6 +73,31 @@ def verify_accepted(entry, *, channel_check=check_channel, youtube_build=build):
         return "youtube_read_or_auth_failed"
 
 
+def archived_youtube_upload_diagnostic(entry):
+    """Only classify already-recorded HTTP codes; do not imply safe reupload."""
+    result = {"category": "upload_error_unrecorded", "safe_to_reupload": False}
+    evidence = entry.get("upload_error") if isinstance(entry, dict) else None
+    if not isinstance(evidence, dict):
+        return result
+    status = evidence.get("http_status")
+    reasons = evidence.get("reasons")
+    if type(status) is int and 400 <= status <= 599:
+        result["http_status"] = status
+    if not isinstance(reasons, list) or any(not isinstance(r, str) for r in reasons):
+        reasons = []
+    if status == 403 and "forbidden" in reasons:
+        result["category"] = "youtube_insert_forbidden_permission_unresolved"
+    elif status in (401, 403) and ({"authError", "insufficientPermissions"} & set(reasons)):
+        result["category"] = "youtube_oauth_permission_unverified"
+    elif status == 403 and ("quotaExceeded" in reasons or "uploadLimitExceeded" in reasons):
+        result["category"] = "youtube_platform_quota_or_upload_limit"
+    elif status == 400:
+        result["category"] = "youtube_request_or_media_validation"
+    else:
+        result["category"] = "youtube_upload_error_needs_readonly_reconciliation"
+    return result
+
+
 def verify_uncertain(key, entry, *, channel_check=check_channel, youtube_build=build):
     """Find exact source-marker evidence using GETs; never release an intent.
 
@@ -80,7 +105,8 @@ def verify_uncertain(key, entry, *, channel_check=check_channel, youtube_build=b
     A unique match is evidence for later reconciliation, not a retry permit.
     """
     result = {"video_id": None, "status": "invalid_uncertain_source_binding",
-              "requires_reconciliation": True}
+              "requires_reconciliation": True,
+              "upload_diagnostic": archived_youtube_upload_diagnostic(entry)}
     route, source_id = entry.get("route"), entry.get("source_id")
     if (not isinstance(route, str) or route not in ROUTES
             or not isinstance(source_id, str) or not SOURCE_ID.fullmatch(source_id)
