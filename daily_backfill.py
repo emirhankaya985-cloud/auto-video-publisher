@@ -102,24 +102,20 @@ def main():
             continue
         for index in range(missing):
             os.environ["FORCE_ROUTE"] = route
-            # Yalnızca eksik sayılan platformu tamamla; diğer platformlarda
-            # gereksiz ve mükerrer gönderi oluşturma.
+            # Only the missing platform. A network exception after a POST is
+            # ambiguous; the legacy three-attempt loop could duplicate posts.
             os.environ["FORCE_PLATFORM"] = target_platform
             os.environ["FORCE_SLOT_SUFFIX"] = f"backfill-{now:%Y%m%d}-{index + 1}"
-            for attempt in range(1, 4):
-                try:
-                    run()
-                    break
-                except Exception as exc:
-                    print(
-                        f"{page_name} [{target_platform}] gönderi {index + 1}, "
-                        f"deneme {attempt} başarısız: {exc}",
-                        flush=True,
-                    )
-                    if attempt < 3:
-                        time.sleep(20 * attempt)
-            else:
+            try:
+                run()
+            except Exception:
+                # Preserve the original intent and let the next scheduled
+                # read-only platform history reconcile it. Never blindly retry.
                 failures.append(f"{page_name} [{target_platform}] gönderi {index + 1}")
+                print(f"{page_name} [{target_platform}] belirsiz/başarısız gönderi "
+                      f"{index + 1}: uzaktan geçmiş denetlenmeden POST tekrar edilmeyecek.",
+                      flush=True)
+                break
             time.sleep(5)
 
     if failures:
