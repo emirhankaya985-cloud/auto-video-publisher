@@ -304,6 +304,20 @@ class UploadErrorEvidenceTests(unittest.TestCase):
         self.assertNotIn('PRIVATE', json.dumps(first) + output.getvalue() + journal)
         return first, output.getvalue(), upload_calls
 
+    def test_permission_403_is_preserved_in_incident_journal_without_provider_body(self):
+        import publisher_error_journal
+        proof = bridge.sanitized_upload_error(self.error(self.body('forbidden')))
+        err = bridge.YouTubeUploadHttpEvidence(proof)
+        record = publisher_error_journal.error_event(
+            'youtube_publish', 'youtube_publication_unverified',
+            route='tarladaki', platform='youtube', error=err, status='uncertain')
+        self.assertEqual(record['http_status'], 403)
+        self.assertEqual(record['http_failure_class'], 'permission_denied')
+        self.assertEqual(record['meta_stage'], 'videos.insert_resumable')
+        self.assertEqual(record['outcome'], 'uncertain')
+        self.assertEqual(record['retry_policy'], 'never_blindly_retry_meta_post')
+        self.assertNotIn('PRIVATE', json.dumps(record))
+
     def test_actual_failed_upload_persists_sanitized_proof_uncertain_and_never_replays(self):
         saved, output, calls = self.run_failure('upload')
         self.assertEqual(saved['status'], 'uncertain')
