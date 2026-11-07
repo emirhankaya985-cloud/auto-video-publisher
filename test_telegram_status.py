@@ -29,6 +29,20 @@ class StatusTableTests(unittest.TestCase):
         self.assertIn('kota ve yayın sayısı N/A', table)
         self.assertNotIn('OddFrames      0/5', table)
 
+    def test_future_daily_slots_are_not_prematurely_reported_overdue(self):
+        early = datetime(2026, 11, 7, 2, 0, tzinfo=ZoneInfo('Europe/Istanbul'))
+        late = datetime(2026, 11, 7, 23, 50, tzinfo=ZoneInfo('Europe/Istanbul'))
+        state = {'entries': {}}
+        early_message = status_table(now=early, state=state)
+        late_message = status_table(now=late, state=state)
+        self.assertIn('Gec Bek Hata', early_message)
+        self.assertIn('Gec Bek Hata', late_message)
+        fasulye_early = next(r for r in early_message.splitlines() if 'Fasulye' in r and '0/5' in r)
+        fasulye_late = next(r for r in late_message.splitlines() if 'Fasulye' in r and '0/5' in r)
+        self.assertIn('  0   0', fasulye_early)
+        self.assertIn('  5   0', fasulye_late)
+        self.assertLess(len(early_message.encode('utf-16-le'))//2, 4096)
+
     def test_pending_failed_and_daily_laugh_previous_ny_day_are_visible(self):
         now = datetime(2026, 11, 7, 23, 42, tzinfo=ZoneInfo('Europe/Istanbul'))
         rows = {
