@@ -4,17 +4,25 @@ on:
   pull_request:
     paths:
       - youtube_readonly_connection.py
+      - youtube_account_inventory.py
+      - test_youtube_account_inventory.py
       - youtube_authorize_channel.py
       - test_youtube_authorize_channel.py
       - test_youtube_readonly_connection.py
+      - youtube_account_inventory.py
+      - test_youtube_account_inventory.py
       - .github/workflows/youtube_readonly_connection.yml
   push:
     branches: [main]
     paths:
       - youtube_readonly_connection.py
+      - youtube_account_inventory.py
+      - test_youtube_account_inventory.py
       - youtube_authorize_channel.py
       - test_youtube_authorize_channel.py
       - test_youtube_readonly_connection.py
+      - youtube_account_inventory.py
+      - test_youtube_account_inventory.py
       - .github/workflows/youtube_readonly_connection.yml
   workflow_dispatch:
     inputs:
@@ -42,10 +50,12 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install --require-hashes -r requirements.txt
-      - run: python -m unittest -v test_youtube_readonly_connection.py test_youtube_authorize_channel.py
+      - run: python -m unittest -v test_youtube_readonly_connection.py test_youtube_authorize_channel.py test_youtube_account_inventory.py
 
   google-readonly:
-    if: github.event_name == 'workflow_dispatch'
+    # PRs use mocked tests. Trusted main pushes check all four authorized
+    # Google channels without a videos.insert or a manual invocation.
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     needs: no-network-tests
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -55,7 +65,8 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install --require-hashes -r requirements.txt
-      - name: Read OAuth token and check YouTube channel identity (no upload)
+      - name: Read OAuth token and check one selected YouTube channel (no upload)
+        if: github.event_name == 'workflow_dispatch'
         env:
           YT_CONNECTION_TARGET: ${{ inputs.channel }}
           TOKEN_CHANNEL1_JSON: ${{ secrets.TOKEN_CHANNEL1_JSON }}
@@ -63,3 +74,19 @@ jobs:
           TOKEN_DAILY_LAUGH_LAB_JSON: ${{ secrets.TOKEN_DAILY_LAUGH_LAB_JSON }}
           TOKEN_GONLE_DUSEN_JSON: ${{ secrets.TOKEN_GONLE_DUSEN_JSON }}
         run: python youtube_readonly_connection.py "$YT_CONNECTION_TARGET"
+      - name: Verify all four exact YouTube identities on trusted main (GET only)
+        if: github.event_name == 'push'
+        env:
+          TOKEN_CHANNEL1_JSON: ${{ secrets.TOKEN_CHANNEL1_JSON }}
+          TOKEN_CHANNEL2_JSON: ${{ secrets.TOKEN_CHANNEL2_JSON }}
+          TOKEN_DAILY_LAUGH_LAB_JSON: ${{ secrets.TOKEN_DAILY_LAUGH_LAB_JSON }}
+          TOKEN_GONLE_DUSEN_JSON: ${{ secrets.TOKEN_GONLE_DUSEN_JSON }}
+        run: python youtube_account_inventory.py
+      - name: Preserve sanitized per-channel live result
+        if: always() && github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: youtube-four-channel-authorization-readonly
+          path: youtube-authorization-readonly.json
+          if-no-files-found: warn
+          retention-days: 30
