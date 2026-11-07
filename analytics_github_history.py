@@ -8,6 +8,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import tempfile
 import zipfile
 from pathlib import Path
 
@@ -20,8 +21,8 @@ HISTORY_FILE = "daily_video_views.jsonl"
 # The historical video ledger already exceeded 64 MiB in production (2026-11-08).
 # Keep a bounded, larger ceiling for both the compressed artifact and expanded
 # JSONL; do not silently replace or truncate an existing history on failure.
-MAX_DOWNLOAD_BYTES = 40 * 1024 * 1024
-MAX_ARCHIVE_BYTES = 256 * 1024 * 1024
+MAX_DOWNLOAD_BYTES = 128 * 1024 * 1024
+MAX_ARCHIVE_BYTES = 2 * 1024 * 1024 * 1024
 
 
 def restore_history(target: str | Path, *, token: str | None = None,
@@ -77,22 +78,38 @@ def restore_history(target: str | Path, *, token: str | None = None,
         result = get(archive_url, headers=headers, timeout=45, allow_redirects=True)
         if result.status_code != 200 or len(result.content) > MAX_DOWNLOAD_BYTES:
             raise RuntimeError("GitHub archive download unavailable")
-        with zipfile.ZipFile(io.BytesIO(result.content)) as archive:
-            names = archive.namelist()
-            if names != [HISTORY_FILE]:
-                raise RuntimeError("GitHub archive file layout invalid")
-            if archive.getinfo(HISTORY_FILE).file_size > MAX_ARCHIVE_BYTES:
-                raise RuntimeError("GitHub archive exceeds size limit")
-            raw = archive.read(HISTORY_FILE)
-        # Validate the structure before making any changes to the target.
-        if len(raw) > MAX_ARCHIVE_BYTES:
-            raise RuntimeError("GitHub archive exceeds size limit")
-        for line in raw.decode("utf-8").splitlines():
-            if line.strip() and not isinstance(json.loads(line), dict):
-                raise RuntimeError("GitHub archive history row invalid")
+        # Expand and verify line-by-line on disk. A 2 GiB JSONL history must
+        # never be materialized as one in-memory bytes object.
         target = Path(target)
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(raw)
+        temp_name = None
+        try:
+            with zipfile.ZipFile(io.BytesIO(result.content)) as archive:
+                names = archive.namelist()
+                if names != [HISTORY_FILE]:
+                    raise RuntimeError("GitHub archive file layout invalid")
+                info = archive.getinfo(HISTORY_FILE)
+                if info.file_size > MAX_ARCHIVE_BYTES:
+                    raise RuntimeError("GitHub archive exceeds size limit")
+                with tempfile.NamedTemporaryFile(
+                    mode="wb", prefix=".analytics-", dir=target.parent,
+                    delete=False
+                ) as tmp:
+                    temp_name = tmp.name
+                    expanded = 0
+                    with archive.open(info) as source:
+                        for line in source:
+                            expanded += len(line)
+                            if expanded > MAX_ARCHIVE_BYTES:
+                                raise RuntimeError("GitHub archive exceeds size limit")
+                            if line.strip() and not isinstance(json.loads(line), dict):
+                                raise RuntimeError("GitHub archive history row invalid")
+                            tmp.write(line)
+            os.replace(temp_name, target)
+            temp_name = None
+        finally:
+            if temp_name is not None:
+                os.unlink(temp_name)
         return {"status": "restored", "source_run": latest["workflow_run"]["id"]}
     except (requests.RequestException, ValueError, UnicodeError, KeyError,
             zipfile.BadZipFile, OSError, TypeError) as exc:
