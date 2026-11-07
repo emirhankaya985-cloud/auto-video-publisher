@@ -12,6 +12,7 @@ on:
       # One date-bound, owner-authorized catch-up; re-running never republishes.
       - 'docs/owner-authorized-catchup-2026-11-01.md'
       - 'docs/owner-authorized-catchup-2026-11-02.md'
+      - 'docs/owner-authorized-catchup-2026-11-07.md'
   schedule:
     # Normal checks every half hour; GitHub schedules may start late.
     - cron: '7,37 * * * *'
@@ -76,7 +77,7 @@ jobs:
       # Owner explicitly requested today's catch-up before the evening check.
       # Subsequent dates automatically return to the existing per-route times.
       COMPLETE_DAY_DATE: '2026-11-02'
-      CATCHUP_BATCH_DATE: '2026-11-02'
+      CATCHUP_BATCH_DATE: '2026-11-07'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
