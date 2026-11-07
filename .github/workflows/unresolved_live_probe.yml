@@ -5,6 +5,8 @@ on:
     paths:
       - 'unresolved_live_probe.py'
       - 'test_unresolved_live_probe.py'
+      - 'film_source_hash_probe.py'
+      - 'test_film_source_hash_probe.py'
       - 'publication_operations.py'
       - 'test_publication_operations.py'
       - '.github/workflows/unresolved_live_probe.yml'
@@ -30,7 +32,7 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install --require-hashes -r requirements.txt
       - run: python -m pip install gdown==6.4.2 pillow==13.0.0
-      - run: python -m unittest -v test_unresolved_live_probe test_publication_operations
+      - run: python -m unittest -v test_unresolved_live_probe test_publication_operations test_film_source_hash_probe
   measure:
     needs: tests
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && github.run_attempt == 1
@@ -48,6 +50,18 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
         run: python unresolved_live_probe.py
+      - name: Compare Film Drive bytes against exactly confirmed Meta post sources
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python film_source_hash_probe.py
+      - name: Preserve sanitized Film identity results, no posting
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: film-source-hash-readonly
+          path: film-source-hash-readonly.json
+          if-no-files-found: warn
+          retention-days: 30
       - name: Preserve read-only evidence or explicit failure
         if: always()
         uses: actions/upload-artifact@v4
