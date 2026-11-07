@@ -261,5 +261,62 @@ class ToonZoneBatchTests(unittest.TestCase):
                 json.loads((root / "alert-history.json").read_text()))["records"], {})
 
 
+    def test_missing_live_ids_are_collected_without_releasing_either_part(self):
+        items = target.selected(self.catalog())
+        entries = {}
+        for item in items[:2]:
+            entries[f"toonzone:instagram:{item['id']}"] = {
+                "route": "toonzone", "platform": "instagram",
+                "file": item["name"], "status": "done",
+                "post_id": str(18100000000000000 + item["part"]),
+            }
+        with self.assertRaises(target.MainPublisherLiveMissing) as raised:
+            target.main_publisher_posts(
+                items, [], {"schema": 1, "entries": entries})
+        self.assertEqual(
+            [(x["episode"], x["part"]) for x in raised.exception.records],
+            [(4, 1), (4, 2)],
+        )
+        self.assertEqual(raised.exception.records[0]["file"], items[0]["name"])
+
+    def test_live_mismatch_writes_nonpublish_evidence_artifact(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        import publisher_alert_history as history
+
+        items = target.selected(self.catalog())
+        first = items[0]
+        entries = {f"toonzone:instagram:{first['id']}": {
+            "route": "toonzone", "platform": "instagram",
+            "file": first["name"], "status": "done",
+            "post_id": "18100507712530539",
+        }}
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            with patch.object(target, "ROOT", root), \
+                 patch.object(target, "REPORT", root / "audit.json"), \
+                 patch.object(target, "page_for_toonzone", return_value={"page_id": "123"}), \
+                 patch.object(target, "instagram_identity", return_value=target.ACCOUNT_ID), \
+                 patch.object(target, "ordered_catalog", return_value=self.catalog()), \
+                 patch.object(history, "restore", return_value={"schema": 1, "records": {}}), \
+                 patch("public_link_runtime.inventory", return_value={}), \
+                 patch("public_link_runtime.graph_rows", return_value=[]), \
+                 patch("public_link_runtime.restore",
+                       return_value={"schema": 1, "entries": entries}), \
+                 patch("public_link_runtime.download_verified_publication_video",
+                       side_effect=AssertionError("not allowed to upload")):
+                with self.assertRaisesRegex(RuntimeError, "post_missing_from_live"):
+                    target.audit("987654", reserve=False)
+            report = json.loads((root / "audit.json").read_text())
+            self.assertEqual(report["status"], "held_live_history_mismatch")
+            self.assertFalse(report["publication_authorized"])
+            self.assertEqual(report["posts_created"], 0)
+            self.assertEqual(len(report["archived_ids_absent_from_list"]), 1)
+            self.assertEqual(report["archived_ids_absent_from_list"][0]["archived_post_id"],
+                             "18100507712530539")
+
+
+
 if __name__ == "__main__":
     unittest.main()
