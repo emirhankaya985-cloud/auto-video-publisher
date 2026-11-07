@@ -64,6 +64,15 @@ class ThreadsRotationTests(unittest.TestCase):
                 rotate("penguen", session=Mock(get=Mock(return_value=response)), persist=store)
         store.assert_not_called()
 
+    def test_missing_owner_secret_authority_is_blocked_not_green(self):
+        from threads_token_maintenance import main
+        env = {"GITHUB_REPOSITORY": "emirhankaya985-cloud/auto-video-publisher",
+               "GITHUB_REF": "refs/heads/main", "GITHUB_RUN_ATTEMPT": "1"}
+        with patch.dict(os.environ, env, clear=True), \
+             patch("threads_token_maintenance.rotate") as rotate:
+            self.assertEqual(main(), 2)
+            rotate.assert_not_called()
+
     def test_secret_store_refuses_non_owner_or_missing_pat(self):
         with patch.dict(os.environ, {"GITHUB_REPOSITORY": "untrusted/repo",
                                      "GITHUB_REF": "refs/heads/main",
