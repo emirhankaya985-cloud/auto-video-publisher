@@ -95,6 +95,68 @@ class OwnerCatchupGateTests(unittest.TestCase):
                 [OWNER_CATCHUP_MARKER]), "audit")
 
 
+    def test_nov7_one_shot_never_allows_rerun_or_nonowner_marker(self):
+        from publisher_one_shot_gate import (
+            NOV7_CATCHUP_MARKER, NOV7_CATCHUP_SUBJECT, is_nov7_catchup_push)
+        good = ("push", "refs/heads/main", NOV7_CATCHUP_SUBJECT,
+                [NOV7_CATCHUP_MARKER])
+        self.assertTrue(is_nov7_catchup_push(*good,
+                         today="2026-11-07", run_attempt="1"))
+        for day, attempt in (("2026-11-06", "1"), ("2026-11-08", "1"),
+                             ("2026-11-07", "2")):
+            with self.subTest(day=day, attempt=attempt):
+                self.assertFalse(is_nov7_catchup_push(*good,
+                                 today=day, run_attempt=attempt))
+        for event, ref, subject, paths in (
+            ("pull_request", good[1], good[2], good[3]),
+            ("push", "refs/heads/other", good[2], good[3]),
+            ("push", good[1], "any other commit", good[3]),
+            ("push", good[1], good[2], []),
+        ):
+            self.assertFalse(is_nov7_catchup_push(event, ref, subject, paths,
+                             today="2026-11-07", run_attempt="1"))
+
+    def test_nov7_push_is_publish_only_when_added_marker_and_attempt_one(self):
+        from publisher_one_shot_gate import (
+            NOV7_CATCHUP_MARKER, NOV7_CATCHUP_SUBJECT, main)
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.dict(os.environ, {'GITHUB_EVENT_NAME': 'push',
+                     'GITHUB_REF': 'refs/heads/main',
+                     'GITHUB_RUN_ATTEMPT': '1',
+                     'GITHUB_OUTPUT': str(Path(tmp)/'output')}, clear=True), \
+             patch('publisher_one_shot_gate._git',
+                   side_effect=[NOV7_CATCHUP_SUBJECT, NOV7_CATCHUP_MARKER, '']), \
+             patch('publisher_one_shot_gate.datetime') as clock:
+            clock.now.return_value.date.return_value.isoformat.return_value = '2026-11-07'
+            self.assertEqual(main(), 0)
+            self.assertIn('publish_allowed=true',
+                          (Path(tmp)/'output').read_text())
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.dict(os.environ, {'GITHUB_EVENT_NAME': 'push',
+                     'GITHUB_REF': 'refs/heads/main',
+                     'GITHUB_RUN_ATTEMPT': '2',
+                     'GITHUB_OUTPUT': str(Path(tmp)/'output')}, clear=True), \
+             patch('publisher_one_shot_gate._git',
+                   side_effect=[NOV7_CATCHUP_SUBJECT, NOV7_CATCHUP_MARKER, '']), \
+             patch('publisher_one_shot_gate.datetime') as clock:
+            clock.now.return_value.date.return_value.isoformat.return_value = '2026-11-07'
+            self.assertEqual(main(), 0)
+            self.assertIn('publish_allowed=false',
+                          (Path(tmp)/'output').read_text())
+
+    def test_nov7_only_uses_existing_verified_account_and_no_rights_bypass(self):
+        from publisher_one_shot_gate import NOV7_CATCHUP_MARKER
+        workflow = (Path(__file__).parent / '.github/workflows/public_link_schedule.yml').read_text()
+        self.assertIn(NOV7_CATCHUP_MARKER, workflow)
+        self.assertIn("CATCHUP_BATCH_DATE: '2026-11-07'", workflow)
+        self.assertIn("cron: '7,37 * * * *'", workflow)
+        self.assertIn("run: python meta_page_token_health.py", workflow)
+        self.assertIn("run: python public_link_runtime.py publish", workflow)
+        self.assertIn("Persist intent before any Meta upload", workflow)
+        self.assertIn("ENABLE_TOONZONE_ROUTES: ${{ vars.ENABLE_TOONZONE_ROUTES }}", workflow)
+        self.assertIn("FILM_RIGHTS_APPROVED: ${{ vars.FILM_RIGHTS_APPROVED }}", workflow)
+
+
 if __name__ == "__main__":
     unittest.main()
 
