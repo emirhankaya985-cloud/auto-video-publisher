@@ -32,6 +32,19 @@ class LiveProbeTests(unittest.TestCase):
                            "reason": "view_counter_unavailable"}])
         self.assertNotIn("PRIVATE_TOKEN_123", str(result))
 
+    def test_owner_seventh_account_is_explicitly_unconfigured_and_unmeasured(self):
+        known = list(stats_live_probe.stats_reporter.ACCOUNT_TARGETS)
+        report = Mock(comparison={"accounts": [
+            {"account": name, "platforms": [{"platform": "Instagram", "total": 0}]}
+            for name in known
+        ], "meta_collection": {}, "collection_errors": []})
+        coverage = stats_live_probe.summarize(report)["owner_account_coverage"]
+        self.assertEqual(coverage["expected_accounts"], 7)
+        self.assertEqual(coverage["configured_accounts"], 6)
+        self.assertEqual(coverage["measured_accounts"], 6)
+        self.assertEqual(coverage["unconfigured_accounts"], ["OddFrames"])
+        self.assertEqual(coverage["unmeasured_accounts"], ["OddFrames"])
+
     def test_no_report_fails_closed(self):
         with self.assertRaisesRegex(RuntimeError, "invalid_comparison"):
             stats_live_probe.summarize(Mock(comparison=None))
