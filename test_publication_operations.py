@@ -139,6 +139,54 @@ class OperationsTests(unittest.TestCase):
         self.assertEqual(state, before)
         self.assertFalse(result[0]['safe_to_repost'])
 
+    def test_source_evidence_separates_verified_cross_platform_bytes_from_ig_post(self):
+        from publication_operations import _caption_digest
+        sha = 'a' * 64
+        state = dict(schema=1, entries={
+            'new_ig': dict(entry(1, 'uncertain', post=''),
+                           source_sha256=sha, caption_hash=_caption_digest('original')),
+            'facebook_done': dict(entry(1, platform='facebook', post='12345'),
+                                  source_sha256=sha),
+        })
+        before = copy.deepcopy(state)
+        rows = audit_unresolved_remote(state, lambda *a: [])
+        self.assertEqual(len(rows), 1)
+        proof = rows[0]['source_evidence']
+        self.assertEqual(len(proof['entry_fingerprint']), 16)
+        self.assertTrue(proof['other_platform_exact_sha256_done'])
+        self.assertTrue(proof['source_sha256_present'])
+        self.assertFalse(rows[0]['safe_to_repost'])
+        self.assertEqual(rows[0]['reason'], 'not_observed_in_bounded_remote_history')
+        self.assertEqual(state, before)
+
+    def test_missing_source_digest_has_filename_clue_not_verified_bytes(self):
+        state = dict(schema=1, entries={
+            'unresolved': dict(entry(1, 'uncertain', post='')),
+            'facebook': entry(1, platform='facebook', post='12345'),
+        })
+        report = audit_unresolved_remote(state, lambda *a: [])
+        proof = report[0]['source_evidence']
+        self.assertFalse(proof['source_sha256_present'])
+        self.assertFalse(proof['other_platform_exact_sha256_done'])
+        self.assertTrue(proof['other_platform_filename_candidate'])
+        self.assertFalse(report[0]['safe_to_repost'])
+
+    def test_sibling_film_holds_are_not_misclassified_as_confirmed_posts(self):
+        sha = 'b' * 64
+        state = dict(schema=1, entries={
+            'film_first': dict(entry(1, 'held', post='', platform='facebook'),
+                               source_sha256=sha,
+                               failure={'reason': 'visual_duplicate_review'}),
+            'film_second': dict(entry(1, 'held', post='', route='film_second',
+                                    platform='facebook'), source_sha256=sha,
+                                failure={'reason': 'visual_duplicate_review'}),
+        })
+        rows = audit_unresolved_remote(state, lambda *a: [])
+        self.assertEqual(len(rows), 2)
+        self.assertTrue(all(row['source_evidence']['same_source_held_sibling_pages'] for row in rows))
+        self.assertTrue(all(row['reason'] == 'visual_duplicate_requires_owner_review' for row in rows))
+        self.assertTrue(all(not row['source_evidence']['other_platform_exact_sha256_done'] for row in rows))
+
     def test_unresolved_remote_audit_history_failure_never_becomes_absence(self):
         from publication_operations import _caption_digest as caption_key
         state = dict(schema=1, entries={
