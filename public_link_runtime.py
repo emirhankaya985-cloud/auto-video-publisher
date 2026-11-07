@@ -1618,6 +1618,11 @@ def plan(audit=False):
         out.write(summary)
 
 
+class MP4MissingMoov(RuntimeError):
+    """Source MP4 has no sample index. No Meta upload can repair its bytes."""
+    diagnostic_code = "missing_moov_atom"
+
+
 def verify_source_video(path):
     """Reject truncated or nonvideo MP4s before either Facebook or IG POST."""
     try:
@@ -1632,7 +1637,19 @@ def verify_source_video(path):
     except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
         raise RuntimeError("MP4 medya ön doğrulaması başarısız: " + type(exc).__name__) from None
     except Exception as exc:
-        # ffprobe process errors are handled like other local pre-upload errors.
+        # An actual ffprobe decode failure may be the MP4's missing moov
+        # index (confirmed for Daily Laugh 195.mp4). Distinguish it from
+        # transient tool errors WITHOUT reading or logging ffprobe stderr.
+        if type(exc).__name__ == "CalledProcessError":
+            try:
+                from instagram_media_compat import mp4_atom_structure
+                atoms = mp4_atom_structure(path)
+                if atoms["moov_offset"] is None:
+                    raise MP4MissingMoov("missing_moov_atom") from None
+            except MP4MissingMoov:
+                raise
+            except (OSError, ValueError, KeyError, TypeError):
+                pass
         raise RuntimeError("MP4 medya doğrulaması çalıştırılamadı: " + type(exc).__name__) from None
     return True
 
@@ -1824,6 +1841,9 @@ def publish():
                         status="ready",
                         failure={"reason": "source_or_cover_preparation_failed",
                                  "error_type": type(exc).__name__,
+                                 "media_diagnostic": ("missing_moov_atom"
+                                                      if isinstance(exc, MP4MissingMoov)
+                                                      else "N/A"),
                                  "safe_to_repost": True},
                     )
                 for platform in item["platforms"]:
