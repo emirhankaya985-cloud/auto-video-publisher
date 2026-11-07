@@ -52,6 +52,30 @@ def compare_film_sources(state, audit, *, catalog, digest):
             continue
         outcome = {"route": entry["route"], "platform": entry.get("platform"),
                    "finding": "requires_manual_source_review", "safe_to_repost": False}
+        if observation.get("reason") == "visual_duplicate_requires_owner_review":
+            # The old held intent has never sent a Meta POST. Identify the
+            # *already posted* source with matching three-frame fingerprint;
+            # this is a warning, not permission to relabel or republish it.
+            from media_similarity import conflicts
+            fingerprint = entry.get("visual_fingerprint")
+            source = source_id(key, entry)
+            if source and isinstance(fingerprint, dict):
+                matching = conflicts(state, route=entry["route"],
+                                     platform=entry["platform"],
+                                     source_id=source, fingerprint=fingerprint)
+                confirmed = []
+                for match_key in matching:
+                    previous = all_entries[match_key]
+                    if (previous.get("status") == "done"
+                            and previous.get("post_id")
+                            and isinstance(previous.get("file"), str)):
+                        # File basename only, never Drive IDs, Meta IDs or URLs.
+                        confirmed.append(Path(previous["file"]).name[:100])
+                if confirmed:
+                    outcome["finding"] = "visual_similarity_to_confirmed_other_source_still_held"
+                    outcome["matching_confirmed_files"] = sorted(set(confirmed))[:8]
+            results.append(outcome)
+            continue
         if observation.get("reason") != "caption_candidate_requires_source_proof":
             results.append(outcome)
             continue
