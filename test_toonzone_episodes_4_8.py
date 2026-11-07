@@ -414,5 +414,45 @@ class ToonZoneBatchTests(unittest.TestCase):
 
 
 
+    def test_positive_control_differentiates_unsupported_owner_from_id_failure(self):
+        from unittest.mock import Mock
+        with_owner = Mock(status_code=400)
+        with_owner.json.return_value = {
+            "error": {"code": 100, "message": "secret detailed error"}}
+        basic = Mock(status_code=200)
+        basic.json.return_value = {"id": "18000000000000001",
+                                   "media_type": "VIDEO"}
+        get = Mock(side_effect=[with_owner, basic])
+        result = target.individual_get_positive_control(
+            [{"id": "18000000000000001", "media_type": "VIDEO"}],
+            {"page_id": "1298191963387372", "page_token": "SECRET-TOKEN"},
+            get=get,
+        )
+        self.assertEqual(result["with_owner"]["status"], "read_rejected")
+        self.assertEqual(result["with_owner"]["graph_error_code"], 100)
+        self.assertEqual(result["basic"]["status"], "exact_id_readable")
+        self.assertEqual(get.call_count, 2)
+        self.assertIn("owner", get.call_args_list[0].kwargs["params"]["fields"])
+        self.assertNotIn("owner", get.call_args_list[1].kwargs["params"]["fields"])
+        self.assertNotIn("SECRET", repr(result))
+        with_owner.close.assert_called_once()
+        basic.close.assert_called_once()
+
+    def test_positive_control_rejects_wrong_id_and_handles_empty_list(self):
+        from unittest.mock import Mock
+        self.assertEqual(
+            target.individual_get_positive_control([], {"page_token": "SECRET"}),
+            {"status": "no_listed_media_for_control"})
+        response = Mock(status_code=200)
+        response.json.return_value = {"id": "999"}
+        get = Mock(return_value=response)
+        result = target.individual_get_positive_control(
+            [{"id": "181"}], {"page_token": "SECRET"}, get=get)
+        self.assertEqual(result["with_owner"]["status"], "returned_identity_mismatch")
+        self.assertEqual(result["basic"]["status"], "returned_identity_mismatch")
+        self.assertEqual(get.call_count, 2)
+
+
+
 if __name__ == "__main__":
     unittest.main()
