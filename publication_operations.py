@@ -165,13 +165,19 @@ def verify_publications_with_retry(state, run_id, read_history, *, sleep=time.sl
     return results
 
 
+def _caption_digest(value):
+    """Match publisher caption normalization without heavy media dependencies."""
+    value = re.sub(r"https://www\\.etsy\\.com/\\S+", "", value or "")
+    value = re.sub(r"\\bEtsy:\\s*", "", value, flags=re.I)
+    return hashlib.sha256(" ".join(value.split()).encode()).hexdigest()
+
+
 def audit_unresolved_remote(state, read_history):
     """GET-only candidate search; never resolves, mutates, or republishes an intent.
 
     A caption match is *not* a trustworthy source-video identity. A provider's
     bounded feed cannot prove a post is absent. Both conclusions remain held.
     """
-    from public_link_runtime import caption_key
     rows = [(key, row) for key, row in validate(state)['entries'].items()
             if row.get('status') in {'intent', 'uncertain', 'held'}]
     if len(rows) > 128:
@@ -212,7 +218,7 @@ def audit_unresolved_remote(state, read_history):
         else:
             matches = {str(item.get('id')) for item in cache[pair]
                        if str(item.get('id', '')).isdecimal()
-                       and caption_key(item.get('caption') or item.get('description') or '') == digest}
+                       and _caption_digest(item.get('caption') or item.get('description') or '') == digest}
             if len(matches) == 1:
                 entry['reason'] = 'caption_candidate_requires_source_proof'
                 entry['candidate_post_id'] = next(iter(matches))
