@@ -99,7 +99,7 @@ class OperationsTests(unittest.TestCase):
         self.assertEqual(calls, [('film', 'instagram')])
 
     def test_unresolved_remote_audit_never_resolves_by_caption_alone(self):
-        from public_link_runtime import caption_key
+        from publication_operations import _caption_digest as caption_key
         original = dict(schema=1, entries={
             'a': dict(entry(1, 'uncertain', post=''), caption_hash=caption_key('Exact caption')),
             'b': dict(entry(2, 'held', post=''), failure={'reason': 'visual_duplicate_review'}),
@@ -121,7 +121,7 @@ class OperationsTests(unittest.TestCase):
         self.assertEqual(original, before)
 
     def test_unresolved_remote_audit_history_failure_never_becomes_absence(self):
-        from public_link_runtime import caption_key
+        from publication_operations import _caption_digest as caption_key
         state = dict(schema=1, entries={
             'a': dict(entry(1, 'uncertain', post=''), caption_hash=caption_key('caption')),
             'b': dict(entry(2, 'uncertain', post=''), caption_hash=caption_key('caption'))})
