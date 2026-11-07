@@ -25,6 +25,8 @@ on:
       - 'instagram_media_compat.py'
       - 'test_instagram_media_compat.py'
       - 'publisher_recovery.py'
+      - 'daily_backfill.py'
+      - 'test_daily_backfill.py'
       - 'cloud_omnichannel_publisher.py'
       - 'meta_auth_loader.py'
       - 'publisher_error_journal.py'
