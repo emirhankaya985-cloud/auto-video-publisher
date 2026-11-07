@@ -11,6 +11,8 @@ on:
       - 'stats_live_probe.py'
       - 'stats_reporter.py'
       - 'test_stats_live_probe.py'
+      - 'analytics_github_history.py'
+      - 'test_analytics_github_history_limits.py'
       - '.github/workflows/stats_live_probe.yml'
   workflow_dispatch:
 permissions:
@@ -29,7 +31,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install --require-hashes -r requirements.txt
-      - run: python -m unittest -v test_stats_live_probe.py
+      - run: python -m unittest -v test_stats_live_probe.py test_analytics_github_history_limits.py
   measure:
     needs: tests
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
