@@ -37,6 +37,23 @@ def remote_evidence(state, pages, *, history_reader, status_reader):
     return audit_unresolved_remote(state, history, read_container=status)
 
 
+def summarize_film_blockers(rows):
+# Surface Film-specific blockers in public CI logs without exposing media
+# captions, Drive IDs, post IDs, token-bearing URLs, or changing the ledger.
+film_blockers = {}
+for route in ("film", "film_second"):
+    entries = [row for row in rows if row["route"] == route]
+    film_blockers[route] = {
+        "unresolved": len(entries),
+        "reasons": dict(Counter(row["reason"] for row in entries)),
+        "platforms": dict(Counter(row["platform"] for row in entries)),
+        "source_proof_required": sum(row["reason"] ==
+            "caption_candidate_requires_source_proof" for row in entries),
+        "safe_to_repost": False,
+    }
+    return film_blockers
+
+
 def main():
     if (os.getenv("GITHUB_REPOSITORY") != "emirhankaya985-cloud/auto-video-publisher"
             or os.getenv("GITHUB_REF") != "refs/heads/main"
@@ -65,19 +82,7 @@ def main():
 
     rows = remote_evidence(state, pages,
         history_reader=graph_rows, status_reader=container_status)
-    # Surface Film-specific blockers in public CI logs without exposing media
-    # captions, Drive IDs, post IDs, token-bearing URLs, or changing the ledger.
-    film_blockers = {}
-    for route in ("film", "film_second"):
-        entries = [row for row in rows if row["route"] == route]
-        film_blockers[route] = {
-            "unresolved": len(entries),
-            "reasons": dict(Counter(row["reason"] for row in entries)),
-            "platforms": dict(Counter(row["platform"] for row in entries)),
-            "source_proof_required": sum(row["reason"] ==
-                "caption_candidate_requires_source_proof" for row in entries),
-            "safe_to_repost": False,
-        }
+    film_blockers = summarize_film_blockers(rows)
     payload = {"run_id": os.getenv("GITHUB_RUN_ID"), "mode": "readonly",
                "source": "saved_GitHub_actions_publication_ledger",
                "previous_unresolved_count": len(rows),
