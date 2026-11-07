@@ -2,7 +2,7 @@
 import unittest
 from unittest.mock import patch
 
-from unresolved_live_probe import remote_evidence
+from unresolved_live_probe import remote_evidence, summarize_film_blockers
 from publication_operations import _caption_digest
 
 
@@ -36,6 +36,27 @@ class UnresolvedRemoteProbeTests(unittest.TestCase):
         self.assertFalse(rows[0]["safe_to_repost"])
         self.assertEqual(len(checks), 2)
         self.assertNotIn("private-token", str(rows))
+
+    def test_film_collision_counts_expose_no_identifiers(self):
+        rows = [
+            {"route": "film", "platform": "instagram",
+             "reason": "caption_candidate_requires_source_proof",
+             "candidate_post_id": "123456", "file": "private.mp4"},
+            {"route": "film", "platform": "facebook",
+             "reason": "visual_duplicate_requires_owner_review"},
+            {"route": "film_second", "platform": "facebook",
+             "reason": "not_observed_in_bounded_remote_history"},
+            {"route": "penguen", "platform": "instagram",
+             "reason": "caption_candidate_requires_source_proof"},
+        ]
+        summary = summarize_film_blockers(rows)
+        self.assertEqual(summary["film"]["unresolved"], 2)
+        self.assertEqual(summary["film"]["source_proof_required"], 1)
+        self.assertEqual(summary["film_second"]["unresolved"], 1)
+        self.assertFalse(summary["film"]["safe_to_repost"])
+        self.assertNotIn("123456", str(summary))
+        self.assertNotIn("private.mp4", str(summary))
+        self.assertNotIn("penguen", str(summary))
 
     def test_missing_page_is_unavailable_not_permission_to_repost(self):
         with patch("public_link_runtime.ROUTES", {"film": ("film", "Film Mağarası")}):
