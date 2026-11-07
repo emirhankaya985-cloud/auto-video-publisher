@@ -58,6 +58,27 @@ class FilmSourceProofTests(unittest.TestCase):
         self.assertNotIn("sensitive", str(rows))
         self.assertFalse(rows[0]["safe_to_repost"])
 
+    def test_film_visual_collision_names_prior_published_part_without_post(self):
+        state, audit, catalog = self.evidence()
+        entries = state["entries"]
+        old_id, new_id = list(entries)
+        old = entries[old_id]
+        new = entries[new_id]
+        old["file"] = "Bickin_Part_3.mp4"
+        new["file"] = "Bickin_Part_8 (1).mp4"
+        frame = {"version": 1, "duration_ms": 180118,
+                 "frames": ["00008f2763320000", "00001f4783b62300",
+                            "0000177706060000"]}
+        old["visual_fingerprint"] = frame
+        new["visual_fingerprint"] = frame
+        audit["rows"][0]["reason"] = "visual_duplicate_requires_owner_review"
+        rows = compare_film_sources(state, audit, catalog=catalog,
+                                    digest=lambda _: self.fail("must not fetch"))
+        self.assertEqual(rows[0]["matching_confirmed_files"], ["Bickin_Part_3.mp4"])
+        self.assertEqual(rows[0]["finding"], "visual_similarity_to_confirmed_other_source_still_held")
+        self.assertFalse(rows[0]["safe_to_repost"])
+        self.assertEqual(new["status"], "uncertain")
+
     def test_no_confirmed_post_does_not_download_media(self):
         state, audit, catalog = self.evidence()
         audit["rows"][0]["candidate_post_id"] = "999"
