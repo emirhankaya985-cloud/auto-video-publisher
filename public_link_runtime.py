@@ -1054,6 +1054,89 @@ def quarantined_unordered_local_failure(route, item, state, platforms, day):
     return True
 
 
+# The owner explicitly approved this one previously held, never-posted part.
+# This is NOT a global duplicate bypass. Exact bytes, route and part are bound.
+_OWNER_BICKIN8_NAME = "Bickin_Part_8 (1).mp4"
+_OWNER_BICKIN8_SHA256 = "2366ca629ae0a41577e4f89b36f07f3367937971de969a846abea9702f273813"
+
+
+def owner_approved_bickin8_local_hold(route, platform, item, entry, state):
+    """Allow retry planning only for the exact local-only Film Part 8 hold."""
+    if (route not in {"film", "film_second"}
+            or platform != "facebook"
+            or item.get("name") != _OWNER_BICKIN8_NAME
+            or entry.get("route") != route
+            or entry.get("platform") != platform
+            or entry.get("file") != _OWNER_BICKIN8_NAME
+            or entry.get("status") != "held"
+            or entry.get("source_sha256") != _OWNER_BICKIN8_SHA256):
+        return False
+    failure = entry.get("failure")
+    if (not isinstance(failure, dict)
+            or failure.get("reason") != "visual_duplicate_review"
+            or failure.get("external_post_attempted") is not False):
+        return False
+    # A confirmed Part 8 on this destination always takes precedence.
+    for prior in state.get("entries", {}).values():
+        if (not isinstance(prior, dict)
+                or prior.get("route") != route
+                or prior.get("platform") != platform
+                or prior.get("status") != "done"):
+            continue
+        if (film_canonical_part(prior.get("file", "")) ==
+                film_canonical_part(_OWNER_BICKIN8_NAME)):
+            return False
+    return True
+
+
+def approved_bickin8_visual_similarity_override(item, state, fingerprint):
+    """Ignore only weak visual similarity to *earlier verified parts*.
+
+    A previously posted identical source or any unresolved matching item holds
+    the publish. An owner-approved explicit Part 8 release must not become a
+    reusable general-purpose duplicate exemption.
+    """
+    if (item.get("route") not in {"film", "film_second"}
+            or item.get("name") != _OWNER_BICKIN8_NAME
+            or not isinstance(item.get("platforms"), list)
+            or not item["platforms"]):
+        return False
+    from media_similarity import conflicts
+    for platform in item["platforms"]:
+        if platform not in {"facebook", "instagram"}:
+            return False
+        key = f"{item['route']}:{platform}:{item['id']}"
+        entry = state.get("entries", {}).get(key)
+        if (not isinstance(entry, dict)
+                or entry.get("status") != "intent"
+                or entry.get("run_id") != os.getenv("GITHUB_RUN_ID")
+                or entry.get("file") != _OWNER_BICKIN8_NAME
+                or entry.get("source_sha256") != _OWNER_BICKIN8_SHA256):
+            return False
+        for other_key, other in state["entries"].items():
+            if (other_key == key or not isinstance(other, dict)
+                    or other.get("route") != item["route"]
+                    or other.get("platform") != platform
+                    or other.get("status") != "done"):
+                continue
+            if (other.get("source_sha256") == _OWNER_BICKIN8_SHA256
+                    or film_canonical_part(other.get("file", "")) ==
+                    film_canonical_part(_OWNER_BICKIN8_NAME)):
+                return False
+        similar_keys = conflicts(state, route=item["route"], platform=platform,
+                                 source_id=item["id"], fingerprint=fingerprint)
+        # Previous parts must be unequivocally published, with earlier part
+        # numbers. An uncertain source is never allowed through this override.
+        for other_key in similar_keys:
+            other = state["entries"][other_key]
+            old = parse_order(Path(other.get("file", "")).stem, "film")
+            new = parse_order(Path(_OWNER_BICKIN8_NAME).stem, "film")
+            if (other.get("status") != "done" or not old or not new
+                    or old >= new or not other.get("post_id")):
+                return False
+    return True
+
+
 def can_advance_past_local_visual_hold(route, entry):
     """Only an exact non-posted visual duplicate may be bypassed on unordered feeds."""
     if route not in {"tarladaki", "penguen", "gonle", "daily_laugh"}:
@@ -1469,6 +1552,13 @@ def plan(audit=False):
                         "RECOVERY: audited Avanak Apti Part 10 binary rejection; "
                         "one bounded 720p/96k attempt after remote reconciliation."
                     )
+                if (not audit and owner_approved_bickin8_local_hold(
+                        route, p, item, existing, state)):
+                    existing.update(status="ready", failure={
+                        "reason": "exact_owner_approved_local_visual_hold",
+                        "safe_to_repost": True,
+                        "external_post_attempted": False})
+                    report.append("RECOVERY: Bickin Part 8 local-only hold released on exact source SHA; remote history checked.")
                 if existing and existing.get("status") != "ready":
                     report.append(f"HELD: {item['name']} {p} has an uncertain previous intent.")
                     # A green GitHub run is NOT proof these queues are healthy.
@@ -1901,7 +1991,14 @@ def publish():
                 continue
             if source_fingerprint is not None:
                 from media_similarity import hold_visual_duplicate
-                if hold_visual_duplicate(item, state, source_fingerprint):
+                exact_owner_override = approved_bickin8_visual_similarity_override(
+                    item, state, source_fingerprint)
+                if exact_owner_override:
+                    for platform in item["platforms"]:
+                        state["entries"][f"{item['route']}:{platform}:{item['id']}"][
+                            "visual_fingerprint"] = source_fingerprint
+                    save(STATE, state)
+                elif hold_visual_duplicate(item, state, source_fingerprint):
                     # A potentially duplicated source is held for human review,
                     # never retried automatically. Preserve every prior post.
                     failures.append(item["page"] + ": visual duplicate held for review")
