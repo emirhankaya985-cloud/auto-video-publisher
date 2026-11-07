@@ -1,0 +1,43 @@
+name: OddFrames seventh account safe preflight (no publishing)
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 5 * * 1'
+  push:
+    branches: [main]
+    paths: ['oddframes_preflight.py', 'test_oddframes_preflight.py', '.github/workflows/oddframes_preflight.yml']
+  pull_request:
+    paths: ['oddframes_preflight.py', 'test_oddframes_preflight.py', '.github/workflows/oddframes_preflight.yml']
+permissions:
+  contents: read
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --require-hashes -r requirements.txt
+      - run: python -m unittest -v test_oddframes_preflight
+  audit:
+    needs: tests
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --require-hashes -r requirements.txt
+      - name: Check seventh account configuration and identity without writes
+        env:
+          META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+          ODDFRAMES_DRIVE_FOLDER_ID: ${{ vars.ODDFRAMES_DRIVE_FOLDER_ID }}
+          ODDFRAMES_PAGE_ID: ${{ vars.ODDFRAMES_PAGE_ID }}
+          ODDFRAMES_INSTAGRAM_ID: ${{ vars.ODDFRAMES_INSTAGRAM_ID }}
+          ENABLE_ODDFRAMES_ROUTES: ${{ vars.ENABLE_ODDFRAMES_ROUTES }}
+          ODDFRAMES_RIGHTS_APPROVED: ${{ vars.ODDFRAMES_RIGHTS_APPROVED }}
+        run: python oddframes_preflight.py
