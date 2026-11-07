@@ -16,7 +16,8 @@ from scheduled_multi_publisher import (TARLADAKI_HOURS, PENGUEN_HOURS, GONLE_HOU
 TR = ZoneInfo('Europe/Istanbul')
 NAMES = {'tarladaki': 'Fasulye', 'penguen': 'Penguen', 'gonle': 'Gönle Düşen',
          'daily_laugh': 'Daily Laugh', 'film': 'Film Mağarası',
-         'film_second': 'Film FB 2', 'toonzone': 'ToonZone'}
+         'film_second': 'Film FB 2', 'toonzone': 'ToonZone',
+         'oddframes': 'OddFrames'}
 FLAGS = ('LINK_AUTOMATION_ENABLED', 'ADAPTIVE_SCHEDULE_ENABLED',
          'ENABLE_TP_NORMAL_ROUTES', 'ENABLE_GONLE_NORMAL_ROUTES',
          'ENABLE_GONLE_INSTAGRAM_ROUTES', 'ENABLE_DAILY_LAUGH_NORMAL_ROUTES',
@@ -35,6 +36,12 @@ def status_table(*, now=None, state=None, configured=False):
     lines = ['Hesap          FB     IG    Ayar', '--------------------------------']
     hours = ['Hesap          Saatler (TR)', '--------------------------------']
     for route, name in NAMES.items():
+        if route == 'oddframes':
+            # Never infer a target/identity from another owner's Meta page.
+            # Its own preflight must pass before a real schedule can be added.
+            lines.append(f'{name:<14} {"N/A":<6} {"N/A":<5} Kapalı')
+            hours.append(f'{name:<14} Kimlik/hak bekleniyor')
+            continue
         clock = now.astimezone(ZoneInfo('America/New_York')) if route == 'daily_laugh' else now
         if route == 'toonzone':
             slots = [(12, m) for m in (0, 10, 20, 30)]
@@ -80,6 +87,7 @@ def status_table(*, now=None, state=None, configured=False):
             '<pre>' + escape('\n'.join(lines)) + '</pre>\n'
             '<b>Tanımlı yayın planı</b>\n<pre>' + escape('\n'.join(hours)) + '</pre>\n'
             'FB/IG: doğrulanmış yayın / günlük hedef. N/A: veri veya ayar okunamadı.\n'
+            'OddFrames: geçerli kimlik/hak verisi sağlanmadı, kota ve yayın sayısı N/A. '+
             'Saatler planı gösterir; hak, kaynak, kota ve tekrar kontrolleri yayını bekletebilir. '
             'Daily Laugh kendi New York gününü kullanır; saatleri TR’ye çevrildi. '
             '(+1)/(-1): rapor tarihine göre ertesi/önceki gün.\n'
