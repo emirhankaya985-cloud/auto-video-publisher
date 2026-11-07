@@ -20,6 +20,16 @@ class YouTubeVideoHeld(RuntimeError):
     """A verified GET cannot confirm this saved ID; never authorizes insert."""
 
 
+class YouTubeUploadHttpEvidence(RuntimeError):
+    """Only bounded numeric HTTP evidence; never carries provider exception text."""
+
+    def __init__(self, proof):
+        super().__init__("sanitized_youtube_upload_failure")
+        status = proof.get("http_status") if isinstance(proof, dict) else None
+        self.http_status = status if type(status) is int and 400 <= status <= 599 else None
+        self.stage = "videos.insert_resumable"
+
+
 HELD_VERIFICATIONS = {'video_unavailable', 'upload_failed', 'upload_rejected', 'upload_deleted'}
 UPLOAD_ERROR_CONTENT_LIMIT = 16_384
 # Canonical labels only: youtube/v3/docs/errors, youtube/v3/docs/videos/insert
@@ -327,9 +337,15 @@ def publish():
                               and prior_hold == entry.get('verification_status'))
             if not unchanged_hold:
                 failed = True
+                # The previous generic RuntimeError discarded a real 403,
+                # making API permission failures indistinguishable from media
+                # errors in the persistent incident journal. Retain only the
+                # sanitized HTTP status; never store Google's raw response.
+                journal_error = (YouTubeUploadHttpEvidence(upload_error)
+                                 if upload_error is not None else RuntimeError(type(exc).__name__))
                 record_error('youtube_publish', 'youtube_publication_unverified',
                              route=entry.get('route'), platform='youtube',
-                             error=RuntimeError(type(exc).__name__))
+                             error=journal_error, status=entry.get('status', ''))
             summary = {'platform': 'youtube', 'route': entry.get('route'),
                        'status': entry.get('status'), 'error_type': type(exc).__name__,
                        'verification_status': ('upload_unverified' if upload_error is not None else
