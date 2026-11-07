@@ -41,14 +41,14 @@ class DailyBackfillTests(unittest.TestCase):
         route = "tarladaki"
         page = {"page_id": "123", "page_token": "opaque", "instagram_id": "456"}
         with patch.dict(os.environ, {"BACKFILL_ROUTE": route, "BACKFILL_AUDIT_ONLY": "false",
-                                     "TARGET_PER_DAY": "3"}, clear=False), \\
-             patch.object(backfill, "TARGET_PER_DAY", 3), \\
-             patch.object(backfill, "meta_page", return_value=page), \\
-             patch.object(backfill, "facebook_posts_today", return_value=0), \\
-             patch.object(backfill, "instagram_posts_today", return_value=0), \\
-             patch.object(backfill, "route_paused", return_value=False), \\
-             patch.object(backfill, "run", side_effect=TimeoutError("ambiguous POST")) as publisher, \\
-             patch.object(backfill.time, "sleep") as sleep, \\
+                                     "TARGET_PER_DAY": "3"}, clear=False), \
+             patch.object(backfill, "TARGET_PER_DAY", 3), \
+             patch.object(backfill, "meta_page", return_value=page), \
+             patch.object(backfill, "facebook_posts_today", return_value=0), \
+             patch.object(backfill, "instagram_posts_today", return_value=0), \
+             patch.object(backfill, "route_paused", return_value=False), \
+             patch.object(backfill, "run", side_effect=TimeoutError("ambiguous POST")) as publisher, \
+             patch.object(backfill.time, "sleep") as sleep, \
              self.assertRaisesRegex(RuntimeError, "Tamamlanamayan"):
             backfill.main()
         publisher.assert_called_once()
@@ -57,10 +57,10 @@ class DailyBackfillTests(unittest.TestCase):
     def test_audit_only_cannot_post(self):
         import os
         import daily_backfill as backfill
-        with patch.dict(os.environ, {"BACKFILL_ROUTE": "tarladaki", "BACKFILL_AUDIT_ONLY": "true"}), \\
-             patch.object(backfill, "meta_page", return_value={}), \\
-             patch.object(backfill, "facebook_posts_today", return_value=0), \\
-             patch.object(backfill, "instagram_posts_today", return_value=0), \\
+        with patch.dict(os.environ, {"BACKFILL_ROUTE": "tarladaki", "BACKFILL_AUDIT_ONLY": "true"}), \
+             patch.object(backfill, "meta_page", return_value={}), \
+             patch.object(backfill, "facebook_posts_today", return_value=0), \
+             patch.object(backfill, "instagram_posts_today", return_value=0), \
              patch.object(backfill, "run") as publisher:
             backfill.main()
         publisher.assert_not_called()
