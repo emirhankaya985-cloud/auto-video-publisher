@@ -9,7 +9,7 @@ from pathlib import Path
 
 import requests
 
-from telegram_ai_worker import Worker, load_statistics, load_threads_statistics
+from telegram_ai_worker import Worker, load_statistics, load_threads_statistics, load_threads_status
 from telegram_notifications import send_telegram
 from telegram_status import status_table
 from publication_github_progress import restore_publication_state
@@ -95,9 +95,14 @@ def prepare(*, session=requests):
     def threads_statistics():
         return load_threads_statistics(session=session)
 
+    @cache
+    def threads_status():
+        return load_threads_status(session=session)
+
     worker = Worker(str(database), sender=reserve, status_loader=status,
                     statistics_loader=statistics,
                     threads_statistics_loader=threads_statistics,
+                    threads_status_loader=threads_status,
                     callback_ack=reserve_callback_ack)
     (ROOT/'checkpoint-ready').write_text('valid', encoding='utf-8')
     try:
