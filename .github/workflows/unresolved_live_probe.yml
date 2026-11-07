@@ -15,6 +15,8 @@ on:
     paths:
       - 'unresolved_live_probe.py'
       - 'test_unresolved_live_probe.py'
+      - 'film_source_hash_probe.py'
+      - 'test_film_source_hash_probe.py'
       - 'publication_operations.py'
       - 'test_publication_operations.py'
       - '.github/workflows/unresolved_live_probe.yml'

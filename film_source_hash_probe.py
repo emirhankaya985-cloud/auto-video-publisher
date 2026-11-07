@@ -76,14 +76,35 @@ def compare_film_sources(state, audit, *, catalog, digest):
             outcome["finding"] = "source_catalog_identity_unverified"
             results.append(outcome)
             continue
+        # Persisted digests were measured from the exact original Drive bytes.
+        # They can avoid downloading large copies when *both* are present.
+        def trusted_sha(value):
+            return value if isinstance(value, str) and re.fullmatch(
+                r"[0-9a-f]{64}", value) else None
+
+        saved_a, saved_b = (trusted_sha(entry.get("source_sha256")),
+                            trusted_sha(other.get("source_sha256")))
+        if saved_a is not None and saved_b is not None:
+            outcome["finding"] = (
+                "identical_recorded_sha256_no_repost"
+                if saved_a == saved_b
+                else "different_recorded_sha256_still_held"
+            )
+            results.append(outcome)
+            continue
         try:
+            hash_a = saved_a or digest(a)
+            hash_b = saved_b or digest(b)
             outcome["finding"] = (
                 "identical_bytes_to_confirmed_post_no_repost"
-                if digest(a) == digest(b)
+                if hash_a == hash_b
                 else "different_bytes_from_confirmed_post_still_held"
             )
-        except Exception:
+        except Exception as exc:
             outcome["finding"] = "source_download_or_digest_unavailable"
+            # Only a Python exception class; never emit untrusted provider
+            # URLs, filenames, response bodies or access tokens.
+            outcome["failure_type"] = type(exc).__name__
         results.append(outcome)
     return results
 
