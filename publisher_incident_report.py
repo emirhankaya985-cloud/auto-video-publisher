@@ -94,6 +94,24 @@ def build_incident_report(state, run_id, *, plan_text="", errors=None, step_outc
         and row.get("status") in ("intent", "uncertain", "held")
         and str(row.get("run_id", "")) != str(run_id)
     ]
+    # Old "previous_unreconciled_intents" included local visual-duplicate
+    # holds that explicitly prove NO provider POST was attempted. Keep the
+    # legacy total field for existing consumers but expose precise categories:
+    # an ambiguous POST MUST be checked against remote history, while a
+    # local-only duplicate is correctly blocked and must never be resubmitted.
+    remote_reconciliation = [
+        row for row in previous_held
+        if row.get("status") in ("intent", "uncertain")
+    ]
+    known_nonposted_visual_holds = [
+        row for row in previous_held
+        if row.get("status") == "held"
+        and isinstance(row.get("failure"), dict)
+        and row["failure"].get("reason") == "visual_duplicate_review"
+        and row["failure"].get("external_post_attempted") is False
+        and row["failure"].get("safe_to_repost") is False
+    ]
+    other_held = len(previous_held) - len(remote_reconciliation) - len(known_nonposted_visual_holds)
     safe_routes = {"tarladaki", "penguen", "gonle", "daily_laugh",
                    "film", "film_second", "toonzone"}
     previous_held_routes = dict(Counter(
@@ -109,8 +127,16 @@ def build_incident_report(state, run_id, *, plan_text="", errors=None, step_outc
         "safe_pre_upload_retries": counts["ready"],
         "held_for_review": counts["held"],
         "uncertain_pending_reconciliation": counts["intent"] + counts["uncertain"],
+        # Legacy count is all prior pending/held rows, not necessarily POSTs.
         "previous_unreconciled_intents": len(previous_held),
         "previous_unreconciled_by_route": previous_held_routes,
+        "previous_remote_reconciliation_required": len(remote_reconciliation),
+        "previous_known_nonposted_visual_holds": len(known_nonposted_visual_holds),
+        "previous_other_review_holds": other_held,
+        "previous_ambiguous_by_route": dict(Counter(
+            row.get("route") if row.get("route") in safe_routes else "unknown"
+            for row in remote_reconciliation
+        )),
         "incidents": incidents, "planning_blocker_counts": blockers,
         "all_error_events": events, "error_event_count": len(events),
         "step_outcomes": outcomes,
@@ -140,6 +166,9 @@ def main():
     print(json.dumps({key: summary[key] for key in ("run_id", "confirmed_new_posts",
                       "unverified_done_entries", "safe_pre_upload_retries", "uncertain_pending_reconciliation",
                       "previous_unreconciled_intents", "previous_unreconciled_by_route",
+                      "previous_remote_reconciliation_required",
+                      "previous_known_nonposted_visual_holds", "previous_other_review_holds",
+                      "previous_ambiguous_by_route",
                       "planning_blocker_counts", "error_event_count", "step_outcomes",
                       "state_available")},
                      ensure_ascii=False), flush=True)
