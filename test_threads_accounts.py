@@ -143,11 +143,24 @@ class ThreadsAccountsTests(unittest.TestCase):
         self.assertEqual(result["graph_code"], 190)
         self.assertEqual(result["reason"], "threads_token_reauthorization_required")
         self.assertNotIn("PRIVATE", str(result))
-        self.assertNotIn("463", str(result))
+        self.assertEqual(result["graph_subcode"], 463)
         response = Mock(status_code=503)
         response.json.return_value = {"error": {"code": 190}}
         self.assertEqual(safe_provider_failure(HTTPError(response=response))["reason"],
                          "connection_or_identity_unverified")
+
+    def test_graph_subcode_is_bounded_and_provider_body_never_logged(self):
+        from check_threads_connection import safe_provider_failure
+        from requests import HTTPError
+        from unittest.mock import Mock
+        for value in (True, -1, 0, 100000, "463", None):
+            response = Mock(status_code=401)
+            response.json.return_value = {"error": {"code": 190, "error_subcode": value,
+                                                    "message": "SECRET_PROVIDER_MESSAGE"}}
+            proof = safe_provider_failure(HTTPError("SECRET_TOKEN", response=response))
+            self.assertNotIn("graph_subcode", proof)
+            self.assertEqual(proof["graph_code"], 190)
+            self.assertNotIn("SECRET", str(proof))
 
     @patch("check_threads_connection.validate_threads_identity")
     def test_all_route_audit_reports_failed_identity_and_checks_others(self, validate):

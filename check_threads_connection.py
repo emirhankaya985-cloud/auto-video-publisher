@@ -25,6 +25,10 @@ def safe_provider_failure(exc):
             code = error.get("code") if isinstance(error, dict) else None
             if type(code) is int and 1 <= code <= 9999:
                 result["graph_code"] = code
+            # Numeric only: never disclose Graph provider messages or tokens.
+            subcode = error.get("error_subcode") if isinstance(error, dict) else None
+            if type(subcode) is int and 1 <= subcode <= 99999:
+                result["graph_subcode"] = subcode
         except Exception:
             pass
     if result.get("http_status") == 401 and result.get("graph_code") == 190:
@@ -67,11 +71,13 @@ def main():
             records.append({"route": route, "status": evidence["reason"],
                             "http_status": evidence.get("http_status", "N/A"),
                             "graph_code": evidence.get("graph_code", "N/A"),
+                            "graph_subcode": evidence.get("graph_subcode", "N/A"),
                             "identity_verified": False})
         else:
             records.append({"route": route, "status": "verified",
                             "identity_verified": True,
-                            "http_status": 200, "graph_code": "N/A"})
+                            "http_status": 200, "graph_code": "N/A",
+                            "graph_subcode": "N/A"})
             print(f"PASS: route={route}, username=@{identity['username']}; no upload or post.", flush=True)
 
     # Persist only allowlisted route names and numeric Graph status/code.
