@@ -20,6 +20,13 @@ TODAY_CATCHUP_MARKER = "docs/owner-authorized-catchup-2026-11-02.md"
 TODAY_CATCHUP_SUBJECT = "ops: owner-authorized-catchup-2026-11-02"
 TODAY_CATCHUP_DATE = "2026-11-02"
 
+# Owner explicitly authorized eligible, rights-gated missing posts on Nov 7.
+# A unique, ADDED marker commit on main only; never retroactively re-run.
+NOV7_CATCHUP_MARKER = "docs/owner-authorized-catchup-2026-11-07.md"
+NOV7_CATCHUP_SUBJECT = "ops: owner-authorized-once-meta-catchup-2026-11-07"
+NOV7_CATCHUP_DATE = "2026-11-07"
+
+
 
 def is_owner_catchup_push(event, ref, subject, added_paths, *, today=None, run_attempt=None):
     """One day, one commit, first attempt only; never publish on CI PR or rerun."""
@@ -50,6 +57,18 @@ def is_today_catchup_push(event, ref, subject, added_paths, *, today=None, run_a
             and str(run_attempt) == "1")
 
 
+def is_nov7_catchup_push(event, ref, subject, added_paths, *, today=None, run_attempt=None):
+    """One rights-gated due-slot catch-up. A rerun or later date is audit-only."""
+    if today is None:
+        today = datetime.now(timezone(timedelta(hours=3))).date().isoformat()
+    if run_attempt is None:
+        run_attempt = os.getenv("GITHUB_RUN_ATTEMPT", "1")
+    return (event == "push" and ref == "refs/heads/main"
+            and subject == NOV7_CATCHUP_SUBJECT
+            and NOV7_CATCHUP_MARKER in added_paths
+            and today == NOV7_CATCHUP_DATE and str(run_attempt) == "1")
+
+
 def is_v4_recovery_push(event, ref, subject, added_paths):
     return (event == "push" and ref == "refs/heads/main"
             and subject == IG_V4_SUBJECT
@@ -73,7 +92,8 @@ def determine_mode(event, ref, subject="", added_paths=(), requested_mode="audit
         rescue = is_ig_rescue_push(event, ref, subject, added_paths)
         v4 = is_v4_recovery_push(event, ref, subject, added_paths)
         catchup = (is_owner_catchup_push(event, ref, subject, added_paths)
-                   or is_today_catchup_push(event, ref, subject, added_paths))
+                   or is_today_catchup_push(event, ref, subject, added_paths)
+                   or is_nov7_catchup_push(event, ref, subject, added_paths))
         return "publish" if normal or rescue or v4 or catchup else "audit"
     return "audit"
 
