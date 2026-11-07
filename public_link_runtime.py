@@ -1047,6 +1047,21 @@ def quarantined_unordered_local_failure(route, item, state, platforms, day):
     return True
 
 
+def can_advance_past_local_visual_hold(route, entry):
+    """Only an exact non-posted visual duplicate may be bypassed on unordered feeds."""
+    if route not in {"tarladaki", "penguen", "gonle", "daily_laugh"}:
+        return False
+    if not isinstance(entry, dict) or entry.get("status") != "held":
+        return False
+    proof = entry.get("failure")
+    return (isinstance(proof, dict) and proof.get("reason") == "visual_duplicate_review"
+            and proof.get("external_post_attempted") is False
+            and proof.get("safe_to_repost") is False
+            and isinstance(proof.get("conflicting_platforms"), list)
+            and bool(proof["conflicting_platforms"])
+            and all(p in {"facebook", "instagram"} for p in proof["conflicting_platforms"]))
+
+
 def prioritized_route_items(day):
     """Move rights-approved serial routes first only during today's owner catch-up."""
     items = list(ROUTES.items())
@@ -1443,7 +1458,8 @@ def plan(audit=False):
                     # A green GitHub run is NOT proof these queues are healthy.
                     # Once per Istanbul day while still blocked, emit an
                     # actionable alert without retrying the Meta POST.
-                    if not audit and previous_intent_alert_due(existing, now):
+                    if (not audit and not can_advance_past_local_visual_hold(route, existing)
+                            and previous_intent_alert_due(existing, now)):
                         record_error("previous_intent_hold", "unreconciled_previous_intent",
                                      route=route, platform=p, video=item["name"],
                                      status="uncertain")
@@ -1454,6 +1470,13 @@ def plan(audit=False):
                         # both platforms. No retry, resume or intent deletion.
                         skip_unproven_candidate = True
                         report.append("QUARANTINE: exact unresolved humor source; look for another unique clip.")
+                    elif can_advance_past_local_visual_hold(route, existing):
+                        # Humor accounts also have no serial predecessor. A
+                        # fingerprint-confirmed local-only duplicate must not
+                        # block their next independent item indefinitely.
+                        # Preserve the original held row and every real post.
+                        skip_unproven_candidate = True
+                        report.append("QUARANTINE: proven local-only visual duplicate; look for next unique clip.")
                     elif (source in {"gonle", "daily_laugh"}
                             and existing.get("status") == "held"
                             and (existing.get("failure") or {}).get("external_post_attempted") is False):
