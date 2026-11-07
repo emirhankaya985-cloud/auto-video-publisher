@@ -38,6 +38,18 @@ class OperationsTests(unittest.TestCase):
         self.assertEqual(attempts, ['instagram', 'facebook', 'instagram'])
         self.assertEqual(delays, [5])
 
+    def test_youtube_failure_does_not_hide_meta_publication_evidence(self):
+        # YouTube is a separate provider: its failed upload cannot fail the
+        # Meta job, but the raw step outcome must remain in the incident ledger.
+        workflow = Path(".github/workflows/public_link_schedule.yml").read_text(encoding="utf-8")
+        step = workflow.split("      - name: Publish planned YouTube videos with archived intent", 1)[1]
+        step = step.split("      - name: Back up state and verify current-run posts", 1)[0]
+        self.assertIn("id: youtube_publish", step)
+        self.assertIn("continue-on-error: true", step)
+        self.assertIn("run: python youtube_main_bridge.py publish", step)
+        self.assertIn("OUTCOME_YOUTUBE_PUBLISH: ${{ steps.youtube_publish.outcome }}", workflow)
+        self.assertIn("OUTCOME_PUBLISH: ${{ steps.publish.outcome }}", workflow)
+
     def test_platform_isolation_and_gap(self):
         state = dict(schema=1, entries={'a': entry(1), 'b': entry(3),
                      'c': entry(2, platform='facebook')})
