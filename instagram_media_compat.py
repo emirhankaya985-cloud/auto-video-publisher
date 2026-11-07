@@ -306,6 +306,34 @@ def _transcode_recovery_v3(source, output):
         raise RuntimeError("IG kontrollü 720p kurtarma dönüşümü başarısız.") from None
 
 
+def _transcode_recovery_v4(source, output):
+    """Final bounded alternate: full-length 480x854, 25fps H.264/AAC.
+
+    Different from compact 360x640 and v3 720x1280. This only prepares
+    local media; caller must recheck actual remote history before any POST.
+    """
+    command = [
+        "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
+        "-i", str(source), "-map", "0:v:0", "-map", "0:a:0?",
+        "-vf", "scale=480:854:force_original_aspect_ratio=decrease,"
+               "pad=480:854:(ow-iw)/2:(oh-ih)/2:black,setsar=1",
+        "-r", "25", "-fps_mode", "cfr",
+        "-c:v", "libx264", "-profile:v", "main", "-level:v", "3.1",
+        "-preset", "veryfast", "-b:v", "900k", "-maxrate", "1200k",
+        "-bufsize", "2400k", "-pix_fmt", "yuv420p", "-g", "50",
+        "-c:a", "aac", "-profile:a", "aac_low", "-b:a", "96k",
+        "-ar", "44100", "-ac", "2",
+        "-movflags", "+faststart", "-use_editlist", "0",
+        "-avoid_negative_ts", "make_zero", "-tag:v", "avc1",
+        "-map_metadata", "-1", str(output),
+    ]
+    try:
+        subprocess.run(command, check=True, capture_output=True, text=True, timeout=900)
+    except (OSError, subprocess.SubprocessError):
+        Path(output).unlink(missing_ok=True)
+        raise RuntimeError("IG kontrollü 480p kurtarma dönüşümü başarısız.") from None
+
+
 def create_diagnostic_clip(source, output, duration_seconds=15):
     """Create a short, standards-compliant temporary clip for upload-only diagnosis."""
     try:
@@ -452,13 +480,17 @@ def _validate_remux_timing(source_media, output_media):
 def prepare_instagram_upload(
     source, converted_path, prefer_remux=False, film_compact=False,
     toonzone_compact=False, return_method=False, force_transcode=False,
-    recovery_v3=False, short_reel=False,
+    recovery_v3=False, recovery_v4=False, short_reel=False,
 ):
     """Return the original if compliant; otherwise convert and verify before upload."""
     source = Path(source)
     converted_path = Path(converted_path)
     compact_profile = film_compact or toonzone_compact
-    if short_reel and (compact_profile or recovery_v3):
+    if recovery_v3 and recovery_v4:
+        raise ValueError('Recovery profiles are mutually exclusive')
+    if recovery_v4 and (compact_profile or not force_transcode):
+        raise ValueError('IG v4 requires forced noncompact encoding')
+    if short_reel and (compact_profile or recovery_v3 or recovery_v4):
         raise ValueError("Short-Reel first pass cannot combine recovery profiles")
     if short_reel:
         force_transcode = True
@@ -475,6 +507,9 @@ def prepare_instagram_upload(
         original_issues = ["FFprobe kaynağı okuyamadı"]
     if recovery_v3 and (not force_transcode or compact_profile):
         raise ValueError("IG v3 recovery requires forced and noncompact encoding")
+    if recovery_v4:
+        original_issues.append('IG recovery v4: 480p/96k AAC re-encode')
+        original_ok = False
     if recovery_v3:
         original_issues.append("IG recovery v3: 720p/96k AAC re-encode")
         original_ok = False
@@ -534,7 +569,9 @@ def prepare_instagram_upload(
                 f"{_media_summary(normalized_probe)}).", flush=True,
             )
             return (normalized, "transcode") if return_method else normalized
-    if recovery_v3:
+    if recovery_v4:
+        _transcode_recovery_v4(source, converted_path)
+    elif recovery_v3:
         _transcode_recovery_v3(source, converted_path)
     elif compact_profile:
         _transcode_film_compact(source, converted_path)
@@ -556,7 +593,7 @@ def prepare_instagram_upload(
     # Full decoding catches malformed packets/audio timestamps that ffprobe
     # metadata checks alone miss. Forced short-Reels uploads fail *before*
     # any Meta POST rather than burning a real binary upload on bad media.
-    if compact_profile or recovery_v3 or force_transcode:
+    if compact_profile or recovery_v3 or recovery_v4 or force_transcode:
         check_full_decode(converted_path)
     converted_hash = _sha256(converted_path) if converted_path.exists() else "unavailable"
     print(
