@@ -40,7 +40,7 @@ def youtube_forbidden_circuit_evidence(state, route):
     ledger = state.get("youtube_entries")
     if not isinstance(ledger, dict):
         return "youtube_ledger_unavailable"
-    from youtube_main_bridge import repeated_youtube_insert_forbidden
+    from youtube_permission_circuit import repeated_youtube_insert_forbidden
     return ("held_after_consecutive_insert_403_forbidden"
             if repeated_youtube_insert_forbidden(ledger, route)
             else "no_consecutive_forbidden_evidence")
