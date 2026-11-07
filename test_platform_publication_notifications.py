@@ -63,6 +63,21 @@ class PlatformNotificationTests(unittest.TestCase):
         self.assertIn(("threads", "film"), sources)
         self.assertEqual(failures, {"threads:penguen": "read_failed_http_401"})
 
+    def test_provider_error_codes_are_sanitized_without_retry_or_secrets(self):
+        response = Mock(status_code=401)
+        response.json.return_value = {"error": {"code": 190,
+                                  "message": "access_token=PRIVATE_SECRET"}}
+        exc = RuntimeError("private")
+        exc.response = response
+        self.assertEqual(notices.safe_read_error(exc), "read_failed_http_401_code_190")
+        response.status_code = 400
+        response.json.return_value = {"error": {"code": 100, "message": "signed url private"}}
+        self.assertEqual(notices.safe_read_error(exc), "read_failed_http_400_code_100")
+        response.json.return_value = {"error": {"code": 999, "message": "private"}}
+        self.assertEqual(notices.safe_read_error(exc), "read_failed_http_400")
+        response.json.side_effect = ValueError("private JSON")
+        self.assertEqual(notices.safe_read_error(exc), "read_failed_http_400")
+
     def test_threads_uses_verified_account_and_refuses_injected_permalink(self):
         response = Mock()
         response.json.return_value = {"data": [
