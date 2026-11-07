@@ -79,14 +79,49 @@ class ToonZoneBatchTests(unittest.TestCase):
                  patch("public_link_runtime.inventory", side_effect=lambda x: cover_files if x == FOLDERS["covers"] else {}), \
                  patch("public_link_runtime.graph_rows", return_value=[]), \
                  patch("public_link_runtime.download", side_effect=download_cover), \
+                 patch("public_link_runtime.download_verified_publication_video", side_effect=download_cover), \
                  patch("public_link_runtime.probe", return_value={"streams": [{"codec_type": "video", "width": 720}]}):
                 result = target.audit("20261106", reserve=True)
             validated = history.validate(json.loads((folder / "alert-history.json").read_text()))
             self.assertEqual(result["prepared_parts"], 20)
             self.assertEqual(len(validated["records"]), 20)
+            self.assertEqual(result["source_files_verified"], 20)
+            self.assertTrue(all(len(row["source_sha256"]) == 64 for row in validated["records"].values()))
             self.assertTrue(all(record["last_seen"].endswith("+00:00")
                                 for record in validated["records"].values()))
             self.assertEqual(len(json.loads((folder / "plan.json").read_text())["plans"]), 20)
+
+    def test_last_source_failure_stops_full_preflight_without_mutating_catalog(self):
+        from pathlib import Path
+        rows = target.selected(self.catalog())
+        calls = []
+        def source_read(identity, path):
+            calls.append(identity)
+            if len(calls) == 20:
+                raise RuntimeError("source_unreadable")
+            Path(path).write_bytes(identity.encode())
+            return Path(path)
+        with patch("public_link_runtime.download_verified_publication_video", side_effect=source_read), \
+             self.assertRaisesRegex(RuntimeError, "source_unreadable"):
+            target.preflight_sources(rows)
+        self.assertEqual(len(calls), 20)
+        self.assertTrue(all("source_sha256" not in row for row in rows))
+
+    def test_replaced_source_or_missing_reserved_hash_cannot_reach_upload(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "source.mp4"
+            source.write_bytes(b"approved source")
+            expected = target.digest(source)
+            item, record = {"source_sha256": expected}, {"source_sha256": expected}
+            target.verify_reserved_source(source, item, record)
+            source.write_bytes(b"replaced under same Drive ID")
+            with self.assertRaisesRegex(RuntimeError, "source_changed"):
+                target.verify_reserved_source(source, item, record)
+            with self.assertRaisesRegex(RuntimeError, "source_changed"):
+                target.verify_reserved_source(source, item, {})
+            self.assertEqual(record["source_sha256"], expected)
 
     def test_artifact_contract_persists_exact_history_member_separately(self):
         from pathlib import Path
@@ -96,6 +131,17 @@ class ToonZoneBatchTests(unittest.TestCase):
         self.assertIn("name: toonzone-4-8-summary", content)
         self.assertEqual(content.count("path: toonzone-4-8-runtime/alert-history.json"), 2)
         self.assertNotIn("toonzone-4-8-runtime/history.json", content)
+
+    def test_release_shares_normal_publisher_lock_and_keeps_rights_gates(self):
+        from pathlib import Path
+        import yaml
+        release = yaml.safe_load(Path(".github/workflows/toonzone_episodes_4_8.yml").read_text())
+        normal = yaml.safe_load(Path(".github/workflows/public_link_schedule.yml").read_text())
+        job = release["jobs"]["publish"]
+        self.assertEqual(job["concurrency"]["group"], normal["concurrency"]["group"])
+        self.assertIs(job["concurrency"]["cancel-in-progress"], False)
+        self.assertIn("vars.TOONZONE_RIGHTS_APPROVED == 'true'", job["if"])
+        self.assertIn("github.run_attempt == 1", job["if"])
 
     def test_release_needs_archived_intent_before_any_api_write(self):
         with patch.dict(os.environ, {"TOONZONE_INTENT_ARCHIVED": "false"}, clear=True), \
