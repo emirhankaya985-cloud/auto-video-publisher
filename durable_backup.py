@@ -7,6 +7,7 @@ import io
 import json
 import os
 import tempfile
+from datetime import datetime, timezone
 import zipfile
 from pathlib import Path
 
@@ -15,13 +16,40 @@ from publication_operations import validate
 FOLDER = 'Auto Video Publisher Recovery Backups'
 MARKER = 'publisher-recovery-v1'
 MAX_BYTES = 50 * 1024 * 1024
+# Never serialize OAuth, API or private-key material into a recovery archive.
+SENSITIVE_FIELD_PARTS = (
+    'accesstoken', 'refreshtoken', 'clientsecret', 'privatekey',
+    'apikey', 'password', 'authorization', 'credential',
+    'secret', 'token', 'cookie', 'webhook',
+)
+
+
+def reject_credentials(value):
+    """Fail closed on credential-shaped fields; preserve intact ledger data."""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            compact = ''.join(c for c in str(key).lower() if c.isalnum())
+            if any(part in compact for part in SENSITIVE_FIELD_PARTS):
+                raise ValueError('backup contains sensitive credential field')
+            reject_credentials(item)
+    elif isinstance(value, list):
+        for item in value:
+            reject_credentials(item)
+    elif isinstance(value, str):
+        if (value.startswith(('ghp_', 'github_pat_', 'ya29.', 'Bearer ', 'sk-'))
+                or '-----BEGIN PRIVATE KEY-----' in value):
+            raise ValueError('backup contains sensitive credential value')
 
 
 def bundle(state, history):
     validate(state)
+    reject_credentials(state)
     for line in history.decode('utf-8').splitlines():
-        if line.strip() and not isinstance(json.loads(line), dict):
-            raise ValueError('invalid analytics history')
+        if line.strip():
+            row = json.loads(line)
+            if not isinstance(row, dict):
+                raise ValueError('invalid analytics history')
+            reject_credentials(row)
     files = {'state.json': json.dumps(state, ensure_ascii=False).encode('utf-8'),
              'daily_video_views.jsonl': history}
     manifest = {'schema': 1, 'files': {name: {'sha256': hashlib.sha256(raw).hexdigest(),
@@ -56,10 +84,15 @@ def unpack(data):
         proof = manifest['files'][name]
         if proof.get('bytes') != len(raw) or proof.get('sha256') != hashlib.sha256(raw).hexdigest():
             raise ValueError('backup integrity failure')
-    validate(json.loads(files['state.json']))
+    state = json.loads(files['state.json'])
+    validate(state)
+    reject_credentials(state)
     for line in files['daily_video_views.jsonl'].decode('utf-8').splitlines():
-        if line.strip() and not isinstance(json.loads(line), dict):
-            raise ValueError('invalid archived history')
+        if line.strip():
+            row = json.loads(line)
+            if not isinstance(row, dict):
+                raise ValueError('invalid archived history')
+            reject_credentials(row)
     return files
 
 
@@ -132,6 +165,30 @@ def persist(drive, data, *, media_factory=None):
             'parents': [folder_id], 'appProperties': {'sha256': digest}},
             media_body=media_factory(io.BytesIO(data), mimetype='application/zip', resumable=False),
             fields='id').execute()['id']
+    # Verify the real remote identity, content address, creation time and privacy
+    # even when the digest matches a previously uploaded file.
+    metadata = drive.files().get(
+        fileId=file_id, fields='id,mimeType,parents,createdTime,appProperties').execute()
+    if (not isinstance(metadata, dict) or metadata.get('id') != file_id
+            or metadata.get('mimeType') != 'application/zip'
+            or folder_id not in metadata.get('parents', [])
+            or (metadata.get('appProperties') or {}).get('sha256') != digest):
+        raise ValueError('remote backup metadata mismatch')
+    file_created_at = metadata.get('createdTime')
+    try:
+        parsed_time = datetime.fromisoformat(file_created_at.replace('Z', '+00:00'))
+        if parsed_time.tzinfo is None:
+            raise ValueError('timezone required')
+    except (AttributeError, ValueError, TypeError):
+        raise ValueError('remote backup creation time missing') from None
+    permissions = drive.permissions().list(
+        fileId=file_id, fields='permissions(type,role)').execute()
+    if (not isinstance(permissions, dict) or
+            not isinstance(permissions.get('permissions'), list) or
+            not permissions['permissions'] or
+            any(p.get('type') != 'user' or p.get('role') != 'owner'
+                for p in permissions['permissions'])):
+        raise ValueError('remote backup file is shared or privacy unverified')
     # Always download the actual remote file. Metadata alone is not acceptance.
     downloaded = drive.files().get_media(fileId=file_id).execute()
     if not isinstance(downloaded, bytes) or hashlib.sha256(downloaded).hexdigest() != digest:
@@ -141,7 +198,9 @@ def persist(drive, data, *, media_factory=None):
         if json.loads((restored / 'state.json').read_bytes()) != json.loads(unpack(data)['state.json']):
             raise ValueError('restore mismatch')
     return dict(status='verified', file_id=file_id, sha256=digest,
-                bytes=len(data), downloaded=True, isolated_restore_verified=True)
+                bytes=len(data), file_created_at=file_created_at,
+                verified_at=datetime.now(timezone.utc).isoformat(),
+                downloaded=True, isolated_restore_verified=True)
 
 
 def main():
