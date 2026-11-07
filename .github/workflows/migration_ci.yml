@@ -19,6 +19,8 @@ on:
       - 'test_owner_daily_quota.py'
       - 'test_telegram_threads_stats.py'
       - 'test_telegram_status_inbox.py'
+      - 'test_daily_stats_schedule.py'
+      - '.github/workflows/daily_stats.yml'
       - 'tracked_meta_routes.py'
       - 'public_link_health.py'
       - 'public_link_runtime.py'
@@ -66,6 +68,8 @@ jobs:
           python -m pip install PyYAML==6.0.2 gdown==6.4.2 pillow==13.0.0
       - name: Python regression tests without production credentials
         run: python migration_985_tests.py
+      - name: Daily 23:59 TRT schedule and backup-order regression
+        run: python -m unittest -v test_daily_stats_schedule.py
       - name: Scheduler regression tests with mocked APIs
         run: node --test test/cloudflare_scheduler.test.mjs
   setup-status:
