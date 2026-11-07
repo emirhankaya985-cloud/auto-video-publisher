@@ -120,6 +120,25 @@ class OperationsTests(unittest.TestCase):
         self.assertEqual(reads, [('film', 'instagram')])
         self.assertEqual(original, before)
 
+    def test_unresolved_container_probe_preserves_original_intent(self):
+        from publication_operations import _caption_digest
+        state = dict(schema=1, entries={'x': dict(entry(1, 'uncertain', post=''),
+                      caption_hash=_caption_digest('Original'),
+                      failure={'reason': 'invalid_media_or_graph_request',
+                               'container_id': '1234567890'})})
+        before = copy.deepcopy(state)
+        probes = []
+        def status(route, container):
+            probes.append((route, container))
+            return 'IN_PROGRESS'
+        result = audit_unresolved_remote(state, lambda *args: [],
+                                         read_container=status)
+        self.assertEqual(result[0]['existing_container_phase'], 'IN_PROGRESS')
+        self.assertEqual(result[0]['reason'], 'not_observed_in_bounded_remote_history')
+        self.assertEqual(probes, [('film', '1234567890')])
+        self.assertEqual(state, before)
+        self.assertFalse(result[0]['safe_to_repost'])
+
     def test_unresolved_remote_audit_history_failure_never_becomes_absence(self):
         from publication_operations import _caption_digest as caption_key
         state = dict(schema=1, entries={
