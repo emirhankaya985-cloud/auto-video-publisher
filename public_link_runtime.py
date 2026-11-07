@@ -1454,6 +1454,18 @@ def plan(audit=False):
                         # both platforms. No retry, resume or intent deletion.
                         skip_unproven_candidate = True
                         report.append("QUARANTINE: exact unresolved humor source; look for another unique clip.")
+                    elif (route in {"tarladaki", "penguen", "gonle", "daily_laugh"}
+                            and existing.get("status") == "held"
+                            and isinstance(existing.get("failure"), dict)
+                            and existing["failure"].get("reason") == "visual_duplicate_review"
+                            and existing["failure"].get("external_post_attempted") is False
+                            and existing["failure"].get("safe_to_repost") is False):
+                        # Humor accounts also have no serial predecessor. A
+                        # fingerprint-confirmed local-only duplicate must not
+                        # block their next independent item indefinitely.
+                        # Preserve the original held row and every real post.
+                        skip_unproven_candidate = True
+                        report.append("QUARANTINE: proven local-only visual duplicate; look for next unique clip.")
                     elif (source in {"gonle", "daily_laugh"}
                             and existing.get("status") == "held"
                             and (existing.get("failure") or {}).get("external_post_attempted") is False):
