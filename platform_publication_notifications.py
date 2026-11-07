@@ -153,8 +153,22 @@ def collect(cutoff):
 
 
 def safe_read_error(exc):
-    status = getattr(getattr(exc, "response", None), "status_code", None)
-    return f"read_failed_http_{status}" if type(status) is int and 400 <= status <= 599 else "read_failed"
+    """Expose only recognized HTTP/Graph numeric codes, never provider text."""
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    if type(status) is not int or not 400 <= status <= 599:
+        return "read_failed"
+    label = f"read_failed_http_{status}"
+    if status in (400, 401, 403):
+        try:
+            payload = response.json()
+        except (ValueError, TypeError, AttributeError):
+            payload = None
+        error = payload.get("error") if isinstance(payload, dict) else None
+        code = error.get("code") if isinstance(error, dict) else None
+        if type(code) is int and code in (10, 100, 190, 200):
+            label += f"_code_{code}"
+    return label
 
 
 def reserve_notices(history, sources, run_id, now):
