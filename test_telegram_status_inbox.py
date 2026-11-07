@@ -56,10 +56,9 @@ class InboxTests(unittest.TestCase):
             with sqlite3.connect(Path(temp)/'telegram.sqlite3') as db:
                 self.assertEqual(db.execute("SELECT value FROM state WHERE key='offset'").fetchone()[0], '7')
             inbox.send()
+            from telegram_notifications import STATISTICS_KEYBOARD
             send.assert_called_once_with(title='📊 İstatistik', message='Son arşiv ölçümü',
-                                         reply_markup={
-                                             'keyboard': [[{'text': '📊 İstatistik'}], [{'text': '🧵 Threads İstatistik'}]],
-                                             'resize_keyboard': True, 'is_persistent': True})
+                                         reply_markup=STATISTICS_KEYBOARD)
 
     def test_inline_callback_is_reserved_before_API_ack_and_without_replay(self):
         update = {"update_id": 10, "callback_query": {
