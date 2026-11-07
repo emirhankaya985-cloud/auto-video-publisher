@@ -5,12 +5,11 @@ permissions:
   actions: read
 
 on:
-  # GitHub cron UTC kullanır: 20:00 UTC = 23:00 TRT.
-  # GitHub scheduled jobs can start late; a 59-minute buffer reduces
-  # post-midnight snapshots that cannot support prior-day growth.
-  # Actual measured_at is always reported; never fabricate a midnight snapshot.
+  # GitHub cron UTC kullanır: 20:59 UTC = 23:59 TRT.
+  # GitHub scheduled jobs can start late; actual measured_at is reported.
+  # Never fabricate a midnight snapshot.
   schedule:
-    - cron: '0 20 * * *'
+    - cron: '59 20 * * *'
   workflow_dispatch:
   # One-time live verification only when the unique audit marker lands on main.
   push:
