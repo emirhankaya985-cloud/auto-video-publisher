@@ -208,6 +208,7 @@ def audit(state, *, verifier=verify_accepted, uncertain_verifier=verify_uncertai
                          and key == f"{route}:{source_id}")
             results.append({
                 **result,
+                "ledger_status": "uncertain",
                 "route": route if isinstance(route, str) and route in ROUTES else "unknown",
                 "ledger_key": key if bound_key else None,
                 "source_id": source_id if valid_source else None,
@@ -217,6 +218,7 @@ def audit(state, *, verifier=verify_accepted, uncertain_verifier=verify_uncertai
             continue
         reason = verifier(entry)
         results.append({
+            "ledger_status": entry["status"],
             "route": entry.get("route") if entry.get("route") in ROUTES else "unknown",
             "video_id": entry.get("post_id") if isinstance(entry.get("post_id"), str)
                         and VIDEO_ID.fullmatch(entry["post_id"]) else None,
@@ -231,6 +233,26 @@ def audit(state, *, verifier=verify_accepted, uncertain_verifier=verify_uncertai
         "uncertain_marker_public_processed_verified": sum(
             x["status"] == "uncertain_marker_public_processed_verified" for x in results),
         "public_processed_verified": confirmed,
+        "accepted_public_processed_verified": sum(
+            x["ledger_status"] == "accepted" and x["status"] == "public_processed_verified"
+            for x in results),
+        "accepted_processing_or_visibility_pending": sum(
+            x["ledger_status"] == "accepted"
+            and x["status"] == "youtube_processing_or_visibility_pending"
+            for x in results),
+        "accepted_not_public_or_unavailable": sum(
+            x["ledger_status"] == "accepted"
+            and x["status"] not in ("public_processed_verified",
+                                    "youtube_processing_or_visibility_pending")
+            for x in results),
+        "uncertain_marker_not_found": sum(
+            x["ledger_status"] == "uncertain"
+            and x["status"] == "uncertain_marker_not_found" for x in results),
+        "uncertain_insert_403_forbidden": sum(
+            x["ledger_status"] == "uncertain"
+            and x.get("upload_diagnostic", {}).get("category")
+              == "youtube_insert_forbidden_permission_unresolved"
+            for x in results),
         "unverified": len(results) - confirmed,
         "posts": results,
         "uploads_attempted": 0,
