@@ -47,11 +47,25 @@ def summarize(report):
                 })
     if len(missing_counters) > 64:
         raise RuntimeError("invalid_metric_coverage")
+    # Owner-listed accounts absent from the configured collector must never
+    # silently disappear from a green metrics probe.
+    expected_accounts = tuple(stats_reporter.ACCOUNT_TARGETS) + ("OddFrames",)
+    measured_names = {item.get("account") for item in accounts
+                      if isinstance(item, dict) and isinstance(item.get("account"), str)}
+    owner_coverage = {
+        "expected_accounts": len(expected_accounts),
+        "configured_accounts": len(stats_reporter.ACCOUNT_TARGETS),
+        "measured_accounts": len(set(expected_accounts) & measured_names),
+        "unconfigured_accounts": [name for name in expected_accounts
+                                  if name not in stats_reporter.ACCOUNT_TARGETS],
+        "unmeasured_accounts": [name for name in expected_accounts if name not in measured_names],
+    }
     meta = comparison.get("meta_collection")
     return {
         "status": "measured_partial_or_complete",
         "measurement_at": comparison.get("measured_at"),
         "account_count": len(accounts),
+        "owner_account_coverage": owner_coverage,
         "counts": counts,
         "missing_view_counters": missing_counters,
         "meta_collection": meta if isinstance(meta, dict) else {"status": "unverified"},
