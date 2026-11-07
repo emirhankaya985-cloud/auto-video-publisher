@@ -1047,6 +1047,21 @@ def quarantined_unordered_local_failure(route, item, state, platforms, day):
     return True
 
 
+def can_advance_past_local_visual_hold(route, entry):
+    """Only an exact non-posted visual duplicate may be bypassed on unordered feeds."""
+    if route not in {"tarladaki", "penguen", "gonle", "daily_laugh"}:
+        return False
+    if not isinstance(entry, dict) or entry.get("status") != "held":
+        return False
+    proof = entry.get("failure")
+    return (isinstance(proof, dict) and proof.get("reason") == "visual_duplicate_review"
+            and proof.get("external_post_attempted") is False
+            and proof.get("safe_to_repost") is False
+            and isinstance(proof.get("conflicting_platforms"), list)
+            and bool(proof["conflicting_platforms"])
+            and all(p in {"facebook", "instagram"} for p in proof["conflicting_platforms"]))
+
+
 def prioritized_route_items(day):
     """Move rights-approved serial routes first only during today's owner catch-up."""
     items = list(ROUTES.items())
@@ -1454,12 +1469,7 @@ def plan(audit=False):
                         # both platforms. No retry, resume or intent deletion.
                         skip_unproven_candidate = True
                         report.append("QUARANTINE: exact unresolved humor source; look for another unique clip.")
-                    elif (route in {"tarladaki", "penguen", "gonle", "daily_laugh"}
-                            and existing.get("status") == "held"
-                            and isinstance(existing.get("failure"), dict)
-                            and existing["failure"].get("reason") == "visual_duplicate_review"
-                            and existing["failure"].get("external_post_attempted") is False
-                            and existing["failure"].get("safe_to_repost") is False):
+                    elif can_advance_past_local_visual_hold(route, existing):
                         # Humor accounts also have no serial predecessor. A
                         # fingerprint-confirmed local-only duplicate must not
                         # block their next independent item indefinitely.
