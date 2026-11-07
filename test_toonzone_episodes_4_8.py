@@ -143,6 +143,19 @@ class ToonZoneBatchTests(unittest.TestCase):
         self.assertIn("vars.TOONZONE_RIGHTS_APPROVED == 'true'", job["if"])
         self.assertIn("github.run_attempt == 1", job["if"])
 
+    def test_audit_authorization_only_after_both_release_gates(self):
+        for reserve, env, expected in (
+            (False, {"TOONZONE_RIGHTS_APPROVED": "true",
+                     "TOONZONE_RELEASE_4_8": "true"}, False),
+            (True, {}, False),
+            (True, {"TOONZONE_RIGHTS_APPROVED": "true"}, False),
+            (True, {"TOONZONE_RELEASE_4_8": "true"}, False),
+            (True, {"TOONZONE_RIGHTS_APPROVED": "true",
+                    "TOONZONE_RELEASE_4_8": "true"}, True),
+        ):
+            with self.subTest(reserve=reserve, env=env):
+                self.assertIs(target.release_authorized(reserve, environ=env), expected)
+
     def test_release_needs_archived_intent_before_any_api_write(self):
         with patch.dict(os.environ, {"TOONZONE_INTENT_ARCHIVED": "false"}, clear=True), \
              self.assertRaisesRegex(RuntimeError, "not_archived"):
