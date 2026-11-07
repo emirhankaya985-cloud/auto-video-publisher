@@ -1951,6 +1951,7 @@ def publish():
                             not alternate_compact_profile
                             and not short_recovery_v3
                             and not gonle_alt_vertical
+                            and not (retry_count == 2 and item["route"] in {"film", "film_second", "toonzone"})
                             and (item["route"] in {"film", "film_second", "gonle"}
                                  or retry_count > 0)
                         ),
