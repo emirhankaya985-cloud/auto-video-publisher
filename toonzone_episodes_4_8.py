@@ -108,6 +108,13 @@ def verify_reserved_source(source, item, record):
         raise RuntimeError("source_changed_since_preflight")
 
 
+def release_authorized(reserve, *, environ=None):
+    """Only claim approval after BOTH owner-controlled gates are verified."""
+    env = os.environ if environ is None else environ
+    return bool(reserve and env.get("TOONZONE_RIGHTS_APPROVED") == "true"
+                and env.get("TOONZONE_RELEASE_4_8") == "true")
+
+
 def audit(run_id, *, reserve=False):
     from public_link_runtime import FOLDERS, inventory, graph_rows, download, probe
     page = page_for_toonzone()
@@ -148,7 +155,7 @@ def audit(run_id, *, reserve=False):
               "prepared_parts": len(prepared), "exact_covers_verified": len(prepared),
               "source_files_verified": len(prepared),
               "instagram_identity_verified": True, "live_history_read": True,
-              "publication_authorized": reserve,
+              "publication_authorized": release_authorized(reserve),
               "posts_created": 0}
     ROOT.mkdir(exist_ok=True)
     history.save(REPORT, report)
