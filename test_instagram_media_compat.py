@@ -134,6 +134,20 @@ class InstagramMediaCompatibilityTests(unittest.TestCase):
             self.assertIn("open_gop=0", " ".join(command))
         self.assertEqual(command[command.index("-b:a") + 1], "112k")
 
+    def test_final_480p_recovery_is_distinct_and_requires_safe_gate(self):
+        from instagram_media_compat import _transcode_recovery_v4
+        with patch("instagram_media_compat.subprocess.run") as run:
+            _transcode_recovery_v4(Path("source.mp4"), Path("output.mp4"))
+        command = run.call_args.args[0]
+        self.assertIn("480:854", " ".join(command))
+        self.assertIn("900k", command)
+        self.assertIn("+faststart", command)
+        with self.assertRaisesRegex(ValueError, "forced noncompact"):
+            prepare_instagram_upload("source.mp4", "output.mp4", recovery_v4=True)
+        with self.assertRaisesRegex(ValueError, "mutually exclusive"):
+            prepare_instagram_upload("source.mp4", "output.mp4",
+                                     force_transcode=True, recovery_v4=True, recovery_v3=True)
+
     def test_film_compact_command_matches_successful_full_length_profile(self):
         with patch("instagram_media_compat.subprocess.run") as run:
             _transcode_film_compact(Path("source.mp4"), Path("output.mp4"))
