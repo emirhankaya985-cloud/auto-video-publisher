@@ -113,6 +113,77 @@ def main_publisher_posts(items, live, state):
 
 
 
+
+def individual_get_positive_control(live, page, *, get=None):
+    """Test the exact per-ID Graph query against a confirmed listed IG video.
+
+    If the positive control also fails, old ID failures do not diagnose
+    deletion. Compare the full query with the same safe query minus owner
+    to distinguish an unsupported field from a token/read-scope failure.
+    No publication endpoints are used. Never emit provider error messages.
+    """
+    import requests
+    from cloud_omnichannel_publisher import GRAPH_API_VERSION
+    from publisher_recovery import read_with_retry
+
+    get = get or requests.get
+    if not isinstance(live, list) or not live:
+        return {"status": "no_listed_media_for_control"}
+    known = str(live[0].get("id") or "")
+    if not known.isdecimal():
+        return {"status": "invalid_listed_media_identity"}
+    if not isinstance(page, dict) or not page.get("page_token"):
+        return {"status": "page_token_missing"}
+    outcome = {"listed_media_id": known, "status": "tested"}
+    variants = (
+        ("with_owner", "id,caption,media_type,permalink,timestamp,owner"),
+        ("basic", "id,caption,media_type,permalink,timestamp"),
+    )
+    for label, fields in variants:
+        response = None
+        detail = {"status": "unavailable"}
+        try:
+            response = read_with_retry(
+                get, f"https://graph.facebook.com/{GRAPH_API_VERSION}/{known}",
+                headers={"Authorization": "Bearer " + page["page_token"]},
+                params={"fields": fields}, timeout=25,
+                allow_redirects=False, graph_read=True,
+            )
+            http = getattr(response, "status_code", None)
+            detail["http_status"] = http if type(http) is int else None
+            try:
+                body = response.json()
+            except (ValueError, TypeError, AttributeError):
+                body = None
+            if isinstance(body, dict):
+                error = body.get("error")
+                code = error.get("code") if isinstance(error, dict) else None
+                if type(code) is int:
+                    detail["graph_error_code"] = code
+                if http == 200 and str(body.get("id") or "") == known:
+                    detail["status"] = "exact_id_readable"
+                    owner = body.get("owner")
+                    owner_id = str(owner.get("id") or "") if isinstance(owner, dict) else str(owner or "")
+                    if owner_id.isdecimal():
+                        detail["returned_owner_id"] = owner_id
+                elif http == 200:
+                    detail["status"] = "returned_identity_mismatch"
+                else:
+                    detail["status"] = "read_rejected"
+            else:
+                detail["status"] = "invalid_provider_response"
+        except (OSError, RuntimeError, ValueError, TypeError):
+            detail["status"] = "read_exception"
+        finally:
+            if response is not None:
+                closer = getattr(response, "close", None)
+                if callable(closer):
+                    closer()
+        outcome[label] = detail
+    return outcome
+
+
+
 def direct_probe_missing_main_posts(records, page, account_id, state, *, get=None):
     """Read-only per-ID Graph reconciliation for list-missing ToonZone posts.
 
@@ -319,6 +390,7 @@ def audit(run_id, *, reserve=False):
         # A missing ID in the list is not a deletion finding. Individually GET
         # every missing ID against this exact, previously validated IG account.
         # The archive is read-only and no publication is permitted here.
+        control = individual_get_positive_control(live, page)
         individual = direct_probe_missing_main_posts(exc.records, page, user_id, main_state)
         counts = {status: sum(x["status"] == status for x in individual)
                   for status in ("verified", "not_found", "access_blocked", "ambiguous")}
@@ -330,6 +402,7 @@ def audit(run_id, *, reserve=False):
             "meta_page_id": str(page["page_id"]),
             "archived_ids_absent_from_list": exc.records,
             "individual_post_checks": individual,
+            "individual_get_positive_control": control,
             "individual_status_counts": counts,
             "provider_list_observed": len(live),
             "publication_authorized": False, "posts_created": 0,
