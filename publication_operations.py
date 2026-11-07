@@ -167,7 +167,7 @@ def verify_publications_with_retry(state, run_id, read_history, *, sleep=time.sl
 
 def _caption_digest(value):
     """Match publisher caption normalization without heavy media dependencies."""
-    value = re.sub(r"https://www\\.etsy\\.com/\\S+", "", value or "")
+    value = re.sub(r"https://www\.etsy\.com/\S+", "", value or "")
     value = re.sub(r"\\bEtsy:\\s*", "", value, flags=re.I)
     return hashlib.sha256(" ".join(value.split()).encode()).hexdigest()
 
