@@ -40,7 +40,7 @@ class StatusTableTests(unittest.TestCase):
         fasulye_early = next(r for r in early_message.splitlines() if 'Fasulye' in r and '0/5' in r)
         fasulye_late = next(r for r in late_message.splitlines() if 'Fasulye' in r and '0/5' in r)
         self.assertIn('  0   0', fasulye_early)
-        self.assertIn('  5   0', fasulye_late)
+        self.assertIn(' 10   0', fasulye_late)
         self.assertLess(len(early_message.encode('utf-16-le'))//2, 4096)
 
     def test_pending_failed_and_daily_laugh_previous_ny_day_are_visible(self):
@@ -56,7 +56,7 @@ class StatusTableTests(unittest.TestCase):
                 status='done', post_id='wrong', day='2026-11-07'),
         }
         message = status_table(now=now, state={'entries': rows})
-        self.assertIn('Eks Bek Hata', message)
+        self.assertIn('Gec Bek Hata', message)
         self.assertIn('1/8', message)
         self.assertIn('son tamamlanmış New York gününe', message)
         self.assertIn('yerel hazırlık', message)
