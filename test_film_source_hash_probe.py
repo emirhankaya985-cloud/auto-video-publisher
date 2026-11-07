@@ -38,6 +38,26 @@ class FilmSourceProofTests(unittest.TestCase):
         self.assertEqual(result[0]["finding"], "different_bytes_from_confirmed_post_still_held")
         self.assertEqual(state["entries"][next(reversed(state["entries"]))]["status"], "uncertain")
 
+    def test_saved_exact_hashes_skip_unavailable_drive(self):
+        state, audit, catalog = self.evidence()
+        entries = list(state["entries"].values())
+        entries[0]["source_sha256"] = "a" * 64
+        entries[1]["source_sha256"] = "a" * 64
+        rows = compare_film_sources(state, audit, catalog=catalog,
+                                    digest=lambda _: self.fail("no network"))
+        self.assertEqual(rows[0]["finding"], "identical_recorded_sha256_no_repost")
+        self.assertFalse(rows[0]["safe_to_repost"])
+
+    def test_failed_source_read_is_sanitized_and_still_held(self):
+        state, audit, catalog = self.evidence()
+        def bad(_):
+            raise RuntimeError("sensitive external media URL")
+        rows = compare_film_sources(state, audit, catalog=catalog, digest=bad)
+        self.assertEqual(rows[0]["finding"], "source_download_or_digest_unavailable")
+        self.assertEqual(rows[0]["failure_type"], "RuntimeError")
+        self.assertNotIn("sensitive", str(rows))
+        self.assertFalse(rows[0]["safe_to_repost"])
+
     def test_no_confirmed_post_does_not_download_media(self):
         state, audit, catalog = self.evidence()
         audit["rows"][0]["candidate_post_id"] = "999"
