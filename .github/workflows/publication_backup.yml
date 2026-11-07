@@ -35,7 +35,7 @@ jobs:
       - run: python -m unittest -v test_durable_backup.py test_publication_operations.py test_publication_backup_workflow.py
   backup:
     if: >-
-      vars.DURABLE_DRIVE_BACKUP_ENABLED != 'false' &&
+      vars.DURABLE_DRIVE_BACKUP_ENABLED == 'true' &&
       github.event_name != 'pull_request' && github.ref == 'refs/heads/main' &&
       (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'push')
     runs-on: ubuntu-24.04
