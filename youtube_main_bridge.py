@@ -103,6 +103,54 @@ ROUTES = {
 }
 
 
+def repeated_youtube_insert_forbidden(ledger, route, threshold=3):
+    """Only three consecutive distinct stored 403/forbidden INSERT failures.
+
+    Prior successful posts break the streak. Missing/unknown evidence never
+    turns into a confirmed permission failure or an auto-reupload.
+    """
+    if route not in ROUTES or not isinstance(ledger, dict):
+        return False
+    streak, sources = 0, set()
+    for key, row in reversed(list(ledger.items())):
+        if not isinstance(row, dict) or row.get("route") != route:
+            continue
+        status = row.get("status")
+        if status == "done" and row.get("post_id"):
+            break
+        proof = row.get("upload_error")
+        if (status == "uncertain" and isinstance(proof, dict)
+                and proof.get("http_status") == 403
+                and proof.get("reasons") == ["forbidden"]
+                and proof.get("unrecognized_reason") is False
+                and isinstance(key, str) and key.startswith(route + ":")
+                and key not in sources):
+            sources.add(key)
+            streak += 1
+            if streak >= threshold:
+                return True
+        elif status in {"uncertain", "done", "accepted"}:
+            break
+    return False
+
+
+def authorize_single_recheck(state, route, release_id):
+    """One new source allowed after the owner explicitly fixes upload rights.
+
+    A new release ID is required to try again after another 403 streak;
+    a persistent environment flag cannot endlessly POST new source files.
+    """
+    if not isinstance(release_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{8,48}", release_id):
+        return False
+    releases = state.setdefault("youtube_forbidden_release_ids", {})
+    if not isinstance(releases, dict):
+        raise RuntimeError("YouTube circuit state invalid")
+    if releases.get(route) == release_id:
+        return False
+    releases[route] = release_id
+    return True
+
+
 def selected(plans):
     seen = set()
     for item in plans:
@@ -125,10 +173,20 @@ def prepare():
     plans = json.loads(PLAN.read_text())
     run = os.environ['GITHUB_RUN_ID']
     state['youtube_prepare_errors'] = []
+    state['youtube_prepare_holds'] = []
     for key, item in selected(plans):
         if key in ledger:
             continue  # done, intent and uncertain are all protected from replay
         route = item['route']
+        if repeated_youtube_insert_forbidden(ledger, route):
+            # This route already has several separate real Google 403/forbidden
+            # INSERT results. Avoid spending quota and creating fresh uncertain
+            # rows until permission is repaired. Other platforms are untouched.
+            release_id = os.getenv("YOUTUBE_FORBIDDEN_RELEASE_ID", "").strip()
+            if not authorize_single_recheck(state, route, release_id):
+                if route not in state['youtube_prepare_holds']:
+                    state['youtube_prepare_holds'].append(route)
+                continue
         target, secret, expected = ROUTES[route]
         if not os.getenv(secret, '').strip():
             state['youtube_prepare_errors'].append(route + ': missing_secret')
