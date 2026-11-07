@@ -78,6 +78,7 @@ class ToonZoneBatchTests(unittest.TestCase):
                  patch.object(history, "restore", return_value={"schema": 1, "records": {}}), \
                  patch("public_link_runtime.inventory", side_effect=lambda x: cover_files if x == FOLDERS["covers"] else {}), \
                  patch("public_link_runtime.graph_rows", return_value=[]), \
+                 patch("public_link_runtime.restore", return_value={"schema": 1, "entries": {}}), \
                  patch("public_link_runtime.download", side_effect=download_cover), \
                  patch("public_link_runtime.download_verified_publication_video", side_effect=download_cover), \
                  patch("public_link_runtime.probe", return_value={"streams": [{"codec_type": "video", "width": 720}]}):
@@ -165,6 +166,95 @@ class ToonZoneBatchTests(unittest.TestCase):
         with patch.dict(os.environ, {"TOONZONE_INTENT_ARCHIVED": "true"}, clear=True), \
              self.assertRaisesRegex(RuntimeError, "release_gate_closed"):
             target.publish("42")
+
+
+    def test_main_publisher_ledger_recognizes_live_id_even_with_old_caption(self):
+        items = target.selected(self.catalog())
+        first = items[0]
+        state = {"schema": 1, "entries": {
+            f"toonzone:instagram:{first['id']}": {
+                "route": "toonzone", "platform": "instagram", "file": first["name"],
+                "status": "done", "post_id": "18100507712530539"
+            }
+        }}
+        # Older regular-publisher captions need not carry this campaign's S01E marker.
+        live = [{"id": "18100507712530539", "caption": "Older original caption"}]
+        main = target.main_publisher_posts(items, live, state)
+        self.assertEqual(main, {(4, 1): "18100507712530539"})
+        self.assertEqual(target.conflicts(live, {}, main), {(4, 1)})
+        with self.assertRaisesRegex(RuntimeError, "already_live"):
+            target.conflicts(live, {})
+
+    def test_main_publisher_record_cannot_be_reposted_if_unresolved_or_not_live(self):
+        items = target.selected(self.catalog())
+        first = items[0]
+        original = {"route": "toonzone", "platform": "instagram",
+                    "file": first["name"], "status": "done", "post_id": "123"}
+        key = f"toonzone:instagram:{first['id']}"
+        live = [{"id": "123", "caption": "Original regular publisher text"}]
+        for change, expected in (
+            ({"status": "uncertain"}, "prior_intent_unresolved"),
+            ({"file": "Wrong_Part1.mp4"}, "source_identity_conflict"),
+            ({"post_id": None}, "prior_intent_unresolved"),
+            ({"platform": "facebook"}, "source_identity_conflict"),
+        ):
+            with self.subTest(change=change):
+                entry = dict(original, **change)
+                with self.assertRaisesRegex(RuntimeError, expected):
+                    target.main_publisher_posts(
+                        items, live, {"schema": 1, "entries": {key: entry}})
+        with self.assertRaisesRegex(RuntimeError, "post_missing_from_live"):
+            target.main_publisher_posts(
+                items, [], {"schema": 1, "entries": {key: original}})
+        with self.assertRaisesRegex(RuntimeError, "ledger_unavailable"):
+            target.main_publisher_posts(items, live, {"entries": {}})
+        with self.assertRaisesRegex(RuntimeError, "caption_slot_mismatch"):
+            target.main_publisher_posts(
+                items, [{"id": "123", "caption": "S01E05 Part 2"}],
+                {"schema": 1, "entries": {key: original}})
+
+    def test_existing_twenty_regular_posts_mean_zero_new_reservations(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        import publisher_alert_history as history
+
+        selected = target.selected(self.catalog())
+        live = []
+        entries = {}
+        for i, item in enumerate(selected):
+            pid = str(18000000000000000 + i)
+            live.append({"id": pid, "caption": "Older text without campaign marker"})
+            entries[f"toonzone:instagram:{item['id']}"] = {
+                "route": "toonzone", "platform": "instagram", "status": "done",
+                "file": item["name"], "post_id": pid,
+            }
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            with patch.dict(os.environ, {"TOONZONE_RIGHTS_APPROVED": "true",
+                                         "TOONZONE_RELEASE_4_8": "true"}, clear=True), \
+                 patch.object(target, "ROOT", root), \
+                 patch.object(target, "HISTORY", root / "alert-history.json"), \
+                 patch.object(target, "PLAN", root / "plan.json"), \
+                 patch.object(target, "REPORT", root / "audit.json"), \
+                 patch.object(target, "page_for_toonzone", return_value={"page_id": "123"}), \
+                 patch.object(target, "instagram_identity", return_value=target.ACCOUNT_ID), \
+                 patch.object(target, "ordered_catalog", return_value=self.catalog()), \
+                 patch.object(history, "restore", return_value={"schema": 1, "records": {}}), \
+                 patch("public_link_runtime.inventory", return_value={}), \
+                 patch("public_link_runtime.graph_rows", return_value=live), \
+                 patch("public_link_runtime.restore",
+                       return_value={"schema": 1, "entries": entries}), \
+                 patch("public_link_runtime.download_verified_publication_video",
+                       side_effect=AssertionError("source should not be downloaded")):
+                report = target.audit("987654", reserve=True)
+            self.assertEqual(report["previously_verified"], 20)
+            self.assertEqual(report["regular_publisher_live_id_matches"], 20)
+            self.assertEqual(report["prepared_parts"], 0)
+            self.assertEqual(report["posts_created"], 0)
+            self.assertEqual(json.loads((root / "plan.json").read_text())["plans"], [])
+            self.assertEqual(history.validate(
+                json.loads((root / "alert-history.json").read_text()))["records"], {})
 
 
 if __name__ == "__main__":
