@@ -991,6 +991,14 @@ _CONFIRMED_UNREADABLE_SHARED_SOURCES = {
     ("tarladaki", "1hArLxDecYFwPs9lWQasXaNHK4f0dQ20W", "195.mp4"): {
         "run_id": "41790686639",
     },
+    # 7 Nov owner Drive read of the exact 18,612,272-byte source:
+    # both ffprobe and ffmpeg fail "moov atom not found". Existing Meta
+    # ledger has Facebook/IG local-only ready failures for this same source
+    # in run 42378874507. Never resubmit it on a later calendar day.
+    # A repaired clip must be a new Drive object, preserving source identity.
+    ("daily_laugh", "1TBHD0d-rtgt8ECx_6oYHeRBW8Ae2ysyH", "195.mp4"): {
+        "run_id": "42378874507",
+    },
     ("penguen", "1lBoXFmmxvlfL6lUhxk4Qc_eZ6WHANb2I", "250.mp4"): {
         "run_id": "42175366213",
         "sha256": "513d67961759f96a7e64196bf2adbe4d8ce01f0acb3b0257a5acce71a27ea1b0",
