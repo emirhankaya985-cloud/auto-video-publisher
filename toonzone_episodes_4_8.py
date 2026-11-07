@@ -51,7 +51,52 @@ def published_slot(caption):
     return None
 
 
-def conflicts(live, existing):
+def main_publisher_posts(items, live, state):
+    """Verify old regular-publisher IDs by exact account, Drive ID and live GET.
+
+    This separate 4-8 campaign must not re-post clips already confirmed by the
+    normal Meta publisher. Older ledger rows need not have a source digest:
+    only skip their exact source IDs, never infer a fresh publishing approval.
+    Missing/corrupt archives and unmatched provider IDs fail closed.
+    """
+    if not isinstance(state, dict) or state.get("schema") != 1 or not isinstance(state.get("entries"), dict):
+        raise RuntimeError("main_publisher_ledger_unavailable")
+    live_by_id = {}
+    for row in live:
+        if not isinstance(row, dict) or not str(row.get("id") or "").isdecimal():
+            raise RuntimeError("main_publisher_live_identity_invalid")
+        pid = str(row["id"])
+        if pid in live_by_id:
+            raise RuntimeError("main_publisher_duplicate_live_identity")
+        live_by_id[pid] = row
+    result = {}
+    used_ids = set()
+    for item in items:
+        key = f"toonzone:instagram:{item['id']}"
+        entry = state["entries"].get(key)
+        if entry is None:
+            continue
+        if (not isinstance(entry, dict) or entry.get("route") != "toonzone"
+                or entry.get("platform") != "instagram"
+                or entry.get("file") != item["name"]):
+            raise RuntimeError("main_publisher_source_identity_conflict")
+        pid = str(entry.get("post_id") or "")
+        if entry.get("status") != "done" or not pid.isdecimal():
+            raise RuntimeError("main_publisher_prior_intent_unresolved")
+        if pid not in live_by_id:
+            raise RuntimeError("main_publisher_post_missing_from_live")
+        slot = item["episode"], item["part"]
+        caption_slot = published_slot(live_by_id[pid].get("caption"))
+        if caption_slot is not None and caption_slot != slot:
+            raise RuntimeError("main_publisher_live_caption_slot_mismatch")
+        if pid in used_ids or slot in result:
+            raise RuntimeError("main_publisher_duplicate_post_or_slot")
+        result[slot] = pid
+        used_ids.add(pid)
+    return result
+
+
+def conflicts(live, existing, main_posts=None):
     """Fail closed on any target slot already on Instagram, even old campaigns."""
     live_ids = {}
     found = {}
@@ -65,7 +110,8 @@ def conflicts(live, existing):
         slot = published_slot(row.get("caption"))
         if slot:
             found.setdefault(slot, []).append(pid)
-    verified = set()
+    main_posts = main_posts or {}
+    verified = set(main_posts)
     for row in existing.values():
         if not isinstance(row, dict):
             raise RuntimeError("invalid_campaign_history")
@@ -80,7 +126,9 @@ def conflicts(live, existing):
             raise RuntimeError("previous_verified_caption_changed")
         verified.add(slot)
     # Do not resume around old/unrelated media, even if it has the same title.
-    if any(len(ids) != 1 or slot not in verified for slot, ids in found.items()):
+    if any(len(ids) != 1 or slot not in verified
+           or (slot in main_posts and main_posts[slot] != ids[0])
+           for slot, ids in found.items()):
         raise RuntimeError("target_part_already_live_unreconciled")
     return verified
 
@@ -116,7 +164,7 @@ def release_authorized(reserve, *, environ=None):
 
 
 def audit(run_id, *, reserve=False):
-    from public_link_runtime import FOLDERS, inventory, graph_rows, download, probe
+    from public_link_runtime import FOLDERS, inventory, graph_rows, download, probe, restore as restore_main
     page = page_for_toonzone()
     user_id = instagram_identity(page)
     if user_id != ACCOUNT_ID:
@@ -127,7 +175,8 @@ def audit(run_id, *, reserve=False):
     live = graph_rows(page, "instagram")
     if not isinstance(live, list):
         raise RuntimeError("instagram_live_history_unavailable")
-    already = conflicts(live, archive["records"])
+    main_posts = main_publisher_posts(items, live, restore_main())
+    already = conflicts(live, archive["records"], main_posts)
     records = archive["records"]
     prepared = []
     (ROOT / "covers").mkdir(parents=True, exist_ok=True)
@@ -152,6 +201,7 @@ def audit(run_id, *, reserve=False):
     prepared = preflight_sources(prepared)
     report = {"run_id": run_id, "target_episodes": [4, 5, 6, 7, 8],
               "expected_parts": 20, "previously_verified": len(already),
+              "regular_publisher_live_id_matches": len(main_posts),
               "prepared_parts": len(prepared), "exact_covers_verified": len(prepared),
               "source_files_verified": len(prepared),
               "instagram_identity_verified": True, "live_history_read": True,
