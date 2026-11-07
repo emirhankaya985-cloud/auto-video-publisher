@@ -74,6 +74,23 @@ class QuotaReadOnlyTests(unittest.TestCase):
         self.assertEqual(report["provider_writes"], 0)
         self.assertEqual(json.dumps(state, sort_keys=True), before)
 
+    def test_local_failures_are_distinct_from_uncertain_posts_and_gaps(self):
+        rows = {
+            'tarladaki:facebook:source12345': {'route':'tarladaki',
+                'platform':'facebook','day':'2026-11-07','status':'ready',
+                'failure':{'reason':'source_or_cover_preparation_failed'}},
+            'tarladaki:facebook:source23456': {'route':'tarladaki',
+                'platform':'facebook','day':'2026-11-07','status':'uncertain'},
+        }
+        state = {'schema': 1, 'entries': rows}
+        report = quota_evidence(state, now=self.NOW)
+        fb = report['accounts'][0]['platforms'][0]
+        self.assertEqual(fb['ledger_post_ids_count'], 0)
+        self.assertEqual(fb['not_recorded_against_target'], 5)
+        self.assertEqual(fb['unresolved_sources'], 1)
+        self.assertEqual(fb['failed_local_preparation_sources'], 1)
+        self.assertFalse(fb['safe_to_auto_repost'])
+
     def test_bad_or_unverified_done_id_cannot_increment_success(self):
         state = {"schema": 1, "entries": {
             "tarladaki:facebook:1234567890abcdef": {
