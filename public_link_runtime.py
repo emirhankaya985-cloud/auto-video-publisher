@@ -1923,7 +1923,7 @@ def publish():
                         f"{item['route']}:instagram:{item['id']}"
                     ].get("prepublish_retry_count", 0)
                     alternate_compact_profile = (
-                        retry_count > 0 and item["route"] in {"film", "toonzone"}
+                        retry_count == 1 and item["route"] in {"film", "film_second", "toonzone"}
                         and not (retry_count == 3 and
                                  item["route"] in _AUDITED_IG_V3_FILES and
                                  item["name"] == _AUDITED_IG_V3_FILES[item["route"]])
@@ -1956,7 +1956,13 @@ def publish():
                         ),
                         toonzone_compact=(
                             item["route"] == "toonzone" and not alternate_compact_profile
+                            and retry_count != 2
                         ),
+                        # Last verified prepublish rejection gets a THIRD, distinct
+                        # locally validated full-length MP4 bitstream. This does
+                        # not authorize repeating uncertain Meta writes.
+                        recovery_v4=(retry_count == 2 and item["route"] in
+                                     {"film", "film_second", "toonzone"}),
                         # Apparent MP4/codec compliance did not prevent the
                         # repeated short-Reels rupload ProcessingFailedError.
                         # Always encode first-pass humour/Daily reels into a
@@ -1965,6 +1971,7 @@ def publish():
                         # established profiles and one-shot retry gates.
                         force_transcode=(
                             alternate_compact_profile or gonle_alt_vertical
+                            or (retry_count == 2 and item["route"] in {"film", "film_second", "toonzone"})
                             or short_recovery_v3
                             or item["route"] in {"tarladaki", "penguen", "daily_laugh"}
                         ),
