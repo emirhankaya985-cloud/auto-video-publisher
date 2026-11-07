@@ -14,7 +14,7 @@ class DurableBackupScheduleTests(unittest.TestCase):
 
     def test_owner_enablement_and_explicit_disable_are_honored(self):
         text = WORKFLOW.read_text(encoding="utf-8")
-        self.assertIn("vars.DURABLE_DRIVE_BACKUP_ENABLED != 'false'", text)
+        self.assertIn("vars.DURABLE_DRIVE_BACKUP_ENABLED == 'true'", text)
         self.assertIn("github.ref == 'refs/heads/main'", text)
         self.assertIn("github.event_name != 'pull_request'", text)
 
