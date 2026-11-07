@@ -7,11 +7,14 @@ on:
     branches: [main]
   push:
     branches: [main]
-    paths: ['docs/threads-owner-start-2026-11-04.md']
+    paths:
+      - 'docs/threads-owner-start-2026-11-04.md'
+      - 'docs/threads-owner-catchup-2026-11-07.md'
   pull_request:
     paths:
       - 'threads_live_publish.py'
       - 'test_threads_live_publish.py'
+      - 'test_threads_one_shot_gate.py'
       - '.github/workflows/threads_live_publish.yml'
 
 permissions:
@@ -32,7 +35,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install --require-hashes -r requirements.txt
-      - run: python -m unittest test_threads_live_publish test_threads_accounts test_threads_publisher test_publisher_alert_history
+      - run: python -m unittest test_threads_live_publish test_threads_accounts test_threads_publisher test_publisher_alert_history test_threads_one_shot_gate
 
   threads:
     if: >-
@@ -41,7 +44,12 @@ jobs:
       github.run_attempt == 1 && vars.THREADS_PUBLICATION_ENABLED != 'false' &&
       (github.event_name != 'workflow_run' ||
       (github.event.workflow_run.head_repository.full_name == github.repository &&
-      github.event.workflow_run.event == 'schedule'))
+      github.event.workflow_run.event == 'schedule')) &&
+      (github.event_name != 'push' ||
+      contains(github.event.head_commit.added, 'docs/threads-owner-start-2026-11-04.md') ||
+      contains(github.event.head_commit.modified, 'docs/threads-owner-start-2026-11-04.md') ||
+      (github.event.head_commit.message == 'ops: owner-authorized-once-threads-catchup-2026-11-07' &&
+      contains(github.event.head_commit.added, 'docs/threads-owner-catchup-2026-11-07.md')))
     runs-on: ubuntu-latest
     timeout-minutes: 24
     env:
