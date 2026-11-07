@@ -13,6 +13,12 @@ _CHAT_ID = re.compile(r"^-?[0-9]{4,20}$")
 _MAX_TEXT_CHARS = 3900
 STATISTICS_BUTTON = "📊 İstatistik"
 THREADS_STATISTICS_BUTTON = "🧵 Threads İstatistik"
+THREADS_CALLBACK_DATA = "owner:threads-stats:v1"
+THREADS_INLINE_KEYBOARD = {
+    "inline_keyboard": [[{"text": THREADS_STATISTICS_BUTTON,
+                          "callback_data": THREADS_CALLBACK_DATA}]],
+}
+
 STATISTICS_KEYBOARD = {
     "keyboard": [[{"text": STATISTICS_BUTTON}], [{"text": THREADS_STATISTICS_BUTTON}]],
     "resize_keyboard": True,
