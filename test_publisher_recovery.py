@@ -140,9 +140,10 @@ class RecoveryPolicyTests(unittest.TestCase):
                 self.assertTrue(known_pre_publish_media_rejection(error, route, 0))
                 self.assertTrue(known_pre_publish_media_rejection(error, route, 1))
                 self.assertFalse(known_pre_publish_media_rejection(error, route, 2))
-        for route in ("film", "toonzone"):
+        for route in ("film", "film_second", "toonzone"):
             self.assertTrue(known_pre_publish_media_rejection(error, route, 0))
-            self.assertFalse(known_pre_publish_media_rejection(error, route, 1))
+            self.assertTrue(known_pre_publish_media_rejection(error, route, 1))
+            self.assertFalse(known_pre_publish_media_rejection(error, route, 2))
         for counter in (-1, True, "0", None):
             self.assertFalse(known_pre_publish_media_rejection(error, "penguen", counter))
 
