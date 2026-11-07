@@ -134,7 +134,7 @@ def prepare(*, session=requests):
 
 def send(*, session=requests):
     messages = json.loads((ROOT/'reserved-replies.json').read_text(encoding='utf-8'))
-    count = callback_count = 0
+    count = callback_count = callback_failures = 0
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     from telegram_notifications import _BOT_TOKEN
     if any(isinstance(m, dict) and m.get('kind') == 'callback_ack' for m in messages):
@@ -155,7 +155,11 @@ def send(*, session=requests):
                 if response.status_code != 200 or response.json().get('ok') is not True:
                     raise RuntimeError('telegram_callback_not_accepted')
             except Exception:
-                raise RuntimeError('telegram_callback_receipt_unverified') from None
+                # Scheduled GitHub polls can exceed Telegram's short callback
+                # answer window. Never lose the owner's actual report because
+                # the transient spinner acknowledgement has expired.
+                callback_failures += 1
+                continue
             callback_count += 1
     for message in messages:
         if isinstance(message, dict) and message.get('kind') == 'callback_ack':
@@ -163,6 +167,7 @@ def send(*, session=requests):
         send_telegram(**message)
         count += 1
     print(json.dumps({'server_acks': count, 'callback_server_acks': callback_count,
+                      'callback_receipt_failures': callback_failures,
                       'phone_delivery_verified': False}))
 
 

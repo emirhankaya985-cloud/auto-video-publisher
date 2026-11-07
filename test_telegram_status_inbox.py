@@ -85,11 +85,14 @@ class InboxTests(unittest.TestCase):
             session.post.assert_called_once()
             self.assertTrue(session.post.call_args.args[0].endswith("/answerCallbackQuery"))
             sender.assert_called_once()
+            # Explicit fresh callback batch: ACK expiry must not lose a valid
+            # owner stats response or invent a callback-server acceptance.
             session.post.reset_mock()
             session.post.side_effect = TimeoutError("provider sensitive")
-            with self.assertRaisesRegex(RuntimeError, "telegram_callback_receipt_unverified"):
-                inbox.send(session=session)
-            self.assertEqual(sender.call_count, 1)
+            sender.reset_mock()
+            inbox.send(session=session)
+            session.post.assert_called_once()
+            sender.assert_called_once()
 
     def test_existing_webhook_is_never_deleted_or_consumed(self):
         session = Mock()
