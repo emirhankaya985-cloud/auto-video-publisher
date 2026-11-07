@@ -58,6 +58,14 @@ def summarize(report):
         "collection_errors_count": len(comparison.get("collection_errors", []))
             if isinstance(comparison.get("collection_errors"), list) else None,
         "telegram_messages_sent": 0, "ntfy_messages_sent": 0, "publisher_writes": 0,
+        "threads_engagement_coverage": {
+            metric: {"expected_accounts": counts["threads_platforms_reported"],
+                     "measured_accounts": len({row.get("account") for row in comparison.get("threads_engagement", [])
+                         if isinstance(row, dict) and row.get("platform") == "Threads"
+                         and row.get("metric") == metric and row.get("status") == "ok"
+                         and type(row.get("value")) is int and row["value"] >= 0})}
+            for metric in stats_reporter.THREADS_ENGAGEMENT_METRICS
+        },
         "source": "stats_reporter.build_report; no notify invocation",
     }
 

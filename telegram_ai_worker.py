@@ -213,6 +213,14 @@ def load_threads_statistics(*, session=requests):
                 lines.append(f"• {str(account.get('account', 'Hesap'))[:70]}: "
                              f"{' / '.join(number(value) for value in values)}"
                              f" · {number(follower)} takipçi")
+                metrics = {row.get("metric"): row.get("value")
+                           for row in comparison.get("threads_engagement", [])
+                           if isinstance(row, dict) and row.get("account") == account.get("account")
+                           and row.get("platform") == "Threads" and row.get("status") == "ok"}
+                lines.append("  Video etkileşimleri: " + " · ".join(
+                    f"{label} {number(metrics.get(metric))}" for metric, label in (
+                        ("likes", "beğeni"), ("replies", "yanıt"), ("reposts", "yeniden paylaşım"),
+                        ("quotes", "alıntı"), ("shares", "dış paylaşım"))))
         if not found:
             lines.append("N/A: doğrulanmış raporda Threads hesabı ölçümü bulunmuyor.")
         lines.extend(["", "N/A: eksik veya karşılaştırılamayan veri; 0 varsayılmadı.",
