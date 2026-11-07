@@ -57,6 +57,34 @@ class RecoveryPolicyTests(unittest.TestCase):
         self.assertEqual(get.call_count, 2)
         wait.assert_called_once_with(1)
 
+    def test_readonly_retry_after_is_bounded_and_only_applies_to_get(self):
+        for header, expected in (("7", 7), ("999999", 1),
+                                 ("Mon, 23 Nov 2026", 1), ("0", 1),
+                                 ("https://private.invalid?token=PRIVATE", 1)):
+            with self.subTest(header=header):
+                limited = Mock(status_code=429)
+                limited.headers = {"Retry-After": header}
+                good = Mock(status_code=200)
+                wait = Mock()
+                read = Mock(side_effect=[limited, good])
+                self.assertIs(read_with_retry(read, sleep=wait), good)
+                wait.assert_called_once_with(expected)
+                limited.close.assert_called_once()
+
+        async_api = Mock()
+        async_api.__name__ = 'post'
+        with self.assertRaisesRegex(ValueError, "requires_get"):
+            read_with_retry(async_api, sleep=Mock())
+        async_api.assert_not_called()
+
+    def test_transient_server_retry_after_is_not_unbounded(self):
+        limited = Mock(status_code=503, headers={"Retry-After": "20"})
+        good = Mock(status_code=200)
+        waits = []
+        self.assertIs(read_with_retry(Mock(side_effect=[limited, good]),
+                                       sleep=waits.append), good)
+        self.assertEqual(waits, [8])
+
     def test_read_500_twice_then_200(self):
         get = Mock(side_effect=[SimpleNamespace(status_code=500), SimpleNamespace(status_code=503),
                                 SimpleNamespace(status_code=200)])

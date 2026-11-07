@@ -11,6 +11,20 @@ READ_RETRY_HTTP = frozenset({429, 500, 502, 503, 504})
 READ_RETRY_DELAYS = (1, 2)
 GRAPH_READ_RETRY_CODES = frozenset({4, 17, 32, 613})
 
+def bounded_retry_after(response, exponential_seconds):
+    """Honor only short numeric Retry-After for GETs, never unbounded waits."""
+    if response is None:
+        return exponential_seconds
+    headers = getattr(response, "headers", None)
+    if headers is None or not hasattr(headers, "get"):
+        return exponential_seconds
+    raw = headers.get("Retry-After")
+    if not isinstance(raw, str) or not raw.isdecimal() or len(raw) > 2:
+        return exponential_seconds
+    seconds = int(raw)
+    return max(exponential_seconds, min(seconds, 8))
+
+
 
 def _graph_read_is_throttled(response):
     # Meta can report throttling as HTTP 400. Only inspect this for explicitly
@@ -34,7 +48,12 @@ def read_with_retry(get, *args, sleep=time.sleep, graph_read=False, **kwargs):
     handles HTTP 400 carrying an explicit Graph throttling code, never arbitrary
     Graph errors or HTTP 200 application errors.
     """
+    # Accidental use of a write method would bypass the intent ledger.
+    # Refuse named POST/PUT/PATCH/DELETE functions before the first request.
+    if getattr(get, "__name__", "").lower() in {"post", "put", "patch", "delete"}:
+        raise ValueError("read_with_retry_requires_get")
     for attempt in range(3):
+        retry_wait = READ_RETRY_DELAYS[attempt] if attempt < 2 else 0
         try:
             response = get(*args, **kwargs)
         except OSError:
@@ -48,12 +67,13 @@ def read_with_retry(get, *args, sleep=time.sleep, graph_read=False, **kwargs):
                 retryable = _graph_read_is_throttled(response)
             if not retryable or attempt >= 2:
                 return response
+            retry_wait = bounded_retry_after(response, retry_wait)
             # Release pooled sockets before the next GET. The final response
             # stays open so its caller can still consume the body normally.
             close = getattr(response, "close", None)
             if callable(close):
                 close()
-        sleep(READ_RETRY_DELAYS[attempt])
+        sleep(retry_wait)
     raise RuntimeError("Read retry unexpectedly exhausted")
 
 
