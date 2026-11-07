@@ -16,7 +16,11 @@ import requests
 REPOSITORY = "emirhankaya985-cloud/auto-video-publisher"
 ARTIFACT_NAME = "meta-daily-analytics-history"
 HISTORY_FILE = "daily_video_views.jsonl"
-MAX_ARCHIVE_BYTES = 20 * 1024 * 1024
+# Compressed artifacts and their expanded JSONL history have different limits.
+# A long-running daily history can exceed 20 MiB uncompressed while the ZIP
+# stays small. Keep both bounds to prevent untrusted archive expansion.
+MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024
+MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
 
 
 def restore_history(target: str | Path, *, token: str | None = None,
@@ -70,7 +74,7 @@ def restore_history(target: str | Path, *, token: str | None = None,
         # GitHub returns a short-lived redirect to artifact storage. Requests
         # removes GitHub authorization when following a cross-host redirect.
         result = get(archive_url, headers=headers, timeout=45, allow_redirects=True)
-        if result.status_code != 200 or len(result.content) > MAX_ARCHIVE_BYTES:
+        if result.status_code != 200 or len(result.content) > MAX_DOWNLOAD_BYTES:
             raise RuntimeError("GitHub archive download unavailable")
         with zipfile.ZipFile(io.BytesIO(result.content)) as archive:
             names = archive.namelist()
