@@ -982,6 +982,22 @@ class LinkRuntimeSafety(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "ön doğrulaması"):
                 runtime.verify_source_video(Path("fake.mp4"))
 
+    def test_real_moov_absence_gets_bounded_diagnostic_no_provider_post(self):
+        import subprocess
+        with tempfile.TemporaryDirectory() as tmp:
+            media = Path(tmp) / "source.mp4"
+            # Legal MP4 headers but no moov index, just like verified 195.mp4.
+            media.write_bytes(b"\\x00\\x00\\x00\\x18ftypisom\\x00\\x00\\x02\\x00isomavc1"
+                              b"\\x00\\x00\\x00\\x0cmdatTEST")
+            with patch.object(runtime, "probe",
+                              side_effect=subprocess.CalledProcessError(
+                                  1, ["ffprobe", "private-media-url"])) as ffprobe:
+                with self.assertRaises(runtime.MP4MissingMoov) as err:
+                    runtime.verify_source_video(media)
+            self.assertEqual(err.exception.diagnostic_code, "missing_moov_atom")
+            self.assertNotIn("private-media-url", str(err.exception))
+            ffprobe.assert_called_once_with(media)
+
     def test_ffprobe_timeout_blocks_meta_without_leaking_video_path(self):
         with patch.object(runtime, "probe", side_effect=TimeoutError("private-file-location")):
             with self.assertRaises(RuntimeError) as raised:
