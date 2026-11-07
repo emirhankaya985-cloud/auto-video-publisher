@@ -25,12 +25,16 @@ class FakeDrive:
         self.permission_rows = [{'type': 'user', 'role': 'owner'}]
         self.quota = {'limit': '1000000000', 'usage': '0'}
         self.corrupt = False
+        self.invalid_metadata = False
+        self.file_permissions = [{'type': 'user', 'role': 'owner'}]
 
     def files(self):
         return self
 
     def permissions(self):
-        return SimpleNamespace(list=lambda **kwargs: Response({'permissions': self.permission_rows}))
+        return SimpleNamespace(list=lambda **kwargs: Response({'permissions':
+            self.file_permissions if kwargs.get('fileId') in self.blobs
+            else self.permission_rows}))
 
     def about(self):
         return SimpleNamespace(get=lambda **kwargs: Response({'storageQuota': self.quota}))
@@ -48,6 +52,14 @@ class FakeDrive:
         key = str(self.created)
         self.blobs[key] = (body['appProperties']['sha256'], media_body.read())
         return Response({'id': key})
+
+    def get(self, fileId, **kwargs):
+        digest, _ = self.blobs[fileId]
+        return Response({'id': 'incorrect' if self.invalid_metadata else fileId,
+                         'mimeType': 'application/zip',
+                         'parents': [self.folder],
+                         'createdTime': '2026-11-07T17:00:00Z',
+                         'appProperties': {'sha256': digest}})
 
     def get_media(self, fileId):
         return Response(b'corrupt' if self.corrupt else self.blobs[fileId][1])
@@ -76,6 +88,8 @@ class DurableBackupTests(unittest.TestCase):
         for _ in range(2):
             receipt = persist(drive, data, media_factory=lambda source, **k: source)
             self.assertTrue(receipt['isolated_restore_verified'])
+            self.assertEqual(receipt['file_created_at'], '2026-11-07T17:00:00Z')
+            self.assertIn('verified_at', receipt)
         self.assertEqual(drive.created, 1)
 
     def test_download_corruption_never_reports_success(self):
@@ -107,6 +121,28 @@ class DurableBackupTests(unittest.TestCase):
                     target.writestr('../escape', b'data')
             with self.assertRaises(ValueError):
                 unpack(out.getvalue())
+
+    def test_sensitive_credentials_never_enter_a_backup(self):
+        base = {'schema': 1, 'entries': {}}
+        for payload in (
+            {'schema': 1, 'entries': {}, 'auth': {'refresh_token': 'private'}},
+            {'schema': 1, 'entries': {}, 'metadata': {'clientSecret': 'private'}},
+            {'schema': 1, 'entries': {}, 'notes': ['Bearer super-secret-value']},
+        ):
+            with self.assertRaisesRegex(ValueError, 'sensitive credential'):
+                bundle(payload, b'')
+        with self.assertRaisesRegex(ValueError, 'sensitive credential'):
+            bundle(base, b'{"metric": "views", "secret": "should-not-archive"}\\n')
+
+    def test_remote_file_identity_and_privacy_are_required(self):
+        drive = FakeDrive()
+        drive.invalid_metadata = True
+        with self.assertRaisesRegex(ValueError, 'metadata mismatch'):
+            persist(drive, self.data(), media_factory=lambda source, **k: source)
+        drive.invalid_metadata = False
+        drive.file_permissions.append({'type': 'anyone', 'role': 'reader'})
+        with self.assertRaisesRegex(ValueError, 'privacy'):
+            persist(drive, self.data(), media_factory=lambda source, **k: source)
 
     def test_live_acceptance_only_calls_audit_not_publish(self):
         import ast
