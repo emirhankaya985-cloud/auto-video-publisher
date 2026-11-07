@@ -44,6 +44,23 @@ def safe_label(value, limit=100):
     return "".join(ch for ch in text if ch.isalnum() or ch in " _.-")[:limit]
 
 
+def http_failure_class(status):
+    """Conservative machine-readable diagnosis; not permission to retry POST."""
+    if type(status) is not int:
+        return "unverified"
+    if status == 400:
+        return "request_or_media_validation"
+    if status == 401:
+        return "authentication"
+    if status == 403:
+        return "permission_denied"
+    if status == 429:
+        return "rate_limited"
+    if 500 <= status <= 599:
+        return "provider_unavailable"
+    return "unverified"
+
+
 def error_event(stage, reason, *, route="", platform="", video="",
                 error=None, status="", safe_to_retry=False):
     if stage not in _ALLOWED_STAGE or reason not in _ALLOWED_REASON:
@@ -54,12 +71,13 @@ def error_event(stage, reason, *, route="", platform="", video="",
         "run_id": safe_label(os.getenv("GITHUB_RUN_ID", ""), 35),
         "stage": stage, "reason": reason,
         "route": safe_label(route, 45),
-        "platform": platform if platform in ("facebook", "instagram", "youtube") else "unknown",
+        "platform": platform if platform in ("facebook", "instagram", "threads", "youtube") else "unknown",
         "video": safe_label(video, 125),
         "outcome": "held" if status != "uncertain" else "uncertain",
         "retry_policy": ("pre_upload_only" if safe_to_retry
                          else "never_blindly_retry_meta_post"),
         "error_type": safe_label(type(exc).__name__ if exc else "", 70),
+        "http_failure_class": http_failure_class(getattr(exc, "http_status", None)),
         "recovery_action": safe_recovery_action(
             "meta_publish" if stage in {"facebook_publish", "instagram_publish"}
             else "read_only_get" if stage in {"meta_history", "shared_account_history"}
