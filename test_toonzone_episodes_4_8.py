@@ -304,6 +304,8 @@ class ToonZoneBatchTests(unittest.TestCase):
                  patch("public_link_runtime.graph_rows", return_value=[]), \
                  patch("public_link_runtime.restore",
                        return_value={"schema": 1, "entries": entries}), \
+                 patch.object(target, "direct_probe_missing_main_posts",
+                              return_value=[{"status": "ambiguous", "reason": "test_only"}]), \
                  patch("public_link_runtime.download_verified_publication_video",
                        side_effect=AssertionError("not allowed to upload")):
                 with self.assertRaisesRegex(RuntimeError, "post_missing_from_live"):
@@ -315,6 +317,100 @@ class ToonZoneBatchTests(unittest.TestCase):
             self.assertEqual(len(report["archived_ids_absent_from_list"]), 1)
             self.assertEqual(report["archived_ids_absent_from_list"][0]["archived_post_id"],
                              "18100507712530539")
+
+
+
+    def test_individual_post_get_confirms_only_exact_owner_and_caption(self):
+        from unittest.mock import Mock
+        from public_link_runtime import caption_key
+        item = target.selected(self.catalog())[0]
+        post = "18100507712530539"
+        account = target.ACCOUNT_ID
+        record = {"episode": item["episode"], "part": item["part"],
+                  "file": item["name"], "source_id": item["id"],
+                  "archived_post_id": post}
+        state = {"entries": {f"toonzone:instagram:{item['id']}": {
+            "status": "done", "route": "toonzone", "platform": "instagram",
+            "file": item["name"], "post_id": post,
+            "caption_hash": caption_key("S01E04 Part 1/4"),
+        }}}
+        page = {"page_id": "1298191963387372", "page_token": "TEST-SECRET"}
+        body = {"id": post, "owner": {"id": account}, "media_type": "VIDEO",
+                "caption": "S01E04 Part 1/4",
+                "timestamp": "2026-10-27T13:00:00+00:00",
+                "permalink": "https://www.instagram.com/reel/Example/"}
+        for change, expected_status, reason in (
+            ({}, "verified", "exact_id_account_video_caption"),
+            ({"owner": {"id": "17840000000000000"}}, "ambiguous", "wrong_instagram_account"),
+            ({"owner": None}, "ambiguous", "owner_id_unavailable"),
+            ({"media_type": "IMAGE"}, "ambiguous", "not_video"),
+            ({"caption": "DIFFERENT PART"}, "ambiguous", "archived_caption_hash"),
+            ({"id": "99999"}, "ambiguous", "returned_id_mismatch"),
+        ):
+            with self.subTest(change=change):
+                response = Mock(status_code=200)
+                response.json.return_value = dict(body, **change)
+                get = Mock(return_value=response)
+                result = target.direct_probe_missing_main_posts(
+                    [record], page, account, state, get=get)[0]
+                self.assertEqual(result["status"], expected_status)
+                self.assertIn(reason, result["reason"])
+                self.assertEqual(get.call_count, 1)
+                self.assertEqual(get.call_args.kwargs["params"]["fields"],
+                                 "id,caption,media_type,permalink,timestamp,owner")
+                self.assertEqual(get.call_args.kwargs["headers"]["Authorization"],
+                                 "Bearer TEST-SECRET")
+                self.assertNotIn("TEST-SECRET", repr(result))
+                response.close.assert_called_once()
+
+    def test_individual_get_errors_never_prove_deletion_or_authorize_repost(self):
+        from unittest.mock import Mock
+        item = target.selected(self.catalog())[0]
+        row = {"episode": 4, "part": 1, "file": item["name"],
+               "source_id": item["id"], "archived_post_id": "123"}
+        state = {"entries": {f"toonzone:instagram:{item['id']}": {
+            "status": "done", "route": "toonzone",
+            "platform": "instagram", "file": item["name"], "post_id": "123",
+        }}}
+        page = {"page_id": "1298191963387372", "page_token": "NOT-A-REAL-TOKEN"}
+        for http, code, expected in (
+            (403, 200, "access_blocked"),
+            (401, 190, "access_blocked"),
+            (404, 100, "not_found"),
+            (400, 100, "ambiguous"),
+        ):
+            with self.subTest(http=http, code=code):
+                response = Mock(status_code=http)
+                response.json.return_value = {"error": {"code": code,
+                    "message": "SECRET NEVER APPEARS IN REPORT"}}
+                result = target.direct_probe_missing_main_posts(
+                    [row], page, target.ACCOUNT_ID, state,
+                    get=Mock(return_value=response))[0]
+                self.assertEqual(result["status"], expected)
+                self.assertNotIn("SECRET", repr(result))
+                self.assertNotEqual(result["status"], "verified")
+                response.close.assert_called_once()
+        result = target.direct_probe_missing_main_posts(
+            [row], page, target.ACCOUNT_ID, state,
+            get=Mock(side_effect=OSError("SECRET TIMEOUT")))[0]
+        self.assertEqual(result["status"], "ambiguous")
+        self.assertNotIn("SECRET", repr(result))
+
+    def test_probe_refuses_to_reclassify_changed_source_or_ledger(self):
+        from unittest.mock import Mock
+        item = target.selected(self.catalog())[0]
+        row = {"episode": 4, "part": 1, "file": item["name"],
+               "source_id": item["id"], "archived_post_id": "123"}
+        state = {"entries": {f"toonzone:instagram:{item['id']}": {
+            "status": "uncertain", "route": "toonzone",
+            "platform": "instagram", "file": item["name"], "post_id": "123",
+        }}}
+        get = Mock()
+        with self.assertRaisesRegex(RuntimeError, "record_changed"):
+            target.direct_probe_missing_main_posts(
+                [row], {"page_id": "123", "page_token": "TOKEN"},
+                target.ACCOUNT_ID, state, get=get)
+        get.assert_not_called()
 
 
 

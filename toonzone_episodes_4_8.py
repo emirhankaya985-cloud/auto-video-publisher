@@ -112,6 +112,127 @@ def main_publisher_posts(items, live, state):
     return result
 
 
+
+def direct_probe_missing_main_posts(records, page, account_id, state, *, get=None):
+    """Read-only per-ID Graph reconciliation for list-missing ToonZone posts.
+
+    An unavailable media list, an HTTP 400, or a 404 never proves deletion or
+    authorizes reposting. A VERIFIED outcome requires the exact archived ID,
+    same IG owner, VIDEO type, timestamp, permalink and saved caption hash.
+    Return only sanitized diagnostics; never include access tokens/API bodies.
+    """
+    import requests
+    from datetime import datetime
+    from cloud_omnichannel_publisher import GRAPH_API_VERSION
+    from public_link_runtime import caption_key
+    from publisher_recovery import read_with_retry
+
+    get = get or requests.get
+    if not isinstance(account_id, str) or not account_id.isdecimal():
+        raise RuntimeError("toonzone_expected_ig_account_invalid")
+    if not isinstance(page, dict) or not str(page.get("page_id") or "").isdecimal():
+        raise RuntimeError("toonzone_page_identity_invalid")
+    if not isinstance(page.get("page_token"), str) or not page["page_token"]:
+        raise RuntimeError("toonzone_page_credential_unavailable")
+    if not isinstance(state, dict) or not isinstance(state.get("entries"), dict):
+        raise RuntimeError("toonzone_main_ledger_invalid")
+    evidence = []
+    for row in records:
+        key = f"toonzone:instagram:{row['source_id']}"
+        old = state["entries"].get(key)
+        if (not isinstance(old, dict) or old.get("status") != "done"
+                or old.get("route") != "toonzone" or old.get("platform") != "instagram"
+                or old.get("file") != row["file"]
+                or str(old.get("post_id") or "") != row["archived_post_id"]):
+            raise RuntimeError("toonzone_main_record_changed_during_probe")
+        post_id = str(row["archived_post_id"])
+        if not post_id.isdecimal():
+            raise RuntimeError("toonzone_media_id_not_numeric")
+        result = {
+            "episode": row["episode"], "part": row["part"],
+            "file": row["file"], "source_id": row["source_id"],
+            "archived_post_id": post_id,
+            "expected_instagram_account_id": account_id,
+            "status": "ambiguous", "reason": "not_yet_probed",
+            "method": "individual_graph_get",
+        }
+        response = None
+        try:
+            response = read_with_retry(
+                get, f"https://graph.facebook.com/{GRAPH_API_VERSION}/{post_id}",
+                headers={"Authorization": "Bearer " + page["page_token"]},
+                params={"fields": "id,caption,media_type,permalink,timestamp,owner"},
+                timeout=25, allow_redirects=False, graph_read=True,
+            )
+            status_code = getattr(response, "status_code", None)
+            result["http_status"] = status_code if type(status_code) is int else None
+            try:
+                body = response.json()
+            except (ValueError, TypeError, AttributeError):
+                body = None
+            if not isinstance(body, dict):
+                result["reason"] = "invalid_provider_response"
+            elif status_code != 200 or "error" in body:
+                error = body.get("error")
+                code = error.get("code") if isinstance(error, dict) else None
+                result["graph_error_code"] = code if type(code) is int else None
+                if status_code in (401, 403) or code in (190, 10, 200):
+                    result.update(status="access_blocked",
+                                  reason="meta_permission_or_token_blocked")
+                elif status_code == 404:
+                    # A 404 is NOT proof of deletion: Graph also hides objects
+                    # when a token cannot access them.
+                    result.update(status="not_found",
+                                  reason="id_not_found_or_inaccessible_not_deletion_proof")
+                else:
+                    result["reason"] = "meta_get_failed_or_ambiguous"
+            elif str(body.get("id") or "") != post_id:
+                result["reason"] = "returned_id_mismatch"
+            else:
+                owner = body.get("owner")
+                owner_id = str(owner.get("id") or "") if isinstance(owner, dict) else str(owner or "")
+                if owner_id.isdecimal():
+                    result["returned_owner_id"] = owner_id
+                media_type = body.get("media_type")
+                result["media_type"] = media_type if isinstance(media_type, str) else None
+                permalink = body.get("permalink")
+                if isinstance(permalink, str) and permalink.startswith("https://www.instagram.com/"):
+                    result["permalink"] = permalink
+                stamp = body.get("timestamp")
+                if isinstance(stamp, str):
+                    try:
+                        dt = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+                        if dt.tzinfo is not None:
+                            result["timestamp"] = stamp
+                    except ValueError:
+                        pass
+                caption = body.get("caption")
+                saved_hash = old.get("caption_hash")
+                if owner_id != account_id:
+                    result["reason"] = ("wrong_instagram_account"
+                                        if owner_id.isdecimal() else "owner_id_unavailable")
+                elif media_type != "VIDEO":
+                    result["reason"] = "not_video_or_media_type_unavailable"
+                elif "timestamp" not in result or "permalink" not in result:
+                    result["reason"] = "media_metadata_incomplete"
+                elif (not isinstance(caption, str)
+                      or not isinstance(saved_hash, str)
+                      or caption_key(caption) != saved_hash):
+                    result["reason"] = "archived_caption_hash_not_confirmed"
+                else:
+                    result.update(status="verified", reason="exact_id_account_video_caption")
+        except (OSError, RuntimeError, ValueError, TypeError):
+            result["reason"] = "individual_graph_get_unavailable"
+        finally:
+            if response is not None:
+                closer = getattr(response, "close", None)
+                if callable(closer):
+                    closer()
+        evidence.append(result)
+    return evidence
+
+
+
 def conflicts(live, existing, main_posts=None):
     """Fail closed on any target slot already on Instagram, even old campaigns."""
     live_ids = {}
@@ -191,16 +312,25 @@ def audit(run_id, *, reserve=False):
     live = graph_rows(page, "instagram")
     if not isinstance(live, list):
         raise RuntimeError("instagram_live_history_unavailable")
+    main_state = restore_main()
     try:
-        main_posts = main_publisher_posts(items, live, restore_main())
+        main_posts = main_publisher_posts(items, live, main_state)
     except MainPublisherLiveMissing as exc:
-        # Persist actionable, credential-free evidence despite a red run.
-        # This is NOT proof of deletion: a GET listing may omit older media.
+        # A missing ID in the list is not a deletion finding. Individually GET
+        # every missing ID against this exact, previously validated IG account.
+        # The archive is read-only and no publication is permitted here.
+        individual = direct_probe_missing_main_posts(exc.records, page, user_id, main_state)
+        counts = {status: sum(x["status"] == status for x in individual)
+                  for status in ("verified", "not_found", "access_blocked", "ambiguous")}
         ROOT.mkdir(parents=True, exist_ok=True)
         history.save(REPORT, {
             "run_id": run_id, "status": "held_live_history_mismatch",
             "expected_parts": 20,
+            "expected_instagram_account_id": user_id,
+            "meta_page_id": str(page["page_id"]),
             "archived_ids_absent_from_list": exc.records,
+            "individual_post_checks": individual,
+            "individual_status_counts": counts,
             "provider_list_observed": len(live),
             "publication_authorized": False, "posts_created": 0,
             "reason": "provider_list_does_not_confirm_archived_ids",
