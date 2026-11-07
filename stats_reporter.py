@@ -507,8 +507,10 @@ def _read_day_records(path, day):
     result = {}
     if not Path(path).exists():
         return result
-    for line in Path(path).read_text(encoding="utf-8").splitlines():
-        if line.strip():
+    with Path(path).open("r", encoding="utf-8") as handle:
+        for line in handle:
+            if not line.strip():
+                continue
             record = json.loads(line)
             if record.get("period") == day:
                 result[(record.get("account"), record.get("platform"), record.get("entity_type"),
@@ -853,7 +855,9 @@ def build_report(now=None):
             rows.append("\n⚠️ EKSİK VERİ / İZİN:")
             rows.extend(f"• {error}" for error in errors)
         comparison = build_comparison(
-            snapshot, load_history(history_path),
+            snapshot, load_history(history_path, required_days={
+                yesterday, (report_day - timedelta(days=7)).isoformat()
+            }),
             {account: list(value[2]) for account, value in report_accounts.items()},
             report_day, now.isoformat(timespec="seconds"), delayed=delayed,
         )
