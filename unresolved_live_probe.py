@@ -38,19 +38,19 @@ def remote_evidence(state, pages, *, history_reader, status_reader):
 
 
 def summarize_film_blockers(rows):
-# Surface Film-specific blockers in public CI logs without exposing media
-# captions, Drive IDs, post IDs, token-bearing URLs, or changing the ledger.
-film_blockers = {}
-for route in ("film", "film_second"):
-    entries = [row for row in rows if row["route"] == route]
-    film_blockers[route] = {
-        "unresolved": len(entries),
-        "reasons": dict(Counter(row["reason"] for row in entries)),
-        "platforms": dict(Counter(row["platform"] for row in entries)),
-        "source_proof_required": sum(row["reason"] ==
-            "caption_candidate_requires_source_proof" for row in entries),
-        "safe_to_repost": False,
-    }
+    """Non-sensitive counts only; source identity remains unresolved."""
+    film_blockers = {}
+    for route in ("film", "film_second"):
+        entries = [row for row in rows if row["route"] == route]
+        film_blockers[route] = {
+            "unresolved": len(entries),
+            "reasons": dict(Counter(row["reason"] for row in entries)),
+            "platforms": dict(Counter(row["platform"] for row in entries)),
+            "source_proof_required": sum(
+                row["reason"] == "caption_candidate_requires_source_proof"
+                for row in entries),
+            "safe_to_repost": False,
+        }
     return film_blockers
 
 
