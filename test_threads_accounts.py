@@ -70,6 +70,47 @@ class ThreadsAccountsTests(unittest.TestCase):
 
 
     @patch("check_threads_connection.validate_threads_identity")
+    def test_partial_authorization_writes_sanitized_six_account_artifact(self, validate):
+        import json
+        import tempfile
+        from pathlib import Path
+        from requests import HTTPError
+        from unittest.mock import Mock
+        from check_threads_connection import main
+        env = {"THREADS_CHECK_ROUTE": "all"}
+        for route, prefix in THREADS_ROUTE_PREFIXES.items():
+            env[f"{prefix}_THREADS_ACCESS_TOKEN"] = f"SECRET_TOKEN_{route}"
+            env[f"{prefix}_THREADS_USERNAME"] = route
+            env[f"{prefix}_THREADS_USER_ID"] = f"identity-{route}"
+        def checker(*, token, expected_username):
+            if expected_username == "penguen":
+                response = Mock(status_code=401)
+                response.json.return_value = {
+                    "error": {"code": 190, "message": "PRIVATE_TOKEN_BODY"}}
+                raise HTTPError("PRIVATE_TOKEN_BODY", response=response)
+            return {"id": f"identity-{expected_username}", "username": expected_username}
+        validate.side_effect = checker
+        with tempfile.TemporaryDirectory() as folder, \
+             patch.dict(os.environ, env, clear=True), \
+             patch("check_threads_connection.Path",
+                   side_effect=lambda *args: Path(folder, *args)):
+            with self.assertRaisesRegex(RuntimeError, "penguen"):
+                main()
+            report = json.loads((Path(folder)/"threads-connection-readonly.json").read_text())
+        self.assertEqual(report["status"], "partial_authorization")
+        self.assertEqual(report["routes_checked"], 6)
+        self.assertEqual(report["verified_routes"], 5)
+        penguen = next(x for x in report["accounts"] if x["route"] == "penguen")
+        self.assertEqual(penguen["http_status"], 401)
+        self.assertEqual(penguen["graph_code"], 190)
+        self.assertEqual(penguen["status"], "threads_token_reauthorization_required")
+        self.assertEqual(report["provider_posts"], 0)
+        self.assertNotIn("SECRET_TOKEN", json.dumps(report))
+        self.assertNotIn("PRIVATE", json.dumps(report))
+        self.assertTrue(all(x["identity_verified"] for x in report["accounts"]
+                            if x["route"] != "penguen"))
+
+    @patch("check_threads_connection.validate_threads_identity")
     def test_all_six_routes_in_single_run_without_publishing(self, validate):
         from check_threads_connection import main
         env = {"THREADS_CHECK_ROUTE": "all"}
