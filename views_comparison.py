@@ -38,11 +38,32 @@ def _count(value):
     return None
 
 
-def load_history(path):
+def load_history(path, *, required_days=None):
+    """Read only requested baselines without loading a multi-GB archive in RAM.
+
+    Preserve the earliest recorded date for the Telegram history coverage label.
+    The returned archive-first marker has no account/metric and can never be
+    mistaken for a verified measurement.
+    """
     if not Path(path).exists():
         return []
-    return [json.loads(line) for line in Path(path).read_text(encoding="utf-8").splitlines()
-            if line.strip()]
+    selected = set(required_days) if required_days is not None else None
+    result = []
+    first_day = None
+    with Path(path).open("r", encoding="utf-8") as handle:
+        for line in handle:
+            if not line.strip():
+                continue
+            record = json.loads(line)
+            period = record.get("period")
+            if isinstance(period, str) and len(period) == 10:
+                if first_day is None or period < first_day:
+                    first_day = period
+            if selected is None or period in selected:
+                result.append(record)
+    if selected is not None and first_day and first_day not in selected:
+        result.append({"period": first_day})
+    return result
 
 
 def _baseline(history, account, platform, day, current):
