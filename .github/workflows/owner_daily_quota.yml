@@ -8,11 +8,13 @@ on:
     branches: [main]
     paths:
       - 'owner_daily_quota.py'
+      - 'youtube_permission_circuit.py'
       - 'test_owner_daily_quota.py'
       - '.github/workflows/owner_daily_quota.yml'
   pull_request:
     paths:
       - 'owner_daily_quota.py'
+      - 'youtube_permission_circuit.py'
       - 'test_owner_daily_quota.py'
       - '.github/workflows/owner_daily_quota.yml'
 permissions:

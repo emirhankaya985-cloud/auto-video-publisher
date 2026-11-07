@@ -55,6 +55,25 @@ class QuotaReadOnlyTests(unittest.TestCase):
         self.assertEqual(daily["day"], "2026-11-06")
         self.assertEqual(daily["platforms"][0]["ledger_post_ids_count"], 1)
 
+    def test_live_ledger_exposes_youtube_forbidden_circuit_without_reupload(self):
+        state = {"schema": 1, "entries": {}, "youtube_entries": {
+            f"tarladaki:source{i}": {
+                "route": "tarladaki", "status": "uncertain",
+                "upload_error": {"http_status": 403, "reasons": ["forbidden"],
+                                 "unrecognized_reason": False}}
+            for i in range(4)}}
+        before = json.dumps(state, sort_keys=True)
+        report = quota_evidence(state, now=self.NOW)
+        tarladaki = report["accounts"][0]
+        self.assertEqual(tarladaki["youtube_upload_permission_circuit"],
+                         "held_after_consecutive_insert_403_forbidden")
+        self.assertEqual(tarladaki["youtube_daily_posts"], "N/A")
+        self.assertEqual(report["accounts"][1]["youtube_upload_permission_circuit"],
+                         "no_consecutive_forbidden_evidence")
+        self.assertEqual(report["accounts"][6]["youtube_upload_permission_circuit"], "N/A")
+        self.assertEqual(report["provider_writes"], 0)
+        self.assertEqual(json.dumps(state, sort_keys=True), before)
+
     def test_bad_or_unverified_done_id_cannot_increment_success(self):
         state = {"schema": 1, "entries": {
             "tarladaki:facebook:1234567890abcdef": {

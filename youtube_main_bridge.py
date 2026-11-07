@@ -103,52 +103,9 @@ ROUTES = {
 }
 
 
-def repeated_youtube_insert_forbidden(ledger, route, threshold=3):
-    """Only three consecutive distinct stored 403/forbidden INSERT failures.
-
-    Prior successful posts break the streak. Missing/unknown evidence never
-    turns into a confirmed permission failure or an auto-reupload.
-    """
-    if route not in ROUTES or not isinstance(ledger, dict):
-        return False
-    streak, sources = 0, set()
-    for key, row in reversed(list(ledger.items())):
-        if not isinstance(row, dict) or row.get("route") != route:
-            continue
-        status = row.get("status")
-        if status == "done" and row.get("post_id"):
-            break
-        proof = row.get("upload_error")
-        if (status == "uncertain" and isinstance(proof, dict)
-                and proof.get("http_status") == 403
-                and proof.get("reasons") == ["forbidden"]
-                and proof.get("unrecognized_reason") is False
-                and isinstance(key, str) and key.startswith(route + ":")
-                and key not in sources):
-            sources.add(key)
-            streak += 1
-            if streak >= threshold:
-                return True
-        elif status in {"uncertain", "done", "accepted"}:
-            break
-    return False
-
-
-def authorize_single_recheck(state, route, release_id):
-    """One new source allowed after the owner explicitly fixes upload rights.
-
-    A new release ID is required to try again after another 403 streak;
-    a persistent environment flag cannot endlessly POST new source files.
-    """
-    if not isinstance(release_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{8,48}", release_id):
-        return False
-    releases = state.setdefault("youtube_forbidden_release_ids", {})
-    if not isinstance(releases, dict):
-        raise RuntimeError("YouTube circuit state invalid")
-    if releases.get(route) == release_id:
-        return False
-    releases[route] = release_id
-    return True
+from youtube_permission_circuit import (
+    repeated_youtube_insert_forbidden, authorize_single_recheck,
+)
 
 
 def selected(plans):

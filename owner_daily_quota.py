@@ -33,6 +33,19 @@ OWNER_ACCOUNTS = (
 POST_ID = re.compile(r"[0-9]{8,30}\Z")
 
 
+def youtube_forbidden_circuit_evidence(state, route):
+    """Read only 403 state in the publisher's existing YouTube ledger."""
+    if route not in {"tarladaki", "penguen", "gonle", "daily_laugh"}:
+        return "N/A"
+    ledger = state.get("youtube_entries")
+    if not isinstance(ledger, dict):
+        return "youtube_ledger_unavailable"
+    from youtube_permission_circuit import repeated_youtube_insert_forbidden
+    return ("held_after_consecutive_insert_403_forbidden"
+            if repeated_youtube_insert_forbidden(ledger, route)
+            else "no_consecutive_forbidden_evidence")
+
+
 def quota_evidence(state, *, now=None):
     if not isinstance(state, dict) or state.get("schema") != 1 or not isinstance(state.get("entries"), dict):
         raise ValueError("publisher_ledger_unavailable")
@@ -80,6 +93,7 @@ def quota_evidence(state, *, now=None):
             "platforms": platform_rows,
             "threads_daily_posts": "N/A",
             "youtube_daily_posts": "N/A",
+            "youtube_upload_permission_circuit": youtube_forbidden_circuit_evidence(state, route),
             "requires_provider_reconciliation": True,
         })
     return {"status": "ledger_only_not_live_verified",
@@ -107,7 +121,8 @@ def main():
         "accounts_expected": report["accounts_expected"],
         "quota": [{"account": row["account"], "day": row["day"],
                    "counts": {f"{p['route']}:{p['platform']}": p['ledger_post_ids_count']
-                              for p in row["platforms"]}}
+                              for p in row["platforms"]},
+                   "youtube_upload_permission_circuit": row["youtube_upload_permission_circuit"]}
                   for row in report["accounts"]],
         "new_provider_posts": 0}, ensure_ascii=False))
     return 0
