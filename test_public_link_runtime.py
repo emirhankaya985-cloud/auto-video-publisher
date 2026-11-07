@@ -1530,6 +1530,21 @@ class LinkRuntimeSafety(unittest.TestCase):
                 self.assertIn("SKIP Gönle Düşen 101.mp4 facebook", summary)
                 self.assertIn("NEXT: 102.mp4", summary)
 
+    def test_film_uncertain_caption_cannot_be_accepted_as_source_proof(self):
+        # Neither the early history pass nor later per-video planning may
+        # silently mark Film's uncertain Drive source as published by caption.
+        source = Path("public_link_runtime.py").read_text(encoding="utf-8")
+        self.assertIn(
+            'if route in {"film", "film_second"}:\\n'
+            '                    report.append("HELD: Film caption candidate',
+            source,
+        )
+        self.assertIn(
+            'if route in {"film", "film_second"}:\\n'
+            '                                report.append("HELD: unresolved Film source',
+            source,
+        )
+
     def test_ordered_film_caption_collision_preserves_sequence(self):
         """Old remote captions cannot lock out new unique clips or fabricate post IDs."""
         for duplicate in (False, True):
