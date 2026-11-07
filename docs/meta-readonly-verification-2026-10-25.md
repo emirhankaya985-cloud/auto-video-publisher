@@ -20,3 +20,7 @@ After PR #26, the owner explicitly requested the daily/weekly percentage tables 
 ## Owner-requested Meta publication table verification — 2 November 2026
 
 The owner requested immediate real Telegram and ntfy table verification after PRs #75 and #76. Run existing Meta read-only analytics and notification workflows once. Check publication-progress and comparison artifacts, ntfy HTTP acknowledgement and all four Telegram part acknowledgements. No video publishing, state reset or token changes. This is a partial-day manual measurement, not the nightly result.
+
+## Owner-requested one-shot Telegram statistics test — 8 November 2026
+
+Owner explicitly requested one immediate live statistics report delivered to configured Telegram. This marker triggers the existing read-only `Hesap Bazli Izlenme Raporu` push workflow once. Verify server acknowledgements and report artifacts; a manual early-day measurement is not a full-day delta. Missing credentials, incomplete API counters and unavailable prior-day baselines must remain visible as unavailable, never fabricated. No video publishing, cross-account interaction, state reset, token rotation, or changes to scheduled jobs are authorized by this marker.
