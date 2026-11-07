@@ -184,7 +184,14 @@ def audit(run_id, *, reserve=False):
         key = history.identity(CAMPAIGN, "toonzone", "instagram", row["id"])
         if (row["episode"], row["part"]) in already:
             recorded = records.get(key)
-            if not recorded or recorded.get("source_id") != row["id"] or recorded.get("file") != row["name"]:
+            # An existing main-publisher post is verified by source ID and
+            # provider GET, even when this separate campaign has no history.
+            # Never invent an entry in the campaign journal.
+            if recorded is not None and (
+                    recorded.get("source_id") != row["id"]
+                    or recorded.get("file") != row["name"]):
+                raise RuntimeError("previous_source_identity_changed")
+            if (row["episode"], row["part"]) not in main_posts and recorded is None:
                 raise RuntimeError("previous_source_identity_changed")
             continue
         name = Path(row["name"]).stem + ".png"
