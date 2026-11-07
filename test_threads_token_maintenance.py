@@ -1,9 +1,10 @@
 """No live requests or credential writes in token rotation safety tests."""
 import os
+import requests
 import unittest
 from unittest.mock import Mock, patch
 
-from threads_token_maintenance import rotate, github_secret_store, SECRET_NAMES
+from threads_token_maintenance import rotate, github_secret_store, SECRET_NAMES, classify_current_token_error
 
 
 class ThreadsRotationTests(unittest.TestCase):
@@ -34,13 +35,22 @@ class ThreadsRotationTests(unittest.TestCase):
 
     @patch("threads_token_maintenance.validate_threads_identity")
     def test_401_existing_token_is_never_refreshed_or_stored(self, check):
-        check.side_effect = RuntimeError("private provider response")
+        check.side_effect = requests.HTTPError("private provider response",
+                                               response=Mock(status_code=401))
         session, store = Mock(), Mock()
         with patch.dict(os.environ, self.env(), clear=True):
             with self.assertRaisesRegex(RuntimeError, "reauthorization_required"):
                 rotate("penguen", session=session, persist=store)
         session.get.assert_not_called()
         store.assert_not_called()
+
+    def test_transient_network_failure_does_not_falsely_demand_reauthorization(self):
+        self.assertEqual(classify_current_token_error(
+            requests.Timeout("provider private text")),
+            "threads_identity_unverified_no_automatic_rotation")
+        self.assertEqual(classify_current_token_error(
+            RuntimeError("Threads token beklenen Beyinsiz Penguen hesabıyla eşleşmedi.")),
+            "threads_profile_identity_mismatch")
 
     @patch("threads_token_maintenance.validate_threads_identity")
     def test_changed_identity_never_persists_secrets(self, check):

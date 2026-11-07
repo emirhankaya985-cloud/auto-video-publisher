@@ -22,6 +22,17 @@ SECRET_NAMES = {
 REFRESH_URL = "https://graph.threads.net/refresh_access_token"
 
 
+def classify_current_token_error(error):
+    """Never confuse transient GET failures with revoked login credentials."""
+    status = getattr(getattr(error, "response", None), "status_code", None)
+    if type(status) is int and status in (400, 401):
+        return "threads_token_reauthorization_required"
+    if (type(error) is RuntimeError
+            and str(error) == "Threads token beklenen Beyinsiz Penguen hesabıyla eşleşmedi."):
+        return "threads_profile_identity_mismatch"
+    return "threads_identity_unverified_no_automatic_rotation"
+
+
 def rotate(route, *, session=requests, persist):
     """Exchange only a VALID token; verify both identities before secret commit.
 
@@ -33,8 +44,8 @@ def rotate(route, *, session=requests, persist):
     try:
         original = validate_threads_identity(token=account.token,
             expected_username=account.username, session=session)
-    except Exception:
-        raise RuntimeError("threads_current_token_invalid_reauthorization_required") from None
+    except Exception as exc:
+        raise RuntimeError(classify_current_token_error(exc)) from None
     if account.expected_user_id and account.expected_user_id != str(original["id"]):
         raise RuntimeError("threads_existing_identity_mismatch")
     try:

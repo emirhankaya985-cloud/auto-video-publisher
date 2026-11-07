@@ -238,6 +238,21 @@ class UncertainSourceReadOnlyTests(unittest.TestCase):
             youtube.videos().list().execute.return_value["items"][0]["status"] = status
             self.assertEqual(self.run_probe(youtube)["status"], expected)
 
+    def test_archived_403_forbidden_is_permission_evidence_not_retry_permission(self):
+        row = self.uncertain(upload_error={
+            "http_status": 403, "reasons": ["forbidden"],
+            "unrecognized_reason": False})
+        before = json.loads(json.dumps(row))
+        youtube = self.youtube([{"items": []}])
+        result = self.run_probe(youtube, row=row)
+        self.assertEqual(result["status"], "uncertain_marker_not_found")
+        self.assertEqual(result["upload_diagnostic"]["http_status"], 403)
+        self.assertEqual(result["upload_diagnostic"]["category"],
+                         "youtube_insert_forbidden_permission_unresolved")
+        self.assertFalse(result["upload_diagnostic"]["safe_to_reupload"])
+        self.assertEqual(row, before)
+        youtube.videos().insert.assert_not_called()
+
     def test_bad_source_binding_never_contacts_google(self):
         for key, changes in [
             ("gonle:other", {}), (self.key, {"source_id": "other"}),
