@@ -19,6 +19,15 @@ class TikTokPreflightTests(unittest.TestCase):
         self.assertTrue(row["blocked"])
         self.assertNotIn("secret", str(row))
 
+    def test_all_flags_present_cannot_be_mistaken_for_live_publish_approval(self):
+        row = target.readiness(environ={
+            "TIKTOK_ACCESS_TOKEN": "private-token", "TIKTOK_OPEN_ID": "creator",
+            "TIKTOK_APP_AUDITED": "true", "TIKTOK_PUBLISH_ENABLED": "true"})
+        self.assertTrue(row["prerequisites_declared"])
+        self.assertTrue(row["blocked"])
+        self.assertFalse(row["authorization_live_verified"])
+        self.assertNotIn("private-token", str(row))
+
     def test_probe_requires_explicit_opt_in_no_network(self):
         session = Mock()
         with self.assertRaisesRegex(RuntimeError, "not_enabled"):

@@ -24,8 +24,9 @@ def readiness(*, environ=None):
         "token_configured": token, "open_id_configured": open_id,
         "app_audited_declared": approved, "publishing_requested": enabled,
         "authorization_live_verified": False,
-        "blocked": not (token and open_id and approved and enabled),
-        "note": "A configured token or flag does not prove video.publish approval, creator settings or domain verification.",
+        "prerequisites_declared": token and open_id and approved and enabled,
+        "blocked": True,
+        "note": "Flags cannot prove live authorization, video.publish scope, creator settings, audit or domain ownership; no publishing is authorized.",
     }
 
 

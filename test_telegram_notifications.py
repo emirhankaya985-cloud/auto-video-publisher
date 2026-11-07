@@ -28,6 +28,7 @@ class TelegramNotificationTests(unittest.TestCase):
             self.assertTrue(telegram_configured())
             result = send_telegram("✅ Test", "Daily report", session=transport)
         self.assertEqual(result["server_ack"], True)
+        self.assertEqual(result["message_id"], 42)
         args, kw = transport.post.call_args
         self.assertTrue(args[0].startswith("https://api.telegram.org/bot"))
         self.assertEqual(kw["json"]["chat_id"], ENV["TELEGRAM_CHAT_ID"])

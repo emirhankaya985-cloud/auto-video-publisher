@@ -8,8 +8,8 @@ from youtube_authorize_channel import TOKEN_PATHS, authorize, verify_selected_ch
 
 
 class YoutubeOauthSetupTests(unittest.TestCase):
-    def test_targets_are_exactly_three_expected_channels(self):
-        self.assertEqual(set(TOKEN_PATHS), {"channel1", "channel2", "daily_laugh"})
+    def test_targets_are_exactly_four_expected_channels(self):
+        self.assertEqual(set(TOKEN_PATHS), {"channel1", "channel2", "daily_laugh", "gonle_dusen"})
 
     def test_does_not_overwrite_existing_token_or_run_oauth(self):
         with tempfile.TemporaryDirectory() as dirname:
@@ -25,6 +25,9 @@ class YoutubeOauthSetupTests(unittest.TestCase):
             with self.assertRaises(FileNotFoundError):
                 authorize("daily_laugh", base_dir=dirname)
             self.assertFalse((Path(dirname) / TOKEN_PATHS["daily_laugh"]).exists())
+            with self.assertRaises(FileNotFoundError):
+                authorize("gonle_dusen", base_dir=dirname)
+            self.assertFalse((Path(dirname) / TOKEN_PATHS["gonle_dusen"]).exists())
 
     def test_readonly_identity_verification_and_no_post(self):
         fake = Mock()
