@@ -22,6 +22,13 @@ class StatusTableTests(unittest.TestCase):
         self.assertNotIn('0/5', status_table(now=self.now))
         self.assertLess(len(table.encode('utf-16-le')) // 2, 3600)
 
+    def test_seventh_account_explicitly_unconfigured_without_inventing_posts(self):
+        table = status_table(now=self.now, state={'entries': {}}, configured=True)
+        self.assertIn('OddFrames', table)
+        self.assertIn('Kimlik/hak bekleniyor', table)
+        self.assertIn('kota ve yayın sayısı N/A', table)
+        self.assertNotIn('OddFrames      0/5', table)
+
     def test_actual_gate_configuration_is_distinct_from_counts(self):
         with patch.dict(os.environ, {'LINK_AUTOMATION_ENABLED': 'true',
                                      'ENABLE_TP_NORMAL_ROUTES': 'true',
