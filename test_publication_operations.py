@@ -8,7 +8,7 @@ from pathlib import Path
 
 from publication_operations import (create_backup, restore_backup, series_report,
                                     verify_publications, verify_publications_with_retry,
-                                    checked_backup)
+                                    checked_backup, audit_unresolved_remote)
 
 
 def entry(part, status='done', post='100', route='film', platform='instagram'):
@@ -97,6 +97,42 @@ class OperationsTests(unittest.TestCase):
         self.assertEqual(report[0]['status'], 'verified')
         self.assertEqual(state, original)
         self.assertEqual(calls, [('film', 'instagram')])
+
+    def test_unresolved_remote_audit_never_resolves_by_caption_alone(self):
+        from public_link_runtime import caption_key
+        original = dict(schema=1, entries={
+            'a': dict(entry(1, 'uncertain', post=''), caption_hash=caption_key('Exact caption')),
+            'b': dict(entry(2, 'held', post=''), failure={'reason': 'visual_duplicate_review'}),
+            'c': dict(entry(3, 'uncertain', post=''), caption_hash=caption_key('missing')),
+        })
+        before = copy.deepcopy(original)
+        reads = []
+        def history(route, platform):
+            reads.append((route, platform))
+            return [{'id': '500', 'caption': 'Exact caption'}]
+        result = audit_unresolved_remote(original, history)
+        self.assertEqual([row['reason'] for row in result],
+            ['caption_candidate_requires_source_proof',
+             'visual_duplicate_requires_owner_review',
+             'not_observed_in_bounded_remote_history'])
+        self.assertEqual(result[0]['candidate_post_id'], '500')
+        self.assertTrue(all(row['safe_to_repost'] is False for row in result))
+        self.assertEqual(reads, [('film', 'instagram')])
+        self.assertEqual(original, before)
+
+    def test_unresolved_remote_audit_history_failure_never_becomes_absence(self):
+        from public_link_runtime import caption_key
+        state = dict(schema=1, entries={
+            'a': dict(entry(1, 'uncertain', post=''), caption_hash=caption_key('caption')),
+            'b': dict(entry(2, 'uncertain', post=''), caption_hash=caption_key('caption'))})
+        calls = []
+        def fails(*args):
+            calls.append(1)
+            raise RuntimeError('provider token=private')
+        result = audit_unresolved_remote(state, fails)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual([x['reason'] for x in result], ['remote_history_unavailable'] * 2)
+        self.assertNotIn('private', str(result))
 
     def test_history_failure_and_missing_never_grant_repost(self):
         state = dict(schema=1, entries={'a': entry(1), 'b': entry(2, post='200')})
