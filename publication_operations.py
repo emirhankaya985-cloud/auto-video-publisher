@@ -165,6 +165,65 @@ def verify_publications_with_retry(state, run_id, read_history, *, sleep=time.sl
     return results
 
 
+def audit_unresolved_remote(state, read_history):
+    """GET-only candidate search; never resolves, mutates, or republishes an intent.
+
+    A caption match is *not* a trustworthy source-video identity. A provider's
+    bounded feed cannot prove a post is absent. Both conclusions remain held.
+    """
+    from public_link_runtime import caption_key
+    rows = [(key, row) for key, row in validate(state)['entries'].items()
+            if row.get('status') in {'intent', 'uncertain', 'held'}]
+    if len(rows) > 128:
+        raise ValueError('too_many_unresolved_entries')
+    allowed_routes = {'tarladaki', 'penguen', 'gonle', 'daily_laugh',
+                      'film', 'film_second', 'toonzone'}
+    cache, result = {}, []
+    for key, row in rows:
+        route, platform = row.get('route'), row.get('platform')
+        entry = {'route': route if route in allowed_routes else 'unknown',
+                 'platform': platform if platform in ('facebook', 'instagram') else 'unknown',
+                 'status': row['status'], 'safe_to_repost': False}
+        prior = row.get('failure') if isinstance(row.get('failure'), dict) else {}
+        if prior.get('reason') == 'visual_duplicate_review':
+            entry['reason'] = 'visual_duplicate_requires_owner_review'
+            result.append(entry)
+            continue
+        digest = row.get('caption_hash')
+        if not isinstance(digest, str) or re.fullmatch(r'[0-9a-f]{64}', digest) is None:
+            entry['reason'] = 'stored_caption_hash_missing'
+            result.append(entry)
+            continue
+        pair = (route, platform)
+        if route not in allowed_routes or platform not in ('facebook', 'instagram'):
+            entry['reason'] = 'unsupported_route'
+            result.append(entry)
+            continue
+        if pair not in cache:
+            try:
+                feed = read_history(route, platform)
+                if not isinstance(feed, list) or any(not isinstance(item, dict) for item in feed):
+                    raise ValueError('invalid_provider_feed')
+                cache[pair] = feed
+            except Exception:
+                cache[pair] = None
+        if cache[pair] is None:
+            entry['reason'] = 'remote_history_unavailable'
+        else:
+            matches = {str(item.get('id')) for item in cache[pair]
+                       if str(item.get('id', '')).isdecimal()
+                       and caption_key(item.get('caption') or item.get('description') or '') == digest}
+            if len(matches) == 1:
+                entry['reason'] = 'caption_candidate_requires_source_proof'
+                entry['candidate_post_id'] = next(iter(matches))
+            elif matches:
+                entry['reason'] = 'multiple_caption_candidates_need_review'
+            else:
+                entry['reason'] = 'not_observed_in_bounded_remote_history'
+        result.append(entry)
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--root', type=Path, default=Path('link-runtime'))
@@ -199,6 +258,7 @@ def main():
         report['verification'] = verify_publications_with_retry(
             state, os.environ['GITHUB_RUN_ID'], history
         )
+        report['previous_unresolved_remote'] = audit_unresolved_remote(state, history)
     report['checked_at'] = datetime.now(timezone.utc).isoformat()
     (args.root / 'operations-report.json').write_text(
         json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
