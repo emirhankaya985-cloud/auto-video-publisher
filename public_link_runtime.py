@@ -68,6 +68,13 @@ ROUTES = {
 
 def save(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
+    if path == STATE and isinstance(value, dict) and isinstance(value.get("entries"), dict):
+        # Rebuild on every state write, including after a successful Meta POST.
+        # Persist in the SAME link-state-result/intent artifact so subsequent
+        # GitHub runners resume from verified IDs, not an in-memory counter.
+        # Unordered Daily Laugh is deliberately excluded from serial cursor.
+        from serial_publication_cursor import derive_serial_cursor
+        value["serial_cursor"] = derive_serial_cursor(value)
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
