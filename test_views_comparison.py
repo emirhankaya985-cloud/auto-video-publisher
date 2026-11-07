@@ -122,7 +122,8 @@ class ViewComparisonTests(unittest.TestCase):
             stats_reporter.notify(report)
         self.assertEqual(send.call_count, 3)
         self.assertTrue(all(c.kwargs["parse_mode"] == "HTML" for c in send.call_args_list))
-        self.assertEqual(send.call_args_list[0].kwargs["reply_markup"]["keyboard"], [[{"text": "📊 İstatistik"}], [{"text": "🧵 Threads İstatistik"}]])
+        from telegram_notifications import STATISTICS_KEYBOARD
+        self.assertEqual(send.call_args_list[0].kwargs["reply_markup"], STATISTICS_KEYBOARD)
         self.assertTrue(all("reply_markup" not in c.kwargs for c in send.call_args_list[1:]))
 
     def test_html_transport_adds_parse_mode_and_refuses_truncated_markup(self):
