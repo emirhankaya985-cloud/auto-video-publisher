@@ -92,6 +92,59 @@ class DurableBackupTests(unittest.TestCase):
             self.assertIn('verified_at', receipt)
         self.assertEqual(drive.created, 1)
 
+    def test_legacy_owner_private_backup_folder_is_reused(self):
+        class ExistingFolderDrive(FakeDrive):
+            def __init__(self):
+                super().__init__()
+                self.folder = 'existing-legacy-folder'
+
+            def list(self, q, **kwargs):
+                if "publisher_backup" in q:
+                    return Response({'files': []})
+                if "name='Auto Video Publisher Recovery Backups'" in q:
+                    return Response({'files': [{'id': self.folder}]})
+                return super().list(q, **kwargs)
+
+            def create(self, body, media_body=None, **kwargs):
+                if media_body is None:
+                    raise AssertionError('must not create a duplicate Drive folder')
+                return super().create(body, media_body=media_body, **kwargs)
+
+        drive = ExistingFolderDrive()
+        proof = persist(drive, self.data(), media_factory=lambda src, **kw: src)
+        self.assertTrue(proof['isolated_restore_verified'])
+        self.assertEqual(drive.created, 1)
+        proof2 = persist(drive, self.data(), media_factory=lambda src, **kw: src)
+        self.assertEqual(proof2['file_id'], proof['file_id'])
+        self.assertEqual(drive.created, 1)
+
+    def test_ambiguous_or_shared_legacy_folder_never_uploads(self):
+        class LegacyFolderDrive(FakeDrive):
+            def __init__(self, ambiguous=False):
+                super().__init__()
+                self.folder = 'existing-legacy-folder'
+                self.ambiguous = ambiguous
+
+            def list(self, q, **kwargs):
+                if "publisher_backup" in q:
+                    return Response({'files': []})
+                if "name='Auto Video Publisher Recovery Backups'" in q:
+                    rows = [{'id': self.folder}]
+                    if self.ambiguous:
+                        rows.append({'id': 'second-folder'})
+                    return Response({'files': rows})
+                return super().list(q, **kwargs)
+
+        drive = LegacyFolderDrive(ambiguous=True)
+        with self.assertRaisesRegex(ValueError, 'ambiguous backup folder'):
+            persist(drive, self.data())
+        self.assertEqual(drive.created, 0)
+        drive = LegacyFolderDrive()
+        drive.permission_rows.append({'type': 'anyone', 'role': 'reader'})
+        with self.assertRaisesRegex(ValueError, 'destination is shared'):
+            persist(drive, self.data())
+        self.assertEqual(drive.created, 0)
+
     def test_download_corruption_never_reports_success(self):
         drive = FakeDrive()
         drive.corrupt = True

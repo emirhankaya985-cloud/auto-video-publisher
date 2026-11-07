@@ -131,9 +131,20 @@ def private_folder(drive):
     if matches:
         folder_id = matches[0]['id']
     else:
-        folder_id = drive.files().create(body={'name': FOLDER,
-            'mimeType': 'application/vnd.google-apps.folder',
-            'appProperties': {'publisher_backup': MARKER}}, fields='id').execute()['id']
+        # The owner already has a private backup folder created before this
+        # marker was introduced. Reuse exactly one named folder instead of
+        # silently creating a second location for the same recovery stream.
+        legacy_query = ("trashed=false and mimeType='application/vnd.google-apps.folder' "
+                        "and name='" + FOLDER + "'")
+        legacy = list_files(drive, legacy_query)
+        if len(legacy) > 1:
+            raise ValueError('ambiguous backup folder')
+        if legacy:
+            folder_id = legacy[0]['id']
+        else:
+            folder_id = drive.files().create(body={'name': FOLDER,
+                'mimeType': 'application/vnd.google-apps.folder',
+                'appProperties': {'publisher_backup': MARKER}}, fields='id').execute()['id']
     # Never write a state bundle into a shared/public destination.
     permissions = drive.permissions().list(fileId=folder_id, fields='permissions(type,role)').execute()
     if any(p.get('type') != 'user' or p.get('role') != 'owner'
