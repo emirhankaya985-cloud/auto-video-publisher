@@ -121,7 +121,7 @@ def confirmed_media_error_is_pre_publish(exc):
 _TWO_ALTERNATE_PROFILE_ROUTES = frozenset({
     "tarladaki", "penguen", "daily_laugh", "gonle",
 })
-_ONE_ALTERNATE_PROFILE_ROUTES = frozenset({"film", "toonzone"})
+_ORDERED_ALTERNATE_PROFILE_ROUTES = frozenset({"film", "film_second", "toonzone"})
 _PRE_PUBLISH_STAGES = frozenset({
     "Instagram ikili video aktarımı", "Instagram video işleme durumu",
 })
@@ -132,7 +132,8 @@ def known_pre_publish_media_rejection(exc, route, previous_retries=0):
 
     A short Reel can try the initial profile followed by two distinct
     validated local transcodes, on separate scheduled runs. Ordered Film and
-    ToonZone have only their old one-profile auto gate; historical one-off
+    ToonZone also get two distinct bounded profiles only when binary processing
+    was definitively rejected before media_publish; historical one-off
     rescue approvals remain separate and unchanged.
 
     This NEVER retries a timed-out POST, container creation, media_publish,
@@ -145,8 +146,8 @@ def known_pre_publish_media_rejection(exc, route, previous_retries=0):
         return False
     if route in _TWO_ALTERNATE_PROFILE_ROUTES:
         allowed = previous_retries < 2
-    elif route in _ONE_ALTERNATE_PROFILE_ROUTES:
-        allowed = previous_retries == 0
+    elif route in _ORDERED_ALTERNATE_PROFILE_ROUTES:
+        allowed = previous_retries < 2
     else:
         return False
     if not allowed or getattr(exc, "stage", None) not in _PRE_PUBLISH_STAGES:
