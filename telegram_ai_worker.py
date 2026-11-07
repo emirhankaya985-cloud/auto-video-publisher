@@ -14,7 +14,8 @@ import requests
 from analytics_github_history import REPOSITORY, MAX_ARCHIVE_BYTES, restore_history
 from nvidia_assistant import answer, enabled
 from telegram_notifications import (STATISTICS_BUTTON, THREADS_STATISTICS_BUTTON,
-                                    STATISTICS_KEYBOARD, _BOT_TOKEN, _CHAT_ID, send_telegram)
+                                    STATISTICS_KEYBOARD, THREADS_CALLBACK_DATA,
+                                    THREADS_INLINE_KEYBOARD, _BOT_TOKEN, _CHAT_ID, send_telegram)
 from telegram_status import load_status
 from views_comparison import number
 
@@ -234,7 +235,7 @@ def load_threads_statistics(*, session=requests):
 class Worker:
     def __init__(self, database, *, evidence_loader=latest_evidence, model=answer, sender=send_telegram,
                  status_loader=load_status, statistics_loader=load_statistics,
-                 threads_statistics_loader=load_threads_statistics):
+                 threads_statistics_loader=load_threads_statistics, callback_ack=None):
         self.chat = os.getenv("TELEGRAM_CHAT_ID", "")
         self.owner = os.getenv("TELEGRAM_AI_OWNER_ID", "")
         token = os.getenv("TELEGRAM_BOT_TOKEN", "")
@@ -252,6 +253,7 @@ class Worker:
         self.load_status = status_loader
         self.load_statistics = statistics_loader
         self.load_threads_statistics = threads_statistics_loader
+        self.callback_ack = callback_ack
 
     def offset(self):
         row = self.db.execute("SELECT value FROM state WHERE key='offset'").fetchone()
@@ -268,6 +270,25 @@ class Worker:
         # Persist before any external call. Crashes/uncertain send are not replayed.
         self.db.execute("INSERT OR REPLACE INTO state VALUES ('offset', ?)", (str(uid + 1),))
         self.db.commit()
+        callback = update.get("callback_query")
+        if isinstance(callback, dict):
+            source = callback.get("message") or {}
+            person = callback.get("from") or {}
+            chat = source.get("chat") or {}
+            callback_id = callback.get("id")
+            if (self.status_only and callback.get("data") == THREADS_CALLBACK_DATA
+                    and str(chat.get("id")) == self.chat
+                    and str(person.get("id")) == self.owner
+                    and person.get("is_bot") is not True
+                    and isinstance(callback_id, str) and 1 <= len(callback_id) <= 128):
+                try:
+                    reply = self.load_threads_statistics()
+                except Exception:
+                    reply = 'Threads istatistik arşivi şu anda doğrulanamadı. Sayı tahmin edilmedi.'
+                self.send(THREADS_STATISTICS_BUTTON, reply, reply_markup=THREADS_INLINE_KEYBOARD)
+                if self.callback_ack is not None:
+                    self.callback_ack(callback_id)
+            return
         message = update.get("message", {})
         if (str(message.get("chat", {}).get("id")) != self.chat or
                 str(message.get("from", {}).get("id")) != self.owner or message.get("from", {}).get("is_bot") is True):
@@ -303,7 +324,7 @@ class Worker:
                     reply = self.load_threads_statistics()
                 except Exception:
                     reply = 'Threads arşivi şu anda okunamadı. Sayı tahmin edilmedi.'
-                self.send(THREADS_STATISTICS_BUTTON, reply, reply_markup=STATISTICS_KEYBOARD)
+                self.send(THREADS_STATISTICS_BUTTON, reply, reply_markup=THREADS_INLINE_KEYBOARD)
             return
         if text.strip() in {"/start", "/help"}:
             self.send("🤖 Sosyal medya yardımcısı", "/durum: veri tarihi\n/sifirla: sohbeti unut")

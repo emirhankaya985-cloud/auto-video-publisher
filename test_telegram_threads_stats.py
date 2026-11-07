@@ -6,7 +6,8 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from telegram_ai_worker import Worker, load_threads_statistics
-from telegram_notifications import THREADS_STATISTICS_BUTTON, STATISTICS_KEYBOARD
+from telegram_notifications import (THREADS_STATISTICS_BUTTON, STATISTICS_KEYBOARD,
+                                    THREADS_CALLBACK_DATA, THREADS_INLINE_KEYBOARD)
 
 
 class ThreadsStatusTests(unittest.TestCase):
@@ -60,6 +61,31 @@ class ThreadsStatusTests(unittest.TestCase):
             finally:
                 worker.db.close()
 
+    def test_threads_inline_callback_is_owner_only_and_reserves_single_ack(self):
+        env = {"TELEGRAM_STATUS_ONLY": "true", "TELEGRAM_BOT_TOKEN": "123456:" + "A" * 30,
+               "TELEGRAM_CHAT_ID": "123456789", "TELEGRAM_AI_OWNER_ID": "123456789"}
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, env, clear=True):
+            send, ack, threads = Mock(), Mock(), Mock(return_value="Threads callback measured")
+            worker = Worker(str(Path(tmp) / "store.sqlite3"), sender=send,
+                            threads_statistics_loader=threads, callback_ack=ack)
+            try:
+                def callback(uid, sender):
+                    return {"update_id": uid, "callback_query": {
+                        "id": "cb_"+str(uid), "data": THREADS_CALLBACK_DATA,
+                        "from": {"id": sender, "is_bot": False},
+                        "message": {"chat": {"id": 123456789, "type": "private"}}}}
+                worker.handle(callback(1, 999))
+                worker.handle(callback(2, 123456789))
+                worker.handle(callback(2, 123456789))
+                worker.handle(callback(3, 999))
+                send.assert_called_once_with(THREADS_STATISTICS_BUTTON,
+                    "Threads callback measured", reply_markup=THREADS_INLINE_KEYBOARD)
+                ack.assert_called_once_with("cb_2")
+                threads.assert_called_once()
+                self.assertEqual(worker.offset(), 4)
+            finally:
+                worker.db.close()
+
     def test_owner_only_threads_command_and_separate_button(self):
         env = {"TELEGRAM_STATUS_ONLY": "true", "TELEGRAM_BOT_TOKEN": "123456:" + "A" * 30,
                "TELEGRAM_CHAT_ID": "123456789", "TELEGRAM_AI_OWNER_ID": "123456789"}
@@ -76,7 +102,7 @@ class ThreadsStatusTests(unittest.TestCase):
                 self.assertEqual(send.call_count, 2)
                 self.assertEqual(threads.call_count, 2)
                 stats.assert_not_called()
-                self.assertEqual(send.call_args.kwargs["reply_markup"], STATISTICS_KEYBOARD)
+                self.assertEqual(send.call_args.kwargs["reply_markup"], THREADS_INLINE_KEYBOARD)
             finally:
                 worker.db.close()
 

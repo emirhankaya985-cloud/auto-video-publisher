@@ -83,6 +83,9 @@ def prepare(*, session=requests):
     messages = []
     def reserve(title, message, **kwargs):
         messages.append({'title': title, 'message': message, **kwargs})
+    def reserve_callback_ack(callback_id):
+        # No network call during prepare; the checkpoint is archived first.
+        messages.append({'kind': 'callback_ack', 'callback_id': callback_id})
 
     @cache
     def statistics():
@@ -94,7 +97,8 @@ def prepare(*, session=requests):
 
     worker = Worker(str(database), sender=reserve, status_loader=status,
                     statistics_loader=statistics,
-                    threads_statistics_loader=threads_statistics)
+                    threads_statistics_loader=threads_statistics,
+                    callback_ack=reserve_callback_ack)
     (ROOT/'checkpoint-ready').write_text('valid', encoding='utf-8')
     try:
         if worker.db.execute("SELECT value FROM state WHERE key='inbox_blocked'").fetchone():
@@ -109,7 +113,7 @@ def prepare(*, session=requests):
             raise RuntimeError('webhook_active_or_unknown')
         response = session.get(worker.url+'getUpdates',
             params={'offset': worker.offset(), 'timeout': 0, 'limit': 20,
-                    'allowed_updates': json.dumps(['message'])}, timeout=15, allow_redirects=False)
+                    'allowed_updates': json.dumps(['message', 'callback_query'])}, timeout=15, allow_redirects=False)
         # In particular, a 409 is a competing-consumer incident, never retried.
         if response.status_code == 409:
             worker.db.execute("INSERT OR REPLACE INTO state VALUES ('inbox_blocked', 'consumer_conflict')")
@@ -128,13 +132,38 @@ def prepare(*, session=requests):
                       'messages_sent': 0, 'publisher_writes': 0}))
 
 
-def send():
+def send(*, session=requests):
     messages = json.loads((ROOT/'reserved-replies.json').read_text(encoding='utf-8'))
-    count = 0
+    count = callback_count = 0
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    from telegram_notifications import _BOT_TOKEN
+    if any(isinstance(m, dict) and m.get('kind') == 'callback_ack' for m in messages):
+        if not _BOT_TOKEN.fullmatch(token):
+            raise RuntimeError('telegram_callback_token_unavailable')
+    # ACK callback before reply; GitHub scheduled polls can be delayed.
+    # Never retry either operation after an ambiguous network result.
     for message in messages:
+        if isinstance(message, dict) and message.get('kind') == 'callback_ack':
+            identifier = message.get('callback_id')
+            if not isinstance(identifier, str) or not 1 <= len(identifier) <= 128:
+                raise RuntimeError('telegram_callback_identifier_invalid')
+            try:
+                response = session.post(
+                    'https://api.telegram.org/bot' + token + '/answerCallbackQuery',
+                    json={'callback_query_id': identifier},
+                    timeout=15, allow_redirects=False)
+                if response.status_code != 200 or response.json().get('ok') is not True:
+                    raise RuntimeError('telegram_callback_not_accepted')
+            except Exception:
+                raise RuntimeError('telegram_callback_receipt_unverified') from None
+            callback_count += 1
+    for message in messages:
+        if isinstance(message, dict) and message.get('kind') == 'callback_ack':
+            continue
         send_telegram(**message)
         count += 1
-    print(json.dumps({'server_acks': count, 'phone_delivery_verified': False}))
+    print(json.dumps({'server_acks': count, 'callback_server_acks': callback_count,
+                      'phone_delivery_verified': False}))
 
 
 if __name__ == '__main__':

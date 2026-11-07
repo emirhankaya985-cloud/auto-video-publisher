@@ -59,6 +59,38 @@ class InboxTests(unittest.TestCase):
                                              'keyboard': [[{'text': '📊 İstatistik'}], [{'text': '🧵 Threads İstatistik'}]],
                                              'resize_keyboard': True, 'is_persistent': True})
 
+    def test_inline_callback_is_reserved_before_API_ack_and_without_replay(self):
+        update = {"update_id": 10, "callback_query": {
+            "id": "callback123", "data": "owner:threads-stats:v1",
+            "from": {"id": 123456789},
+            "message": {"chat": {"id": 123456789, "type": "private"}}}}
+        session = Mock()
+        session.get.side_effect = [self.response({"ok": True, "result": {"url": ""}}),
+                                  self.response({"ok": True, "result": [update]})]
+        with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, self.env, clear=True), \
+             patch.object(inbox, "ROOT", Path(temp)), patch.object(inbox, "restore_checkpoint"), \
+             patch.object(inbox, "load_threads_statistics", return_value="Threads values"), \
+             patch.object(inbox, "send_telegram") as sender:
+            inbox.prepare(session=session)
+            sender.assert_not_called()
+            with sqlite3.connect(Path(temp)/"telegram.sqlite3") as db:
+                self.assertEqual(db.execute("SELECT value FROM state WHERE key='offset'").fetchone()[0], "11")
+            reserved = json.loads((Path(temp)/"reserved-replies.json").read_text())
+            self.assertEqual(len(reserved), 2)
+            self.assertEqual(reserved[1], {"kind": "callback_ack", "callback_id": "callback123"})
+            sender_response = Mock(status_code=200)
+            sender_response.json.return_value = {"ok": True, "result": True}
+            session.post.return_value = sender_response
+            inbox.send(session=session)
+            session.post.assert_called_once()
+            self.assertTrue(session.post.call_args.args[0].endswith("/answerCallbackQuery"))
+            sender.assert_called_once()
+            session.post.reset_mock()
+            session.post.side_effect = TimeoutError("provider sensitive")
+            with self.assertRaisesRegex(RuntimeError, "telegram_callback_receipt_unverified"):
+                inbox.send(session=session)
+            self.assertEqual(sender.call_count, 1)
+
     def test_existing_webhook_is_never_deleted_or_consumed(self):
         session = Mock()
         session.get.return_value = self.response({'ok': True, 'result': {'url': 'https://private.invalid'}})
