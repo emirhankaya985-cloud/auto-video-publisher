@@ -71,6 +71,10 @@ jobs:
           retention-days: 30
   publish:
     needs: [tests, live-audit]
+    # Share the normal publisher lock across reserve, persisted intent and POSTs.
+    concurrency:
+      group: public-drive-recovery
+      cancel-in-progress: false
     if: >-
       github.ref == 'refs/heads/main' &&
       github.event_name == 'workflow_dispatch' &&

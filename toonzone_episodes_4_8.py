@@ -85,6 +85,29 @@ def conflicts(live, existing):
     return verified
 
 
+def preflight_sources(items):
+    """Read and validate every pending source before reserving any provider write.
+
+    Keep only hashes, not twenty potentially large MP4s. Publication downloads
+    must match these bytes, so a replaced Drive file cannot silently pass.
+    """
+    from public_link_runtime import download_verified_publication_video
+    result = []
+    with tempfile.TemporaryDirectory(prefix="toonzone-source-preflight-") as directory:
+        for item in items:
+            path = download_verified_publication_video(item["id"], Path(directory) / "source.mp4")
+            result.append(dict(item, source_sha256=digest(path)))
+            path.unlink()
+    return result
+
+
+def verify_reserved_source(source, item, record):
+    expected = record.get("source_sha256")
+    if (not isinstance(expected, str) or not re.fullmatch(r"[0-9a-f]{64}", expected)
+            or item.get("source_sha256") != expected or digest(source) != expected):
+        raise RuntimeError("source_changed_since_preflight")
+
+
 def audit(run_id, *, reserve=False):
     from public_link_runtime import FOLDERS, inventory, graph_rows, download, probe
     page = page_for_toonzone()
@@ -119,9 +142,11 @@ def audit(run_id, *, reserve=False):
         caption = text_for(row)
         prepared.append(dict(row, key=key, text=caption, cover_id=cover["id"],
                              cover_path=str(path), cover_sha256=digest(path)))
+    prepared = preflight_sources(prepared)
     report = {"run_id": run_id, "target_episodes": [4, 5, 6, 7, 8],
               "expected_parts": 20, "previously_verified": len(already),
               "prepared_parts": len(prepared), "exact_covers_verified": len(prepared),
+              "source_files_verified": len(prepared),
               "instagram_identity_verified": True, "live_history_read": True,
               "publication_authorized": reserve,
               "posts_created": 0}
@@ -144,6 +169,7 @@ def audit(run_id, *, reserve=False):
         records[item["key"]] = {"status": "reserved", "intent_run_id": run_id,
             "user_id": user_id, "platform": "instagram", "route": "toonzone",
             "source_id": item["id"], "file": item["name"], "cover_id": item["cover_id"],
+            "source_sha256": item["source_sha256"],
             "cover_sha256": item["cover_sha256"], "caption": item["text"],
             "last_seen": history.now_utc().isoformat()}
     history.save(HISTORY, history.validate(archive))
@@ -180,7 +206,7 @@ def publish(run_id):
             with tempfile.TemporaryDirectory(prefix="toonzone-4-8-") as d:
                 d = Path(d)
                 source = download_verified_publication_video(item["id"], d / "source.mp4")
-                record["source_sha256"] = digest(source)
+                verify_reserved_source(source, item, record)
                 covered = create_instagram_cover_video(source, Path(item["cover_path"]), d / "covered.mp4",
                                                        preserve_full_cover=True)
                 video = prepare_instagram_upload(covered, d / "upload.mp4", toonzone_compact=True)
