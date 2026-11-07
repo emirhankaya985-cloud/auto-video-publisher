@@ -1184,6 +1184,11 @@ def plan(audit=False):
                 continue
             match = remote[entry["platform"]].get(caption_hash)
             if entry["status"] != "done" and match:
+                # A Film caption match is not proof of which Drive source was
+                # posted. Keep old intents unresolved until exact source proof.
+                if route in {"film", "film_second"}:
+                    report.append("HELD: Film caption candidate requires exact source evidence.")
+                    continue
                 try:
                     confirmed_id, confirmed_day = history_publication_match(route, match)
                 except RuntimeError:
@@ -1383,6 +1388,10 @@ def plan(audit=False):
                             held = True
                             continue
                         if existing and existing.get("status") in {"intent", "uncertain"}:
+                            if route in {"film", "film_second"}:
+                                report.append("HELD: unresolved Film source identity requires byte evidence.")
+                                held = True
+                                continue
                             state["entries"][key].update(
                                 status="done", post_id=confirmed_id, day=confirmed_day,
                                 reconciled_in_run_id=os.getenv("GITHUB_RUN_ID", ""),
