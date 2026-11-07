@@ -60,12 +60,39 @@ def summarize(report):
                                   if name not in stats_reporter.ACCOUNT_TARGETS],
         "unmeasured_accounts": [name for name in expected_accounts if name not in measured_names],
     }
+    # The live statistics probe is NOT a publication ledger: never turn
+    # missing accounts, unsupported platforms, or unseen post counts into 0.
+    owner_accounts = []
+    for name in expected_accounts:
+        configured = name in stats_reporter.ACCOUNT_TARGETS
+        row = next((a for a in accounts
+                    if isinstance(a, dict) and a.get("account") == name), None)
+        observed = {p.get("platform"): p for p in (row or {}).get("platforms", [])
+                    if isinstance(p, dict) and isinstance(p.get("platform"), str)}
+        platform_coverage = {}
+        for platform in ("Facebook", "Instagram", "Threads", "YouTube"):
+            parts = [p for kind, p in observed.items()
+                     if kind == platform or (platform == "Facebook" and kind in ("Facebook 1", "Facebook 2"))]
+            measured = [p for p in parts if type(p.get("total")) is int and p.get("total") >= 0]
+            platform_coverage[platform] = {
+                "view_metric": ("measured" if measured else "N/A"),
+                "reported_channels": len(parts),
+            }
+        owner_accounts.append({
+            "account": name,
+            "configured": configured,
+            "view_coverage": platform_coverage,
+            "planned_daily_target": stats_reporter.ACCOUNT_TARGETS[name][0] if configured else None,
+            "today_verified_post_count": "N/A",
+            "publisher_ledger_required": True,
+        })
     meta = comparison.get("meta_collection")
     return {
         "status": "measured_partial_or_complete",
         "measurement_at": comparison.get("measured_at"),
         "account_count": len(accounts),
         "owner_account_coverage": owner_coverage,
+        "owner_account_platform_health": owner_accounts,
         "counts": counts,
         "missing_view_counters": missing_counters,
         "meta_collection": meta if isinstance(meta, dict) else {"status": "unverified"},
