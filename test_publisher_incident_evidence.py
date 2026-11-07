@@ -26,6 +26,50 @@ class IncidentEvidenceTests(unittest.TestCase):
         self.assertEqual(report["unverified_done_entries"], 0)
 
 
+    def test_remote_unknown_separated_from_local_visual_duplicates_without_mutation(self):
+        import copy
+        rows = {}
+        for i in range(7):
+            route = ("tarladaki" if i < 2 else "penguen" if i == 2
+                     else "film" if i == 3 else "daily_laugh")
+            rows[f"uncertain:{i}"] = {"run_id": "111", "route": route,
+                                     "platform": "instagram", "status": "uncertain"}
+        for i in range(4):
+            route = ("film" if i == 0 else "film_second" if i == 1
+                     else "daily_laugh")
+            rows[f"held:{i}"] = {
+                "run_id": "222", "route": route,
+                "platform": "facebook" if i < 2 else "instagram",
+                "status": "held",
+                "failure": {"reason": "visual_duplicate_review",
+                            "external_post_attempted": False,
+                            "safe_to_repost": False,
+                            "private_provider_message": "NEVER_ECHO_SECRET"}}
+        state = {"entries": rows}
+        before = copy.deepcopy(state)
+        report = build_incident_report(state, "999")
+        self.assertEqual(report["previous_unreconciled_intents"], 11)
+        self.assertEqual(report["previous_remote_reconciliation_required"], 7)
+        self.assertEqual(report["previous_known_nonposted_visual_holds"], 4)
+        self.assertEqual(report["previous_other_review_holds"], 0)
+        self.assertEqual(report["previous_ambiguous_by_route"],
+                         {"tarladaki": 2, "penguen": 1, "film": 1, "daily_laugh": 3})
+        self.assertEqual(report["confirmed_new_posts"], 0)
+        self.assertNotIn("NEVER_ECHO_SECRET", str(report))
+        self.assertEqual(state, before)
+
+    def test_unproven_held_post_is_not_falsely_called_a_safe_local_duplicate(self):
+        rows = {"risky": {"status": "held", "run_id": "15", "route": "film",
+                          "failure": {"reason": "visual_duplicate_review",
+                                      "external_post_attempted": None,
+                                      "safe_to_repost": False}},
+                "actual": {"status": "intent", "run_id": "15", "route": "film"}}
+        r = build_incident_report({"entries": rows}, "999")
+        self.assertEqual(r["previous_remote_reconciliation_required"], 1)
+        self.assertEqual(r["previous_known_nonposted_visual_holds"], 0)
+        self.assertEqual(r["previous_other_review_holds"], 1)
+
+
     def test_prior_uncertain_intent_is_visible_in_new_green_run(self):
         ledger = {"entries": {
             "old_film": {"run_id": "11111", "status": "uncertain",
