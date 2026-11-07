@@ -5,9 +5,11 @@ on:
     paths:
       - '.github/workflows/stats_live_probe.yml'
       - 'stats_live_probe.py'
+      - 'stats_reporter.py'
   pull_request:
     paths:
       - 'stats_live_probe.py'
+      - 'stats_reporter.py'
       - 'test_stats_live_probe.py'
       - '.github/workflows/stats_live_probe.yml'
   workflow_dispatch:

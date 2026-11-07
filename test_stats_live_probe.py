@@ -48,3 +48,19 @@ class LiveProbeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_engagement_coverage_counts_only_verified_threads_metrics():
+    from stats_live_probe import summarize
+    from types import SimpleNamespace
+    report = SimpleNamespace(comparison={"accounts": [
+        {"account": "Film", "platforms": [{"platform": "Threads", "total": 1}]},
+        {"account": "Toon", "platforms": [{"platform": "Threads", "total": None}]}],
+        "threads_engagement": [
+            {"account": "Film", "platform": "Threads", "metric": "likes", "status": "ok", "value": 0},
+            {"account": "Film", "platform": "Threads", "metric": "likes", "status": "ok", "value": 0},
+            {"account": "Toon", "platform": "Threads", "metric": "likes", "status": "unavailable", "value": None},
+            {"account": "Other", "platform": "Instagram", "metric": "likes", "status": "ok", "value": 2}]})
+    coverage = summarize(report)["threads_engagement_coverage"]
+    assert coverage["likes"] == {"expected_accounts": 2, "measured_accounts": 1}
+    assert coverage["shares"] == {"expected_accounts": 2, "measured_accounts": 0}
