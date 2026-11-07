@@ -132,7 +132,7 @@ class DurableBackupTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'sensitive credential'):
                 bundle(payload, b'')
         with self.assertRaisesRegex(ValueError, 'sensitive credential'):
-            bundle(base, b'{"metric": "views", "secret": "should-not-archive"}\\n')
+            bundle(base, b'{"metric": "views", "secret": "should-not-archive"}')
 
     def test_remote_file_identity_and_privacy_are_required(self):
         drive = FakeDrive()
