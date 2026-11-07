@@ -115,6 +115,34 @@ class ProvenLocalSourceQuarantine(unittest.TestCase):
             self.assertFalse(runtime.quarantined_unordered_local_failure(
                 'tarladaki', source, state, ['facebook', 'instagram'], '2026-11-07'))
 
+    def test_audited_daily_laugh_missing_moov_source_stays_held_after_day_change(self):
+        source = {"id": "1TBHD0d-rtgt8ECx_6oYHeRBW8Ae2ysyH", "name": "195.mp4"}
+        state = {"entries": {
+            f"daily_laugh:{p}:{source['id']}": {
+                "route": "daily_laugh", "platform": p, "file": "195.mp4",
+                "day": "2026-11-07", "status": "ready",
+                "run_id": "42378874507",
+                "failure": {"reason": "source_or_cover_preparation_failed",
+                            "safe_to_repost": True, "error_type": "RuntimeError"}
+            } for p in ("facebook", "instagram")}}
+        before = copy.deepcopy(state)
+        with patch.dict(os.environ, {"GITHUB_RUN_ID": "42390000000"}):
+            self.assertTrue(runtime.quarantined_unordered_local_failure(
+                "daily_laugh", source, state, ["facebook", "instagram"], "2026-11-08"))
+            self.assertEqual(state, before)
+            for change in (
+                {"status": "uncertain"}, {"run_id": "42378874508"},
+                {"file": "repaired_195.mp4"}, {"failure": {
+                    "reason": "post_verification_failed", "safe_to_repost": True}},
+            ):
+                altered = copy.deepcopy(state)
+                altered["entries"][f"daily_laugh:instagram:{source['id']}"].update(change)
+                self.assertFalse(runtime.quarantined_unordered_local_failure(
+                    "daily_laugh", source, altered, ["facebook", "instagram"], "2026-11-08"))
+            self.assertFalse(runtime.quarantined_unordered_local_failure(
+                "daily_laugh", dict(source, id="replacement-drive-source"), state,
+                ["facebook", "instagram"], "2026-11-08"))
+
     def test_audited_video_timeline_failure_stays_held_without_mutation(self):
         source, state = self.penguen_timeline_fixture()
         old = copy.deepcopy(state)
