@@ -88,6 +88,26 @@ class ThreadsAccountsTests(unittest.TestCase):
             list(THREADS_ROUTE_PREFIXES),
         )
 
+    def test_penguen_401_code190_is_reauthorization_not_media_or_wrong_route(self):
+        from check_threads_connection import safe_provider_failure
+        from requests import HTTPError
+        from unittest.mock import Mock
+        response = Mock(status_code=401)
+        response.json.return_value = {
+            "error": {"code": 190, "message": "TOKEN_AND_SECRET_PRIVATE",
+                      "error_subcode": 463}}
+        error = HTTPError("SECRET_TOKEN_PRIVATE", response=response)
+        result = safe_provider_failure(error)
+        self.assertEqual(result["http_status"], 401)
+        self.assertEqual(result["graph_code"], 190)
+        self.assertEqual(result["reason"], "threads_token_reauthorization_required")
+        self.assertNotIn("PRIVATE", str(result))
+        self.assertNotIn("463", str(result))
+        response = Mock(status_code=503)
+        response.json.return_value = {"error": {"code": 190}}
+        self.assertEqual(safe_provider_failure(HTTPError(response=response))["reason"],
+                         "connection_or_identity_unverified")
+
     @patch("check_threads_connection.validate_threads_identity")
     def test_all_route_audit_reports_failed_identity_and_checks_others(self, validate):
         from check_threads_connection import main
