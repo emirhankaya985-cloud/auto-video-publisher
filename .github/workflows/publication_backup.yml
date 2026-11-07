@@ -20,8 +20,9 @@ on:
 permissions:
   contents: read
   actions: read
+# Isolate offline PR checks from lengthy main live acceptance; keep main backups serialized.
 concurrency:
-  group: publication-durable-backup
+  group: publication-durable-backup-${{ github.event_name == 'pull_request' && github.event.pull_request.number || 'main' }}
   cancel-in-progress: false
 jobs:
   tests:
