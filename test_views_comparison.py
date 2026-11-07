@@ -36,6 +36,25 @@ class ViewComparisonTests(unittest.TestCase):
         self.assertEqual(row["weekly"]["percent"], 56.25)
         self.assertEqual(data["baseline_dates"]["weekly"], "2026-10-20")
 
+    def test_large_history_reader_filters_baselines_and_preserves_first_day(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from views_comparison import load_history
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "history.jsonl"
+            data = [
+                {"period": "2026-10-01", "account": "older"},
+                {"period": "2026-10-20", "account": "weekly"},
+                {"period": "2026-10-26", "account": "daily"},
+                {"period": "2026-10-27", "account": "current"},
+            ]
+            path.write_text("".join(json.dumps(row) + "\n" for row in data), encoding="utf-8")
+            loaded = load_history(path, required_days={"2026-10-20", "2026-10-26"})
+            self.assertEqual([x.get("account") for x in loaded if x.get("account")],
+                             ["weekly", "daily"])
+            self.assertEqual(min(x["period"] for x in loaded), "2026-10-01")
+
     def test_missing_week_is_unavailable_not_zero_or_nearest_day(self):
         data = compare(history("2026-10-26", 100) + history("2026-10-21", 70))
         self.assertIsNone(data["accounts"][0]["weekly"]["percent"])
