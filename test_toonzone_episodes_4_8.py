@@ -182,8 +182,12 @@ class ToonZoneBatchTests(unittest.TestCase):
         main = target.main_publisher_posts(items, live, state)
         self.assertEqual(main, {(4, 1): "18100507712530539"})
         self.assertEqual(target.conflicts(live, {}, main), {(4, 1)})
+        # Original caption carries no campaign slot marker: old campaign
+        # alone incorrectly sees zero posts. The main-ledger proof closes it.
+        self.assertEqual(target.conflicts(live, {}), set())
         with self.assertRaisesRegex(RuntimeError, "already_live"):
-            target.conflicts(live, {})
+            target.conflicts(
+                [{"id": "18100507712530539", "caption": "S01E04 Part 1"}], {})
 
     def test_main_publisher_record_cannot_be_reposted_if_unresolved_or_not_live(self):
         items = target.selected(self.catalog())
