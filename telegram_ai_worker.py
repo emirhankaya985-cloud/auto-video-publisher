@@ -14,6 +14,7 @@ import requests
 from analytics_github_history import REPOSITORY, MAX_ARCHIVE_BYTES, restore_history
 from nvidia_assistant import answer, enabled
 from telegram_notifications import (STATISTICS_BUTTON, THREADS_STATISTICS_BUTTON,
+                                    THREADS_STATUS_BUTTON, THREADS_STATUS_CALLBACK_DATA,
                                     STATISTICS_KEYBOARD, THREADS_CALLBACK_DATA,
                                     THREADS_INLINE_KEYBOARD, _BOT_TOKEN, _CHAT_ID, send_telegram)
 from telegram_status import load_status
@@ -232,10 +233,82 @@ def load_threads_statistics(*, session=requests):
         return "Threads istatistik arşivi şu anda doğrulanamadı. Sayı tahmin edilmedi."
 
 
+
+def load_threads_status(*, session=requests):
+    """Read the latest main-branch Threads post receipt, never call Threads API."""
+    token = os.getenv("GITHUB_TOKEN", "")
+    if not token:
+        return "Threads yayın arşivi şu anda doğrulanamadı. Gönderi durumu tahmin edilmedi."
+    headers = {"Authorization": "Bearer " + token, "Accept": "application/vnd.github+json"}
+    base = "https://api.github.com/repos/" + REPOSITORY
+    try:
+        listing = session.get(base + "/actions/artifacts", headers=headers,
+                              params={"name": "threads-publish-result", "per_page": 100},
+                              timeout=20, allow_redirects=False)
+        if listing.status_code != 200:
+            raise ValueError("artifact listing unavailable")
+        items = listing.json().get("artifacts")
+        if not isinstance(items, list):
+            raise ValueError("artifact listing invalid")
+        candidates = sorted((a for a in items if isinstance(a, dict)
+                            and a.get("name") == "threads-publish-result"
+                            and a.get("expired") is False and type(a.get("id")) is int
+                            and (a.get("workflow_run") or {}).get("head_branch") == "main"),
+                            key=lambda a: a["id"], reverse=True)
+        history, source_id = None, None
+        for artifact in candidates[:5]:
+            response = session.get(base + "/actions/artifacts/" + str(artifact["id"]) + "/zip",
+                                   headers=headers, timeout=25, allow_redirects=True)
+            if response.status_code != 200 or len(response.content) > 2_000_000:
+                continue
+            try:
+                with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+                    if (archive.namelist() != ["alert-history.json"]
+                            or archive.infolist()[0].file_size > 2_000_000):
+                        continue
+                    parsed = json.loads(archive.read("alert-history.json"))
+            except (zipfile.BadZipFile, ValueError, KeyError, TypeError, OSError):
+                continue
+            if (isinstance(parsed, dict) and parsed.get("schema") == 1
+                    and isinstance(parsed.get("records"), dict)):
+                history, source_id = parsed["records"], artifact["id"]
+                break
+        if history is None:
+            raise ValueError("no verified archive")
+        names = (("tarladaki", "Tarladaki Fasulye"),
+                 ("penguen", "Beyinsiz Penguen"),
+                 ("gonle", "Gönle Düşen"),
+                 ("daily_laugh", "Daily Laugh Lab"),
+                 ("film", "Film Mağarası"), ("toonzone", "ToonZone"))
+        lines = ["🧵 Threads Durumu — son GitHub yayın arşivi",
+                 "Altı tanımlı rota; bu veri canlı bağlantı testi değildir."]
+        for route, name in names:
+            records = [v for v in history.values()
+                       if isinstance(v, dict) and v.get("route") == route]
+            verified = [v for v in records if v.get("status") == "verified"
+                        and isinstance(v.get("post_id"), str)
+                        and v["post_id"].isdigit() and 1 <= len(v["post_id"]) <= 30]
+            pending = sum(v.get("status") in {"reserved", "attempted", "held"}
+                          for v in records)
+            if verified:
+                last = max(verified, key=lambda v: str(v.get("last_seen", "")))
+                lines.append(f"• {name}: {len(verified)} doğrulanmış, "
+                             f"son ID {last['post_id']}; belirsiz {pending}")
+            else:
+                lines.append(f"• {name}: doğrulanmış gönderi N/A; belirsiz {pending}")
+        lines.extend(["", f"Kaynak: GitHub Threads arşivi #{source_id}",
+                      "Token güncelliği bu arşivden doğrulanamaz. N/A sıfır anlamına gelmez."])
+        return "\n".join(lines)
+    except (requests.RequestException, ValueError, TypeError, AttributeError,
+            KeyError, OSError, zipfile.BadZipFile):
+        return "Threads yayın arşivi şu anda doğrulanamadı. Gönderi durumu tahmin edilmedi."
+
+
 class Worker:
     def __init__(self, database, *, evidence_loader=latest_evidence, model=answer, sender=send_telegram,
                  status_loader=load_status, statistics_loader=load_statistics,
-                 threads_statistics_loader=load_threads_statistics, callback_ack=None):
+                 threads_statistics_loader=load_threads_statistics,
+                 threads_status_loader=load_threads_status, callback_ack=None):
         self.chat = os.getenv("TELEGRAM_CHAT_ID", "")
         self.owner = os.getenv("TELEGRAM_AI_OWNER_ID", "")
         token = os.getenv("TELEGRAM_BOT_TOKEN", "")
@@ -253,6 +326,7 @@ class Worker:
         self.load_status = status_loader
         self.load_statistics = statistics_loader
         self.load_threads_statistics = threads_statistics_loader
+        self.load_threads_status = threads_status_loader
         self.callback_ack = callback_ack
 
     def offset(self):
@@ -276,16 +350,21 @@ class Worker:
             person = callback.get("from") or {}
             chat = source.get("chat") or {}
             callback_id = callback.get("id")
-            if (self.status_only and callback.get("data") == THREADS_CALLBACK_DATA
+            if (self.status_only and callback.get("data") in
+                    {THREADS_CALLBACK_DATA, THREADS_STATUS_CALLBACK_DATA}
                     and str(chat.get("id")) == self.chat
                     and str(person.get("id")) == self.owner
                     and person.get("is_bot") is not True
                     and isinstance(callback_id, str) and 1 <= len(callback_id) <= 128):
+                metrics = callback["data"] == THREADS_CALLBACK_DATA
                 try:
-                    reply = self.load_threads_statistics()
+                    reply = (self.load_threads_statistics() if metrics
+                             else self.load_threads_status())
                 except Exception:
-                    reply = 'Threads istatistik arşivi şu anda doğrulanamadı. Sayı tahmin edilmedi.'
-                self.send(THREADS_STATISTICS_BUTTON, reply, reply_markup=THREADS_INLINE_KEYBOARD)
+                    reply = ('Threads istatistik arşivi şu anda doğrulanamadı. Sayı tahmin edilmedi.'
+                             if metrics else 'Threads yayın arşivi şu anda doğrulanamadı.')
+                self.send(THREADS_STATISTICS_BUTTON if metrics else THREADS_STATUS_BUTTON,
+                          reply, reply_markup=THREADS_INLINE_KEYBOARD)
                 if self.callback_ack is not None:
                     self.callback_ack(callback_id)
             return
@@ -298,11 +377,11 @@ class Worker:
             return
         command = text.strip().casefold().replace("\u0307", "")
         if command in {'/stok', '/durdur', '/devam'}:
-            self.send('📋 Durum', 'Bu komut kaldırıldı. /durum, /istatistik veya /threads yazabilirsin.')
+            self.send('📋 Durum', 'Bu komut kaldırıldı. /durum, /istatistik, /threads veya /threads_durum yazabilirsin.')
             return
         if self.status_only:
             if command in {'/start', '/help'}:
-                self.send('📋 Durum', '/durum: yayın durumu ve saat tablosu.\n/istatistik: tüm platformlar.\n/threads: yalnız Threads.',
+                self.send('📋 Durum', '/durum: yayın durumu ve saat tablosu.\n/istatistik: tüm platformlar.\n/threads: Threads istatistikleri.\n/threads_durum: Threads gönderileri.',
                           reply_markup=STATISTICS_KEYBOARD)
             elif command in {'/durum', 'durum'}:
                 try:
@@ -318,6 +397,13 @@ class Worker:
                     # the whole owner poll or misrepresent missing archive as 0.
                     reply = 'Genel istatistik arşivi şu anda doğrulanamadı. Sayı tahmin edilmedi.'
                 self.send(STATISTICS_BUTTON, reply, reply_markup=STATISTICS_KEYBOARD)
+            elif command in {'/threads_durum', 'threads durum', 'threads durumu',
+                             THREADS_STATUS_BUTTON.casefold().replace("\u0307", "")}:
+                try:
+                    reply = self.load_threads_status()
+                except Exception:
+                    reply = 'Threads yayın arşivi şu anda doğrulanamadı.'
+                self.send(THREADS_STATUS_BUTTON, reply, reply_markup=THREADS_INLINE_KEYBOARD)
             elif command in {'/threads', '/threads_istatistik', 'threads',
                              THREADS_STATISTICS_BUTTON.casefold().replace("\u0307", "")}:
                 try:
