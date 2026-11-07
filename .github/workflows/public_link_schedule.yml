@@ -53,6 +53,9 @@ jobs:
       AUTO_BACKFILL_ENABLED: ${{ vars.AUTO_BACKFILL_ENABLED == 'true' && 'true' || 'false' }}
       # Only User token can discover verified Page tokens; invalid/expired token fails closed.
       YOUTUBE_PUBLISHING_ENABLED: ${{ vars.YOUTUBE_PUBLISHING_ENABLED != 'false' && 'true' || 'false' }}
+      # Only after the owner has restored videos.insert permissions; never
+      # a broad unbounded retry flag. New ID grants one source attempt.
+      YOUTUBE_FORBIDDEN_RELEASE_ID: ${{ vars.YOUTUBE_FORBIDDEN_RELEASE_ID }}
       TOKEN_CHANNEL1_JSON: ${{ secrets.TOKEN_CHANNEL1_JSON }}
       TOKEN_CHANNEL2_JSON: ${{ secrets.TOKEN_CHANNEL2_JSON }}
       TOKEN_DAILY_LAUGH_LAB_JSON: ${{ secrets.TOKEN_DAILY_LAUGH_LAB_JSON }}

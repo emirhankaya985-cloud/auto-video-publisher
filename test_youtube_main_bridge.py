@@ -53,6 +53,77 @@ class BridgeTests(unittest.TestCase):
             check.assert_not_called()
             record.assert_called_once_with('youtube_prepare', 'missing_secret', route='gonle', platform='youtube')
 
+    @staticmethod
+    def forbidden_ledger(route="tarladaki", count=4):
+        return {f"{route}:source{i}": {
+            "route": route, "status": "uncertain", "post_id": None,
+            "upload_error": {"http_status": 403, "reasons": ["forbidden"],
+                             "unrecognized_reason": False},
+        } for i in range(count)}
+
+    def test_three_distinct_insert_forbidden_open_permission_circuit(self):
+        rows = self.forbidden_ledger()
+        self.assertTrue(bridge.repeated_youtube_insert_forbidden(rows, "tarladaki"))
+        self.assertFalse(bridge.repeated_youtube_insert_forbidden(rows, "penguen"))
+        self.assertFalse(bridge.repeated_youtube_insert_forbidden(
+            self.forbidden_ledger(count=2), "tarladaki"))
+        other = dict(rows)
+        other["tarladaki:doneafter"] = {"route": "tarladaki", "status": "done",
+                                       "post_id": "abcdefghijk"}
+        self.assertFalse(bridge.repeated_youtube_insert_forbidden(other, "tarladaki"))
+        unknown = dict(rows)
+        unknown["tarladaki:unknown"] = {"route": "tarladaki", "status": "uncertain"}
+        self.assertFalse(bridge.repeated_youtube_insert_forbidden(unknown, "tarladaki"))
+
+    def test_forbidden_circuit_blocks_new_intents_without_provider_calls(self):
+        old_ledger = self.forbidden_ledger()
+        sources = [{'route': 'tarladaki', 'id': f'new{i}', 'name': f'{i}.mp4',
+                    'captions': {'facebook': f'original caption {i}'}}
+                   for i in (1, 2)]
+        with tempfile.TemporaryDirectory() as folder:
+            state, plan = Path(folder) / 'state.json', Path(folder) / 'plan.json'
+            state.write_text(json.dumps({'youtube_entries': old_ledger}))
+            plan.write_text(json.dumps(sources))
+            with patch.object(bridge, "STATE", state), patch.object(bridge, "PLAN", plan), \
+                 patch.dict(os.environ, {"GITHUB_RUN_ID": "300",
+                                        "TOKEN_CHANNEL1_JSON": "opaque"}, clear=True), \
+                 patch.object(bridge, "check_channel") as check:
+                bridge.prepare()
+            saved = json.loads(state.read_text())
+            self.assertEqual(saved['youtube_entries'], old_ledger)
+            self.assertEqual(saved['youtube_prepare_holds'], ['tarladaki'])
+            self.assertEqual(saved['youtube_prepare_errors'], [])
+            check.assert_not_called()
+
+    def test_owner_reauthorization_release_id_is_one_shot_even_if_flag_persists(self):
+        with tempfile.TemporaryDirectory() as folder:
+            state, plan = Path(folder) / 'state.json', Path(folder) / 'plan.json'
+            state.write_text(json.dumps({'youtube_entries': self.forbidden_ledger()}))
+            plan.write_text(json.dumps([
+                {'route': 'tarladaki', 'id': f'fresh{i}', 'name': f'fresh{i}.mp4',
+                 'captions': {'facebook': 'original'}} for i in (1, 2)]))
+            expected = bridge.ROUTES['tarladaki'][2]
+            env = {"GITHUB_RUN_ID": "300", "TOKEN_CHANNEL1_JSON": "opaque",
+                   "YOUTUBE_FORBIDDEN_RELEASE_ID": "reauth-20261107"}
+            with patch.object(bridge, "STATE", state), patch.object(bridge, "PLAN", plan), \
+                 patch.dict(os.environ, env, clear=True), \
+                 patch.object(bridge, "check_channel", return_value={
+                     "status": "verified", "channel_id": expected}) as check:
+                bridge.prepare()
+                first = json.loads(state.read_text())
+                self.assertIn("tarladaki:fresh1", first['youtube_entries'])
+                self.assertNotIn("tarladaki:fresh2", first['youtube_entries'])
+                self.assertEqual(first['youtube_prepare_holds'], ['tarladaki'])
+                self.assertEqual(first['youtube_forbidden_release_ids']['tarladaki'],
+                                 'reauth-20261107')
+                check.assert_called_once()
+                bridge.prepare()
+                again = json.loads(state.read_text())
+                self.assertEqual(again['youtube_entries'], first['youtube_entries'])
+                self.assertEqual(again['youtube_prepare_holds'], ['tarladaki'])
+                self.assertEqual(check.call_count, 1)
+            self.assertFalse(bridge.authorize_single_recheck({}, 'tarladaki', 'true'))
+
     def test_no_upload_without_archived_intent(self):
         with patch.dict(os.environ, {'YOUTUBE_PUBLISHING_ENABLED': 'true'}, clear=True):
             with self.assertRaisesRegex(RuntimeError, 'archived'):
