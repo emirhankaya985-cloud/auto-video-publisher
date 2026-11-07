@@ -183,7 +183,16 @@ def unresolved_source_evidence(key, row, all_entries):
              'source_sha256_present': False,
              'other_platform_exact_sha256_done': False,
              'other_platform_filename_candidate': False,
+             'same_drive_item_other_platform_done': False,
+             'same_drive_item_other_route_done': False,
              'same_source_held_sibling_pages': False}
+    # The persisted ledger key binds route/platform to the original Drive ID.
+    # This proves the same Drive *item*, never byte identity or an IG publish.
+    key_parts = key.split(':', 2) if isinstance(key, str) else []
+    original_drive_id = (key_parts[2] if len(key_parts) == 3
+                         and key_parts[:2] == [route, platform]
+                         and re.fullmatch(r'[A-Za-z0-9_-]{15,128}', key_parts[2])
+                         else None)
     source = row.get('source_sha256')
     if isinstance(source, str) and re.fullmatch(r'[0-9a-f]{64}', source):
         proof['source_sha256_present'] = True
@@ -192,9 +201,19 @@ def unresolved_source_evidence(key, row, all_entries):
     filename = row.get('file')
     if not isinstance(filename, str) or not filename or len(filename) > 150:
         filename = None
-    for other in all_entries.values():
+    for other_key, other in all_entries.items():
         if other is row or not isinstance(other, dict):
             continue
+        parts = other_key.split(':', 2) if isinstance(other_key, str) else []
+        same_drive = bool(original_drive_id and len(parts) == 3
+                          and parts[2] == original_drive_id
+                          and parts[:2] == [other.get('route'), other.get('platform')]
+                          and other.get('file') == filename)
+        if same_drive and other.get('status') == 'done' and str(other.get('post_id') or '').isdecimal():
+            if other.get('platform') != platform:
+                proof['same_drive_item_other_platform_done'] = True
+            if other.get('route') != route:
+                proof['same_drive_item_other_route_done'] = True
         if (route in {'film', 'film_second'} and other.get('route') in {'film', 'film_second'}
                 and source and other.get('source_sha256') == source
                 and other.get('status') == 'held' and other.get('platform') == platform):
