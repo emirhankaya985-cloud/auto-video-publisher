@@ -48,10 +48,18 @@ class HistoryArchiveLimitTests(unittest.TestCase):
         self.assertEqual(outcome["status"], "restored")
         self.assertEqual(restored, raw)
 
-    def test_expanded_archive_over_64mib_is_rejected(self):
+    def test_long_lived_history_over_64mib_is_restored(self):
         raw = json.dumps({"day": "2026-11-07", "extra": "x" * (65 * 1024 * 1024)}).encode() + b"\n"
-        with self.assertRaisesRegex(RuntimeError, "size limit"):
-            self._read_with_archive(self._zip(raw))
+        outcome, restored = self._read_with_archive(self._zip(raw))
+        self.assertEqual(outcome["status"], "restored")
+        self.assertEqual(restored, raw)
+
+    def test_expanded_archive_over_configured_limit_is_rejected(self):
+        from unittest.mock import patch
+        raw = json.dumps({"day": "2026-11-07", "extra": "x" * 2048}).encode() + b"\n"
+        with patch.object(history, "MAX_ARCHIVE_BYTES", 1024):
+            with self.assertRaisesRegex(RuntimeError, "size limit"):
+                self._read_with_archive(self._zip(raw))
 
 
 if __name__ == "__main__":
