@@ -28,7 +28,7 @@ from telegram_notifications import STATISTICS_KEYBOARD, send_telegram, telegram_
 from ntfy_phone_report import compact_phone_report
 from publisher_recovery import read_with_retry
 from performance_history import counter, follower_changes
-from views_comparison import ViewReport, build_comparison, load_history, telegram_tables, validate_collection
+from views_comparison import ViewReport, build_comparison, load_history, telegram_tables, validate_collection, number
 
 
 TZ = ZoneInfo("Europe/Istanbul")
@@ -352,6 +352,9 @@ def _threads_metric(response, name):
     return None
 
 
+THREADS_ENGAGEMENT_METRICS = ("likes", "replies", "reposts", "quotes", "shares")
+
+
 def threads_video_snapshot(route, *, on_followers):
     from threads_live_publish import ID, THREADS, account_config, error_label, graph, profile, rows
 
@@ -375,7 +378,27 @@ def threads_video_snapshot(route, *, on_followers):
         views = _threads_metric(insights, "views")
         if views is None:
             raise RuntimeError("threads_video_views_unavailable")
-        videos[post_id] = {"views": views, "published_at": post.get("timestamp")}
+        # Optional engagement failure must never erase independently verified views.
+        engagement = {metric: None for metric in THREADS_ENGAGEMENT_METRICS}
+        try:
+            result = graph(THREADS, f"{post_id}/insights", account.token,
+                           metric=",".join(THREADS_ENGAGEMENT_METRICS))
+            engagement = {metric: _threads_metric(result, metric)
+                          for metric in THREADS_ENGAGEMENT_METRICS}
+        except Exception as exc:
+            print(f"{route} / Threads engagement: {error_label(exc)}")
+            # An unsupported optional metric must not mask the supported
+            # ones. Only an explicit invalid-parameter GET gets bounded
+            # per-metric fallback; auth/rate/transport failures do not fan out.
+            if getattr(exc, "status", None) == 400 and getattr(exc, "code", None) == 100:
+                for metric in THREADS_ENGAGEMENT_METRICS:
+                    try:
+                        result = graph(THREADS, f"{post_id}/insights", account.token, metric=metric)
+                        engagement[metric] = _threads_metric(result, metric)
+                    except Exception:
+                        pass
+        videos[post_id] = {"views": views, "published_at": post.get("timestamp"),
+                           "engagement": engagement}
     return videos
 
 
@@ -413,6 +436,19 @@ def _collect_snapshot(now, *, report_day=None):
                 value=item["views"], unit="views", period=period,
                 source_api=source_api, source_metric="views", status="ok",
             ))
+
+        if platform == "Threads":
+            for metric in THREADS_ENGAGEMENT_METRICS:
+                values = [counter(item.get("engagement", {}).get(metric)) for item in data.values()]
+                # Empty, successfully enumerated feed is a measured zero. A
+                # missing field on any returned post makes the sum unavailable.
+                value = sum(values) if all(v is not None for v in values) else None
+                records.append(make_record(
+                    measured_at=measured_at, timezone="Europe/Istanbul", account=account,
+                    platform=platform, entity_type="account", entity_id=account,
+                    metric=metric, value=value, unit="count", period=period,
+                    source_api="threads.graph.post.insights", source_metric=f"sum(video {metric})",
+                    status="ok" if value is not None else "unavailable"))
 
     def save_followers(account, platform, value, source, metric):
         value = counter(value)
@@ -777,6 +813,16 @@ def build_report(now=None):
                                               f" | Son: {stats['latest_status']}")
                 rows.append(f"{platform}: {delta_text} | Genel {total_text}")
                 rows.append(f"  {publication_status}")
+                if platform == "Threads":
+                    metrics = {record["metric"]: record["value"] for record in records
+                               if record.get("account") == account and record.get("platform") == "Threads"
+                               and record.get("entity_type") == "account"
+                               and record.get("metric") in THREADS_ENGAGEMENT_METRICS
+                               and record.get("status") == "ok"}
+                    rows.append("  Video etkileşimleri: " + " · ".join(
+                        f"{label} {number(metrics.get(metric))}" for metric, label in (
+                            ("likes", "beğeni"), ("replies", "yanıt"), ("reposts", "yeniden paylaşım"),
+                            ("quotes", "alıntı"), ("shares", "dış paylaşım"))))
             rows.append("")
         progress_known = all(item[3] is not None for item in report_accounts.values())
         if delayed and all_lifetime:
@@ -825,6 +871,12 @@ def build_report(now=None):
             ]})
         comparison["collection_errors"] = collection_errors
         comparison["followers"] = follower_changes(records, previous)
+        comparison["threads_engagement"] = [
+            {key: record.get(key) for key in ("account", "platform", "metric", "value", "status", "source_api", "source_metric")}
+            for record in records if record.get("platform") == "Threads"
+            and record.get("entity_type") == "account"
+            and record.get("metric") in THREADS_ENGAGEMENT_METRICS
+        ]
         return ViewReport("\n".join(rows), comparison)
 
 
@@ -857,6 +909,20 @@ def notify(message):
                     delta = 'N/A' if row['daily_change'] is None else f"{row['daily_change']:+d}"
                     lines.append(escape(f"{row['account']} / {row['platform']}: {count} ({delta})"))
                 parts.append(('📈 Takipçi geçmişi', '\n'.join(lines)))
+            if comparison and comparison.get("threads_engagement"):
+                from html import escape
+                engagement_rows = comparison["threads_engagement"]
+                lines = []
+                for account in dict.fromkeys(row["account"] for row in engagement_rows):
+                    metrics = {row["metric"]: row.get("value") for row in engagement_rows
+                               if row.get("account") == account and row.get("platform") == "Threads"
+                               and row.get("status") == "ok"}
+                    lines.append(escape(account + ": " + " · ".join(
+                        f"{label} {number(metrics.get(metric))}" for metric, label in (
+                            ("likes", "beğeni"), ("replies", "yanıt"), ("reposts", "yeniden paylaşım"),
+                            ("quotes", "alıntı"), ("shares", "dış paylaşım")))))
+                lines.append("Kapsam: erişilebilir video gönderileri; eksik metrik N/A.")
+                parts.append(("🧵 Threads video etkileşimleri", "\n".join(lines)))
             acknowledged = 0
             for part_title, part_body in parts:
                 options = {"parse_mode": "HTML"} if comparison else {}

@@ -461,3 +461,57 @@ def test_meta_publication_ledger_does_not_block_youtube_view_report(tmp_path, mo
     report = stats_reporter.build_report(datetime(2026, 11, 4, 23, 55, tzinfo=ZoneInfo("Europe/Istanbul")))
     assert "YouTube: N/A (ilk ölçüm) | Genel 125\n  Yayın: ⚠️ sayaç alınamadı" in report
     assert report.comparison["accounts"][0]["platforms"][-1]["total"] == 125
+
+
+def test_threads_optional_engagement_keeps_views_and_missing_metrics():
+    from stats_reporter import threads_video_snapshot
+    import threads_live_publish as api
+    account = Mock(token="private")
+    def graph(_host, path, _token, **params):
+        if path.endswith("threads_insights"):
+            return {"data": []}
+        if params["metric"] == "views":
+            return {"data": [{"name": "views", "values": [{"value": 12}]}]}
+        return {"data": [{"name": "likes", "values": [{"value": 0}]},
+                         {"name": "replies", "values": [{"value": 3}]}]}
+    with patch.object(api, "account_config", return_value=account), patch.object(api, "profile", return_value="123456"), patch.object(api, "rows", return_value=[{"id": "1234567890", "media_type": "VIDEO"}]), patch.object(api, "graph", side_effect=graph):
+        data = threads_video_snapshot("film", on_followers=Mock())
+    assert data["1234567890"]["views"] == 12
+    assert data["1234567890"]["engagement"] == {
+        "likes": 0, "replies": 3, "reposts": None, "quotes": None, "shares": None}
+    with patch.object(api, "account_config", return_value=account), patch.object(api, "profile", return_value="123456"), patch.object(api, "rows", return_value=[{"id": "1234567890", "media_type": "VIDEO"}]), patch.object(api, "graph", side_effect=[{}, {"data": [{"name": "views", "values": [{"value": 12}]}]}, RuntimeError("denied")]):
+        data = threads_video_snapshot("film", on_followers=Mock())
+    assert data["1234567890"]["views"] == 12
+    assert all(value is None for value in data["1234567890"]["engagement"].values())
+
+
+def test_threads_aggregation_never_sums_partial_metrics_as_complete():
+    import stats_reporter as stats
+    data = {"1": {"views": 1, "engagement": {"likes": 2, "replies": 0}},
+            "2": {"views": 5, "engagement": {"likes": None, "replies": 0}}}
+    with patch.dict(os.environ, {"MULTIPLATFORM_STATS_ENABLED": "true"}), patch.object(stats, "META_TARGETS", []), patch.object(stats, "YOUTUBE_TARGETS", []), patch.object(stats, "ACCOUNT_TARGETS", {"Film": (1, "film", "folder", [])}), patch.object(stats, "threads_video_snapshot", return_value=data):
+        snapshot, records, errors = stats._collect_snapshot(datetime(2026, 11, 7, tzinfo=ZoneInfo("Europe/Istanbul")))
+    metrics = {r["metric"]: r for r in records if r["entity_type"] == "account"}
+    assert metrics["likes"]["value"] is None
+    assert metrics["likes"]["status"] == "unavailable"
+    assert metrics["replies"]["value"] == 0
+    assert metrics["lifetime_views"]["value"] == 6
+    assert not errors
+
+
+def test_threads_unsupported_batch_metric_falls_back_without_losing_supported_counts():
+    from stats_reporter import threads_video_snapshot
+    import threads_live_publish as api
+    response = Mock(status_code=400)
+    response.json.return_value = {"error": {"code": 100}}
+    def graph(_host, path, _token, **params):
+        metric = params["metric"]
+        if path.endswith("threads_insights"):
+            return {}
+        if "," in metric or metric == "shares":
+            raise api.ProviderError("read", response)
+        return {"data": [{"name": metric, "values": [{"value": 2}]}]}
+    with patch.object(api, "account_config", return_value=Mock(token="private")), patch.object(api, "profile", return_value="123456"), patch.object(api, "rows", return_value=[{"id": "1234567890", "media_type": "VIDEO"}]), patch.object(api, "graph", side_effect=graph) as get:
+        data = threads_video_snapshot("film", on_followers=Mock())
+    assert data["1234567890"]["engagement"] == {"likes": 2, "replies": 2, "reposts": 2, "quotes": 2, "shares": None}
+    assert get.call_count == 8

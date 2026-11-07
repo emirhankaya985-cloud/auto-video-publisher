@@ -83,3 +83,18 @@ class ThreadsStatusTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_threads_button_displays_engagement_with_explicit_missing_values():
+    data = {"measured_at": "2026-11-07T10:00:00+03:00",
+            "accounts": [{"account": "Film", "platforms": [{"platform": "Threads", "total": 12}]}],
+            "threads_engagement": [
+                {"account": "Film", "platform": "Threads", "metric": "likes", "value": 0, "status": "ok"},
+                {"account": "Film", "platform": "Threads", "metric": "replies", "value": 8, "status": "unavailable"},
+                {"account": "Film", "platform": "Instagram", "metric": "shares", "value": 999, "status": "ok"}]}
+    with patch("telegram_ai_worker.latest_comparison", return_value=(42, data)):
+        report = load_threads_statistics()
+    assert "beğeni 0" in report
+    assert "yanıt N/A" in report
+    assert "dış paylaşım N/A" in report
+    assert "999" not in report
