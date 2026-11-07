@@ -9,7 +9,6 @@ on:
     branches: [main]
     paths:
       - 'docs/threads-owner-start-2026-11-04.md'
-      - 'docs/threads-owner-catchup-2026-11-07.md'
       - 'docs/threads-owner-catchup-2026-11-07-v2.md'
   pull_request:
     paths:
