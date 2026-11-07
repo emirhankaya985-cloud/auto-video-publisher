@@ -45,6 +45,25 @@ class LiveProbeTests(unittest.TestCase):
         self.assertEqual(coverage["unconfigured_accounts"], ["OddFrames"])
         self.assertEqual(coverage["unmeasured_accounts"], ["OddFrames"])
 
+    def test_seven_accounts_report_platform_na_instead_of_fake_zero_posts(self):
+        known = list(stats_live_probe.stats_reporter.ACCOUNT_TARGETS)[0]
+        report = Mock(comparison={"accounts": [{"account": known, "platforms": [
+            {"platform": "Facebook", "total": 0},
+            {"platform": "Instagram", "total": None}]}],
+            "collection_errors": [], "meta_collection": {}})
+        rows = stats_live_probe.summarize(report)["owner_account_platform_health"]
+        self.assertEqual(len(rows), 7)
+        first = next(r for r in rows if r["account"] == known)
+        self.assertEqual(first["view_coverage"]["Facebook"]["view_metric"], "measured")
+        self.assertEqual(first["view_coverage"]["Instagram"]["view_metric"], "N/A")
+        self.assertEqual(first["view_coverage"]["YouTube"]["view_metric"], "N/A")
+        self.assertEqual(first["today_verified_post_count"], "N/A")
+        odd = next(r for r in rows if r["account"] == "OddFrames")
+        self.assertFalse(odd["configured"])
+        self.assertIsNone(odd["planned_daily_target"])
+        self.assertEqual(odd["view_coverage"]["Threads"]["view_metric"], "N/A")
+        self.assertEqual(odd["today_verified_post_count"], "N/A")
+
     def test_no_report_fails_closed(self):
         with self.assertRaisesRegex(RuntimeError, "invalid_comparison"):
             stats_live_probe.summarize(Mock(comparison=None))
