@@ -65,6 +65,19 @@ def main():
 
     rows = remote_evidence(state, pages,
         history_reader=graph_rows, status_reader=container_status)
+    # Surface Film-specific blockers in public CI logs without exposing media
+    # captions, Drive IDs, post IDs, token-bearing URLs, or changing the ledger.
+    film_blockers = {}
+    for route in ("film", "film_second"):
+        entries = [row for row in rows if row["route"] == route]
+        film_blockers[route] = {
+            "unresolved": len(entries),
+            "reasons": dict(Counter(row["reason"] for row in entries)),
+            "platforms": dict(Counter(row["platform"] for row in entries)),
+            "source_proof_required": sum(row["reason"] ==
+                "caption_candidate_requires_source_proof" for row in entries),
+            "safe_to_repost": False,
+        }
     payload = {"run_id": os.getenv("GITHUB_RUN_ID"), "mode": "readonly",
                "source": "saved_GitHub_actions_publication_ledger",
                "previous_unresolved_count": len(rows),
@@ -74,13 +87,14 @@ def main():
                    if "existing_container_phase" in row)),
                "safe_to_repost": False, "state_mutations": 0,
                "provider_post_requests": 0,
+               "film_blockers": film_blockers,
                "rows": rows}
     REPORT.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
                       encoding="utf-8")
     print(json.dumps({k: payload[k] for k in
         ("mode", "previous_unresolved_count", "reason_counts",
          "container_phase_counts", "safe_to_repost",
-         "state_mutations", "provider_post_requests")}, ensure_ascii=False))
+         "state_mutations", "provider_post_requests", "film_blockers")}, ensure_ascii=False))
     return 0
 
 
