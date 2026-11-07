@@ -154,17 +154,18 @@ class FilmToonZoneRecoveryTests(unittest.TestCase):
                 self.assertEqual(state[f"{route}:instagram:clip"]["status"], "intent")
                 self.assertEqual(state[f"{route}:instagram:clip"]["prepublish_retry_count"], 2)
                 self.assertEqual(state[f"{route}:facebook:clip"]["status"], "done")
-                self.assertIn("RECOVERY V3", report)
+                self.assertIn("RECOVERY:", report)
 
-    def test_no_fourth_try_and_no_non_audited_video_override(self):
+    def test_third_profile_is_bounded_and_non_audited_override_stays_blocked(self):
         for route, filename in (
             ("film", "Yoksul_1986_Part_16.mp4"),
             ("toonzone", "S01E03_Caffeinated_Concert_Tickets_Part3.mp4"),
         ):
             plans, state, report = self._run(
                 route, filename, retry_count=2, run_id="40224351466")
-            self.assertEqual(plans, [])
-            self.assertEqual(state[f"{route}:instagram:clip"]["status"], "uncertain")
+            self.assertEqual(len(plans), 1)
+            self.assertEqual(state[f"{route}:instagram:clip"]["status"], "intent")
+            self.assertEqual(state[f"{route}:instagram:clip"]["prepublish_retry_count"], 2)
         wrong = {"status": "uncertain", "run_id": "40224351466",
                  "prepublish_retry_count": 1,
                  "failure": {"stage": "Instagram media_publish", "http_status": 400}}
@@ -207,18 +208,20 @@ class FilmToonZoneRecoveryTests(unittest.TestCase):
         self.assertFalse(runtime.audited_ig_v4_eligible(
             "film", "instagram", "Yoksul_1986_Part_17.mp4", prior))
 
-    def test_second_failed_attempt_never_restarts_film(self):
+    def test_second_confirmed_binary_rejection_advances_bounded_film_profile(self):
         plans, state, report = self._run("film", "Yoksul_1986_Part_16.mp4", retry_count=1)
-        self.assertEqual(plans, [])
-        self.assertEqual(state["film:instagram:clip"]["status"], "uncertain")
-        self.assertIn("uncertain previous intent", report)
+        self.assertEqual(len(plans), 1)
+        self.assertEqual(state["film:instagram:clip"]["status"], "intent")
+        self.assertEqual(state["film:instagram:clip"]["prepublish_retry_count"], 2)
+        self.assertIn("RECOVERY:", report)
 
-    def test_second_failed_attempt_never_restarts_toonzone(self):
+    def test_second_confirmed_binary_rejection_advances_bounded_toonzone_profile(self):
         plans, state, report = self._run(
             "toonzone", "S01E03_Caffeinated_Concert_Tickets_Part3.mp4", retry_count=1)
-        self.assertEqual(plans, [])
-        self.assertEqual(state["toonzone:instagram:clip"]["status"], "uncertain")
-        self.assertIn("uncertain previous intent", report)
+        self.assertEqual(len(plans), 1)
+        self.assertEqual(state["toonzone:instagram:clip"]["status"], "intent")
+        self.assertEqual(state["toonzone:instagram:clip"]["prepublish_retry_count"], 2)
+        self.assertIn("RECOVERY:", report)
 
 
 if __name__ == "__main__":
