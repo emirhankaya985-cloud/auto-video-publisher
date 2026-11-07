@@ -82,6 +82,11 @@ def quota_evidence(state, *, now=None):
                     failed.add(pieces[2])
             platform_rows.append({
                 "route": account_route, "platform": platform, "day": day,
+                # Pending daily slots are not failed until their clock expires.
+                # No exact per-slot schedule exists in this archived ledger.
+                "full_day_gap_is_final": day < (now.astimezone(NY).date()
+                                                if route == "daily_laugh"
+                                                else now.astimezone(TR).date()).isoformat(),
                 "scheduled_target": target, "ledger_post_ids_count": len(posts),
                 "not_recorded_against_target": max(0, target - len(posts)),
                 "unresolved_sources": len(pending),

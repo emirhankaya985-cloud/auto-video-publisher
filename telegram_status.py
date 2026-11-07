@@ -34,7 +34,7 @@ def status_table(*, now=None, state=None, configured=False):
     now = now.astimezone(TR)
     entries = state.get('entries', {}) if state is not None else None
     policy = (state or {}).get('adaptive_schedule_days', {}).get(now.date().isoformat(), {})
-    lines = ['Hesap          FB     IG    Eks Bek Hata Ayar', '---------------------------------------------']
+    lines = ['Hesap          FB     IG    Gec Bek Hata Ayar', '---------------------------------------------']
     hours = ['Hesap          Saatler (TR)', '--------------------------------']
     for route, name in NAMES.items():
         if route == 'oddframes':
@@ -58,7 +58,12 @@ def status_table(*, now=None, state=None, configured=False):
         target = len(slots)
         report_day = (clock.date() - timedelta(days=1)
                       if route == 'daily_laugh' else clock.date()).isoformat()
-        missing_total, pending_total, local_failed_total = 0, 0, 0
+        # A same-day full target gap is NOT a missed deadline before slots.
+        # Daily Laugh reports the previous fully completed New York day.
+        due_slots = (target if report_day < clock.date().isoformat() else
+                     sum(clock >= clock.replace(hour=h, minute=m, second=0, microsecond=0)
+                         for h, m in slots))
+        overdue_total, pending_total, local_failed_total = 0, 0, 0
         counts = []
         for platform in ('facebook', 'instagram'):
             if route == 'film_second' and platform == 'instagram':
@@ -75,7 +80,7 @@ def status_table(*, now=None, state=None, configured=False):
                             and r.get('platform') == platform and r.get('day') == report_day]
                 posts = {str(r.get('post_id')) for r in selected
                          if r.get('status') == 'done' and POST_ID.fullmatch(str(r.get('post_id') or ''))}
-                missing_total += max(0, target - len(posts))
+                overdue_total += max(0, due_slots - len(posts))
                 pending_total += sum(r.get('status') in ('intent', 'uncertain', 'held', 'pending')
                                      for r in selected)
                 local_failed_total += sum(r.get('status') == 'ready'
@@ -86,7 +91,7 @@ def status_table(*, now=None, state=None, configured=False):
         if configured:
             enabled = os.getenv('LINK_AUTOMATION_ENABLED') == 'true' and not route_paused('film' if route == 'film_second' else route)
             setting = 'Açık' if enabled else 'Kapalı'
-        gap = str(missing_total) if entries is not None else 'N/A'
+        gap = str(overdue_total) if entries is not None else 'N/A'
         wait = str(pending_total) if entries is not None else 'N/A'
         fail = str(local_failed_total) if entries is not None else 'N/A'
         lines.append(f'{name:<14} {counts[0]:<6} {counts[1]:<5} {gap:>3} {wait:>3} {fail:>4} {setting}')
@@ -100,7 +105,7 @@ def status_table(*, now=None, state=None, configured=False):
     return (f'<b>Yayın durumu — {now:%d.%m.%Y %H:%M} TR</b>\n'
             '<pre>' + escape('\n'.join(lines)) + '</pre>\n'
             '<b>Tanımlı yayın planı</b>\n<pre>' + escape('\n'.join(hours)) + '</pre>\n'
-            'FB/IG: arşivde ID kayıtlı / günlük hedef. Eks: kayıtsız hedef; Bek: belirsiz veya bekletilen; Hata: yerel hazırlık. N/A: doğrulanamıyor.\n'
+            'FB/IG: arşivde ID kayıtlı / günlük hedef. Gec: zamanı geçmiş slotların kayıtsız açığı; Bek: belirsiz veya bekletilen; Hata: yerel hazırlık. N/A: doğrulanamıyor.\n'
             'OddFrames: geçerli kimlik/hak verisi sağlanmadı, kota ve yayın sayısı N/A. '+
             'Saatler planı gösterir; hak, kaynak, kota ve tekrar kontrolleri yayını bekletebilir. '
             'Daily Laugh sayıları son tamamlanmış New York gününe, saatleri güncel NY planına aittir; saatler TR’ye çevrildi. '
