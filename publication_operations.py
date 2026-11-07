@@ -172,6 +172,44 @@ def _caption_digest(value):
     return hashlib.sha256(" ".join(value.split()).encode()).hexdigest()
 
 
+def unresolved_source_evidence(key, row, all_entries):
+    """Read-only source clues; cross-platform publication is never IG proof.
+
+    A SHA256 is trustworthy only if both ledger entries persisted an identical
+    digest. A filename match is explicitly weaker and never authorizes posts.
+    """
+    route, platform = row.get('route'), row.get('platform')
+    proof = {'entry_fingerprint': hashlib.sha256(str(key).encode()).hexdigest()[:16],
+             'source_sha256_present': False,
+             'other_platform_exact_sha256_done': False,
+             'other_platform_filename_candidate': False,
+             'same_source_held_sibling_pages': False}
+    source = row.get('source_sha256')
+    if isinstance(source, str) and re.fullmatch(r'[0-9a-f]{64}', source):
+        proof['source_sha256_present'] = True
+    else:
+        source = None
+    filename = row.get('file')
+    if not isinstance(filename, str) or not filename or len(filename) > 150:
+        filename = None
+    for other in all_entries.values():
+        if other is row or not isinstance(other, dict):
+            continue
+        if (route in {'film', 'film_second'} and other.get('route') in {'film', 'film_second'}
+                and source and other.get('source_sha256') == source
+                and other.get('status') == 'held' and other.get('platform') == platform):
+            proof['same_source_held_sibling_pages'] = True
+        if other.get('route') != route or other.get('platform') == platform:
+            continue
+        if other.get('status') != 'done' or not str(other.get('post_id') or '').isdecimal():
+            continue
+        if source and other.get('source_sha256') == source:
+            proof['other_platform_exact_sha256_done'] = True
+        elif filename and other.get('file') == filename:
+            proof['other_platform_filename_candidate'] = True
+    return proof
+
+
 def audit_unresolved_remote(state, read_history, *, read_container=None):
     """GET-only candidate search; never resolves, mutates, or republishes an intent.
 
@@ -190,6 +228,7 @@ def audit_unresolved_remote(state, read_history, *, read_container=None):
         entry = {'route': route if route in allowed_routes else 'unknown',
                  'platform': platform if platform in ('facebook', 'instagram') else 'unknown',
                  'status': row['status'], 'safe_to_repost': False}
+        entry['source_evidence'] = unresolved_source_evidence(key, row, state['entries'])
         prior = row.get('failure') if isinstance(row.get('failure'), dict) else {}
         container_id = str(prior.get('container_id') or '')
         if (read_container is not None and platform == 'instagram'
