@@ -1,12 +1,13 @@
 """Read-only status and publication timetable for the existing report chat."""
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from html import escape
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from telegram_status_evidence import status_evidence
+from owner_daily_quota import POST_ID
 from adaptive_schedule import slots_for_route
 from publication_github_progress import restore_publication_state
 from publication_safety import route_paused
@@ -33,13 +34,13 @@ def status_table(*, now=None, state=None, configured=False):
     now = now.astimezone(TR)
     entries = state.get('entries', {}) if state is not None else None
     policy = (state or {}).get('adaptive_schedule_days', {}).get(now.date().isoformat(), {})
-    lines = ['Hesap          FB     IG    Ayar', '--------------------------------']
+    lines = ['Hesap          FB     IG    Eks Bek Hata Ayar', '---------------------------------------------']
     hours = ['Hesap          Saatler (TR)', '--------------------------------']
     for route, name in NAMES.items():
         if route == 'oddframes':
             # Never infer a target/identity from another owner's Meta page.
             # Its own preflight must pass before a real schedule can be added.
-            lines.append(f'{name:<14} {"N/A":<6} {"N/A":<5} Kapalı')
+            lines.append(f'{name:<14} {"N/A":<6} {"N/A":<5} {"-":>3} {"-":>3} {"-":>4} Kapalı')
             hours.append(f'{name:<14} Kimlik/hak bekleniyor')
             continue
         clock = now.astimezone(ZoneInfo('America/New_York')) if route == 'daily_laugh' else now
@@ -55,6 +56,9 @@ def status_table(*, now=None, state=None, configured=False):
         if os.getenv('ADAPTIVE_SCHEDULE_ENABLED', 'true') != 'false':
             slots = slots_for_route(policy, route, now, slots)
         target = len(slots)
+        report_day = (clock.date() - timedelta(days=1)
+                      if route == 'daily_laugh' else clock.date()).isoformat()
+        missing_total, pending_total, local_failed_total = 0, 0, 0
         counts = []
         for platform in ('facebook', 'instagram'):
             if route == 'film_second' and platform == 'instagram':
@@ -66,16 +70,26 @@ def status_table(*, now=None, state=None, configured=False):
             elif entries is None:
                 counts.append('N/A')
             else:
-                posts = {str(r['post_id']) for r in entries.values()
-                         if isinstance(r, dict) and r.get('route') == route
-                         and r.get('platform') == platform and r.get('status') == 'done'
-                         and r.get('post_id') and r.get('day') == clock.date().isoformat()}
+                selected = [r for r in entries.values()
+                            if isinstance(r, dict) and r.get('route') == route
+                            and r.get('platform') == platform and r.get('day') == report_day]
+                posts = {str(r.get('post_id')) for r in selected
+                         if r.get('status') == 'done' and POST_ID.fullmatch(str(r.get('post_id') or ''))}
+                missing_total += max(0, target - len(posts))
+                pending_total += sum(r.get('status') in ('intent', 'uncertain', 'held', 'pending')
+                                     for r in selected)
+                local_failed_total += sum(r.get('status') == 'ready'
+                                          and isinstance(r.get('failure'), dict)
+                                          for r in selected)
                 counts.append(f'{len(posts)}/{target}')
         setting = 'N/A'
         if configured:
             enabled = os.getenv('LINK_AUTOMATION_ENABLED') == 'true' and not route_paused('film' if route == 'film_second' else route)
             setting = 'Açık' if enabled else 'Kapalı'
-        lines.append(f'{name:<14} {counts[0]:<6} {counts[1]:<5} {setting}')
+        gap = str(missing_total) if entries is not None else 'N/A'
+        wait = str(pending_total) if entries is not None else 'N/A'
+        fail = str(local_failed_total) if entries is not None else 'N/A'
+        lines.append(f'{name:<14} {counts[0]:<6} {counts[1]:<5} {gap:>3} {wait:>3} {fail:>4} {setting}')
         times = []
         for h, m in slots:
             stamp = clock.replace(hour=h, minute=m, second=0, microsecond=0).astimezone(TR)
@@ -86,10 +100,10 @@ def status_table(*, now=None, state=None, configured=False):
     return (f'<b>Yayın durumu — {now:%d.%m.%Y %H:%M} TR</b>\n'
             '<pre>' + escape('\n'.join(lines)) + '</pre>\n'
             '<b>Tanımlı yayın planı</b>\n<pre>' + escape('\n'.join(hours)) + '</pre>\n'
-            'FB/IG: doğrulanmış yayın / günlük hedef. N/A: veri veya ayar okunamadı.\n'
+            'FB/IG: arşivde ID kayıtlı / günlük hedef. Eks: kayıtsız hedef; Bek: belirsiz veya bekletilen; Hata: yerel hazırlık. N/A: doğrulanamıyor.\n'
             'OddFrames: geçerli kimlik/hak verisi sağlanmadı, kota ve yayın sayısı N/A. '+
             'Saatler planı gösterir; hak, kaynak, kota ve tekrar kontrolleri yayını bekletebilir. '
-            'Daily Laugh kendi New York gününü kullanır; saatleri TR’ye çevrildi. '
+            'Daily Laugh sayıları son tamamlanmış New York gününe, saatleri güncel NY planına aittir; saatler TR’ye çevrildi. '
             '(+1)/(-1): rapor tarihine göre ertesi/önceki gün.\n'
             'Gönderi sayıları son arşivden gelir; bu bilgi canlı anlık izlenme değildir.' + status_evidence(state))
 

@@ -14,7 +14,7 @@ class StatusTableTests(unittest.TestCase):
     now = datetime(2026, 11, 3, 1, tzinfo=ZoneInfo('Europe/Istanbul'))
 
     def test_verified_counts_are_unique_and_unknown_history_is_na(self):
-        row = dict(route='film', platform='facebook', status='done', post_id='123', day='2026-11-03')
+        row = dict(route='film', platform='facebook', status='done', post_id='1234567890', day='2026-11-03')
         table = status_table(now=self.now, state={'entries': {'one': row, 'alias': row.copy()}})
         self.assertIn('1/5', table)
         self.assertIn('12:00 12:10 12:20 12:30', table)
@@ -28,6 +28,26 @@ class StatusTableTests(unittest.TestCase):
         self.assertIn('Kimlik/hak bekleniyor', table)
         self.assertIn('kota ve yayın sayısı N/A', table)
         self.assertNotIn('OddFrames      0/5', table)
+
+    def test_pending_failed_and_daily_laugh_previous_ny_day_are_visible(self):
+        now = datetime(2026, 11, 7, 23, 42, tzinfo=ZoneInfo('Europe/Istanbul'))
+        rows = {
+            'daily_laugh:facebook:source1': dict(route='daily_laugh', platform='facebook',
+                status='done', post_id='2993579024350823', day='2026-11-06'),
+            'daily_laugh:facebook:source2': dict(route='daily_laugh', platform='facebook',
+                status='held', day='2026-11-06'),
+            'tarladaki:instagram:source3': dict(route='tarladaki', platform='instagram',
+                status='ready', day='2026-11-07', failure={'reason': 'source_or_cover_preparation_failed'}),
+            'tarladaki:instagram:source4': dict(route='tarladaki', platform='instagram',
+                status='done', post_id='wrong', day='2026-11-07'),
+        }
+        message = status_table(now=now, state={'entries': rows})
+        self.assertIn('Eks Bek Hata', message)
+        self.assertIn('1/8', message)
+        self.assertIn('son tamamlanmış New York gününe', message)
+        self.assertIn('yerel hazırlık', message)
+        self.assertNotIn('1/5', message)
+        self.assertLess(len(message.encode('utf-16-le')) // 2, 4096)
 
     def test_actual_gate_configuration_is_distinct_from_counts(self):
         with patch.dict(os.environ, {'LINK_AUTOMATION_ENABLED': 'true',

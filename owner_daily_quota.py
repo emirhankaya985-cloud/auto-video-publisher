@@ -61,7 +61,7 @@ def quota_evidence(state, *, now=None):
                if route == "daily_laugh" else now.astimezone(TR).date()).isoformat()
         platform_rows = []
         for account_route, platform in configured:
-            posts, pending, invalid_done = set(), set(), 0
+            posts, pending, failed, invalid_done = set(), set(), set(), 0
             for key, row in entries.items():
                 if (row.get("route") != account_route or row.get("platform") != platform
                         or row.get("day") != day):
@@ -78,11 +78,15 @@ def quota_evidence(state, *, now=None):
                         invalid_done += 1
                 elif row.get("status") in {"uncertain", "intent", "held", "pending"}:
                     pending.add(pieces[2])
+                elif row.get("status") == "ready" and isinstance(row.get("failure"), dict):
+                    failed.add(pieces[2])
             platform_rows.append({
                 "route": account_route, "platform": platform, "day": day,
                 "scheduled_target": target, "ledger_post_ids_count": len(posts),
                 "not_recorded_against_target": max(0, target - len(posts)),
-                "unresolved_sources": len(pending), "invalid_done_rows": invalid_done,
+                "unresolved_sources": len(pending),
+                "failed_local_preparation_sources": len(failed),
+                "invalid_done_rows": invalid_done,
                 "live_provider_history_confirmation": "N/A",
                 "safe_to_auto_repost": False,
             })
@@ -122,6 +126,12 @@ def main():
         "quota": [{"account": row["account"], "day": row["day"],
                    "counts": {f"{p['route']}:{p['platform']}": p['ledger_post_ids_count']
                               for p in row["platforms"]},
+                   "gaps": {f"{p['route']}:{p['platform']}": p['not_recorded_against_target']
+                            for p in row["platforms"]},
+                   "pending": {f"{p['route']}:{p['platform']}": p['unresolved_sources']
+                               for p in row["platforms"]},
+                   "local_failed": {f"{p['route']}:{p['platform']}": p['failed_local_preparation_sources']
+                                   for p in row["platforms"]},
                    "youtube_upload_permission_circuit": row["youtube_upload_permission_circuit"]}
                   for row in report["accounts"]],
         "new_provider_posts": 0}, ensure_ascii=False))
