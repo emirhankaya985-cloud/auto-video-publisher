@@ -1458,7 +1458,8 @@ def plan(audit=False):
                     # A green GitHub run is NOT proof these queues are healthy.
                     # Once per Istanbul day while still blocked, emit an
                     # actionable alert without retrying the Meta POST.
-                    if not audit and previous_intent_alert_due(existing, now):
+                    if (not audit and not can_advance_past_local_visual_hold(route, existing)
+                            and previous_intent_alert_due(existing, now)):
                         record_error("previous_intent_hold", "unreconciled_previous_intent",
                                      route=route, platform=p, video=item["name"],
                                      status="uncertain")
