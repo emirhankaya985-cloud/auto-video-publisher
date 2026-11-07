@@ -51,6 +51,14 @@ def published_slot(caption):
     return None
 
 
+class MainPublisherLiveMissing(RuntimeError):
+    """Provider GET cannot confirm main-ledger posts; never publish them again."""
+
+    def __init__(self, records):
+        super().__init__("main_publisher_post_missing_from_live")
+        self.records = records
+
+
 def main_publisher_posts(items, live, state):
     """Verify old regular-publisher IDs by exact account, Drive ID and live GET.
 
@@ -71,6 +79,7 @@ def main_publisher_posts(items, live, state):
         live_by_id[pid] = row
     result = {}
     used_ids = set()
+    missing_live = []
     for item in items:
         key = f"toonzone:instagram:{item['id']}"
         entry = state["entries"].get(key)
@@ -84,7 +93,10 @@ def main_publisher_posts(items, live, state):
         if entry.get("status") != "done" or not pid.isdecimal():
             raise RuntimeError("main_publisher_prior_intent_unresolved")
         if pid not in live_by_id:
-            raise RuntimeError("main_publisher_post_missing_from_live")
+            missing_live.append({"episode": item["episode"], "part": item["part"],
+                                 "file": item["name"], "source_id": item["id"],
+                                 "archived_post_id": pid})
+            continue
         slot = item["episode"], item["part"]
         caption_slot = published_slot(live_by_id[pid].get("caption"))
         if caption_slot is not None and caption_slot != slot:
@@ -93,6 +105,10 @@ def main_publisher_posts(items, live, state):
             raise RuntimeError("main_publisher_duplicate_post_or_slot")
         result[slot] = pid
         used_ids.add(pid)
+    if missing_live:
+        # Fail closed even when some other IDs are found: never partially
+        # reserve an old season against incomplete remote history.
+        raise MainPublisherLiveMissing(missing_live)
     return result
 
 
@@ -175,7 +191,21 @@ def audit(run_id, *, reserve=False):
     live = graph_rows(page, "instagram")
     if not isinstance(live, list):
         raise RuntimeError("instagram_live_history_unavailable")
-    main_posts = main_publisher_posts(items, live, restore_main())
+    try:
+        main_posts = main_publisher_posts(items, live, restore_main())
+    except MainPublisherLiveMissing as exc:
+        # Persist actionable, credential-free evidence despite a red run.
+        # This is NOT proof of deletion: a GET listing may omit older media.
+        ROOT.mkdir(parents=True, exist_ok=True)
+        history.save(REPORT, {
+            "run_id": run_id, "status": "held_live_history_mismatch",
+            "expected_parts": 20,
+            "archived_ids_absent_from_list": exc.records,
+            "provider_list_observed": len(live),
+            "publication_authorized": False, "posts_created": 0,
+            "reason": "provider_list_does_not_confirm_archived_ids",
+        })
+        raise
     already = conflicts(live, archive["records"], main_posts)
     records = archive["records"]
     prepared = []
