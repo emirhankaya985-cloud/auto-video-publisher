@@ -94,6 +94,46 @@ class AcceptedReadOnlyTests(unittest.TestCase):
         self.assertEqual(reason, "youtube_processing_or_visibility_pending")
         youtube.videos().insert.assert_not_called()
 
+    def test_new_accepted_gets_separate_public_or_processing_evidence_no_upload(self):
+        rows = {"daily_laugh:new": entry(
+            status="accepted", post_id="P3cFaKKqgyA", route="daily_laugh",
+            channel_id="UCF4KwI3alXzlExviMFmmJAA"),
+            "gonle:old": entry()}
+        pending = audit.audit({"schema": 1, "youtube_entries": rows},
+                              verifier=lambda row: (
+                                "youtube_processing_or_visibility_pending"
+                                if row["route"] == "daily_laugh"
+                                else "public_processed_verified"))
+        self.assertEqual(pending["accepted_checked"], 2)
+        self.assertEqual(pending["accepted_public_processed_verified"], 1)
+        self.assertEqual(pending["accepted_processing_or_visibility_pending"], 1)
+        self.assertEqual(pending["accepted_not_public_or_unavailable"], 0)
+        self.assertEqual(pending["uploads_attempted"], 0)
+        self.assertEqual(pending["status"], "pending_confirmation")
+        self.assertEqual(next(x for x in pending["posts"]
+                              if x["video_id"] == "P3cFaKKqgyA")["ledger_status"], "accepted")
+
+    def test_unresolved_old_markers_and_forbidden_are_not_auto_released(self):
+        state = {"schema": 1, "youtube_entries": {
+            "tarladaki:old": {"route": "tarladaki", "source_id": "old",
+                "status": "uncertain", "post_id": None,
+                "upload_error": {"http_status": 403, "reasons": ["forbidden"],
+                                 "unrecognized_reason": False}},
+            "daily_laugh:older": {"route": "daily_laugh", "source_id": "older",
+                "status": "uncertain", "post_id": None}}}
+        before = json.dumps(state, sort_keys=True)
+        report = audit.audit(state, uncertain_verifier=lambda key, row: {
+            "status": "uncertain_marker_not_found",
+            "requires_reconciliation": True,
+            "video_id": None,
+            "upload_diagnostic": audit.archived_youtube_upload_diagnostic(row)})
+        self.assertEqual(report["uncertain_marker_not_found"], 2)
+        self.assertEqual(report["uncertain_insert_403_forbidden"], 1)
+        self.assertEqual(report["accepted_public_processed_verified"], 0)
+        self.assertEqual(report["uploads_attempted"], 0)
+        self.assertEqual(report["status"], "pending_confirmation")
+        self.assertEqual(before, json.dumps(state, sort_keys=True))
+
     def test_audit_does_not_mark_accepted_entry_done(self):
         state = {"schema": 1, "youtube_entries": {
             "gonle:source": entry(),
