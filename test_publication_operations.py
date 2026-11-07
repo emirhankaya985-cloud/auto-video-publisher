@@ -139,6 +139,38 @@ class OperationsTests(unittest.TestCase):
         self.assertEqual(state, before)
         self.assertFalse(result[0]['safe_to_repost'])
 
+    def test_same_drive_item_other_platform_cross_film_pages_is_not_ig_success(self):
+        from publication_operations import _caption_digest
+        source = '1Zn8kYmexuUe3z1EKLtCrKFCwj4qVnIa2'
+        state = dict(schema=1, entries={
+            'film:instagram:'+source: dict(entry(10, 'uncertain', post=''),
+                file='Avanak_Apti_Part_10 (1).mp4',
+                caption_hash=_caption_digest('caption')),
+            'film_second:facebook:'+source: dict(entry(10, 'done', post='999999',
+                route='film_second', platform='facebook'),
+                file='Avanak_Apti_Part_10 (1).mp4'),
+        })
+        before = copy.deepcopy(state)
+        rows = audit_unresolved_remote(state, lambda *args: [])
+        proof = rows[0]['source_evidence']
+        self.assertTrue(proof['same_drive_item_other_platform_done'])
+        self.assertTrue(proof['same_drive_item_other_route_done'])
+        self.assertFalse(proof['source_sha256_present'])
+        self.assertFalse(proof['other_platform_exact_sha256_done'])
+        self.assertFalse(rows[0]['safe_to_repost'])
+        self.assertEqual(state, before)
+
+    def test_changed_file_name_or_corrupt_drive_key_cannot_prove_same_item(self):
+        source = '1Zn8kYmexuUe3z1EKLtCrKFCwj4qVnIa2'
+        state = dict(schema=1, entries={
+            'film:instagram:'+source: dict(entry(1, 'uncertain', post=''),
+                file='Original.mp4'),
+            'film:facebook:'+source: dict(entry(1, 'done', post='123456',
+                platform='facebook'), file='Different.mp4'),
+        })
+        rows = audit_unresolved_remote(state, lambda *args: [])
+        self.assertFalse(rows[0]['source_evidence']['same_drive_item_other_platform_done'])
+
     def test_source_evidence_separates_verified_cross_platform_bytes_from_ig_post(self):
         from publication_operations import _caption_digest
         sha = 'a' * 64
