@@ -11,8 +11,10 @@ from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import AuthorizedSession
 
 TARGETS = {
-    "channel1": ("TOKEN_CHANNEL1_JSON", "Tarladaki Fasulye", None),
-    "channel2": ("TOKEN_CHANNEL2_JSON", "Beyinsiz Penguen", None),
+    # Titles are mutable and not sufficient authorization binding.
+    # Use the existing publisher's exact YouTube channel IDs.
+    "channel1": ("TOKEN_CHANNEL1_JSON", "Tarladaki Fasulye", "UCrUF3mT4oF26JNBLcyKPcGQ"),
+    "channel2": ("TOKEN_CHANNEL2_JSON", "Beyinsiz Penguen", "UCUG-NSyXpEt9PLt5RS4iumw"),
     "daily_laugh": ("TOKEN_DAILY_LAUGH_LAB_JSON", "Daily Laugh Lab", "UCF4KwI3alXzlExviMFmmJAA"),
     "gonle_dusen": ("TOKEN_GONLE_DUSEN_JSON", "Gönle Düşen", "UCvSvo5WghuXqsjwLRmIz22g"),
 }

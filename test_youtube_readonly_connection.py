@@ -66,7 +66,7 @@ class YouTubeReadOnlyCheckTests(unittest.TestCase):
             "youtube_upload_scope_missing")
 
     def test_first_channel_identity_and_no_writes(self):
-        factory, session = session_for("Tarladaki Fasulye")
+        factory, session = session_for("Tarladaki Fasulye", "UCrUF3mT4oF26JNBLcyKPcGQ")
         with patch("youtube_readonly_connection.Credentials.from_authorized_user_info") as creds:
             verdict = check_channel("channel1",
                 environ={"TOKEN_CHANNEL1_JSON": json.dumps(AUTH_DATA)}, session_factory=factory)
@@ -81,6 +81,24 @@ class YouTubeReadOnlyCheckTests(unittest.TestCase):
         self.assertEqual(kwargs["params"]["mine"], "true")
         self.assertFalse(kwargs["allow_redirects"])
         creds.assert_called_once()
+
+    def test_same_named_wrong_channel_id_cannot_publish(self):
+        factory, session = session_for("Tarladaki Fasulye", "different_id")
+        with patch("youtube_readonly_connection.Credentials.from_authorized_user_info"):
+            verdict = check_channel("channel1",
+                environ={"TOKEN_CHANNEL1_JSON": json.dumps(AUTH_DATA)}, session_factory=factory)
+        self.assertEqual(verdict["status"], "wrong_channel")
+        session.post.assert_not_called()
+
+    def test_penguen_exact_id_prevents_cross_account_token_confusion(self):
+        for identifier, expected in (("UCUG-NSyXpEt9PLt5RS4iumw", "verified"),
+                                     ("UCrUF3mT4oF26JNBLcyKPcGQ", "wrong_channel")):
+            factory, session = session_for("Beyinsiz Penguen", identifier)
+            with patch("youtube_readonly_connection.Credentials.from_authorized_user_info"):
+                verdict = check_channel("channel2",
+                    environ={"TOKEN_CHANNEL2_JSON": json.dumps(AUTH_DATA)}, session_factory=factory)
+            self.assertEqual(verdict["status"], expected)
+            session.post.assert_not_called()
 
     def test_wrong_channel_is_not_accepted(self):
         factory, session = session_for("Beyinsiz Penguen")

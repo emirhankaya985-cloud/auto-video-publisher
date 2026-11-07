@@ -103,8 +103,10 @@ def main():
         or os.environ.get("GITHUB_RUN_ATTEMPT") != "1"):
         raise RuntimeError("untrusted_rotation_context")
     if not os.getenv("THREADS_SECRET_ROTATION_PAT"):
-        print("Threads rotation blocked: secret-write authority unavailable; no token changes.")
-        return 0
+        # A green workflow here previously misrepresented a rotation which
+        # had never even been attempted. Fail closed with no secret exposed.
+        print("Threads rotation BLOCKED: owner secret-write authority unavailable; unchanged.")
+        return 2
     failures = []
     for route in SECRET_NAMES:
         try:
