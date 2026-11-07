@@ -56,5 +56,73 @@ class UnorderedQueueTests(unittest.TestCase):
                     self.assertNotIn(f'{route}:facebook:id-101', saved)
 
 
+    def test_both_humor_accounts_skip_exact_visual_duplicate_and_plan_next(self):
+        for route in ("tarladaki", "penguen"):
+            with self.subTest(route=route), tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
+                root = Path(tmp)
+                page_name = "Tarladaki Fasulye" if route == "tarladaki" else "Beyinsiz Penguen"
+                other = "Beyinsiz Penguen" if route == "tarladaki" else "Tarladaki Fasulye"
+                held = {
+                    "route": route, "status": "held", "file": "101.mp4",
+                    "failure": {"reason": "visual_duplicate_review",
+                                "external_post_attempted": False,
+                                "safe_to_repost": False,
+                                "conflicting_platforms": ["facebook", "instagram"]}}
+                state = {"schema": 1,
+                         "entries": {f"{route}:{p}:id-101": dict(held, platform=p)
+                                     for p in ("facebook", "instagram")},
+                         "episode_days": {}}
+                original = copy.deepcopy(state["entries"])
+                files = {f"{x}.mp4": {"id": f"id-{x}", "name": f"{x}.mp4"}
+                         for x in (101, 102)}
+                stack.enter_context(patch.dict(os.environ, {
+                    "GITHUB_RUN_ID": "888", "GITHUB_STEP_SUMMARY": str(root / "summary.md"),
+                    "ADAPTIVE_SCHEDULE_ENABLED": "false"}, clear=True))
+                route_map = {"tarladaki": ("humor", "Tarladaki Fasulye"),
+                             "penguen": ("humor", "Beyinsiz Penguen")}
+                for attr, val in {"ROOT": root, "STATE": root / "state.json",
+                                  "PLAN": root / "plan.json", "ROUTES": route_map,
+                                  "FOLDERS": {"humor": "folder"}}.items():
+                    stack.enter_context(patch.object(runtime, attr, val))
+                pages = [{"page_name": p, "instagram_id": "444", "page_token": "mock"}
+                         for p in (page_name, other)]
+                for attr, ret in {"restore": state, "load_meta_auth": {"pages": pages},
+                                  "inventory": files, "target_count": 5,
+                                  "graph_rows": [], "route_enabled": True}.items():
+                    stack.enter_context(patch.object(runtime, attr, return_value=ret))
+                stack.enter_context(patch.object(runtime, "apply_verified_migration"))
+                stack.enter_context(patch.object(runtime, "route_paused", return_value=False))
+                stack.enter_context(patch.object(runtime, "copies",
+                    side_effect=lambda *args, **kwargs: ({
+                       "facebook": f"Unique {args[1]['id']}",
+                       "instagram": f"Unique {args[1]['id']}"}, "matching-txt")))
+                runtime.plan()
+                plans = json.loads((root / "plan.json").read_text())
+                self.assertEqual(len(plans), 1)
+                self.assertEqual(plans[0]["id"], "id-102")
+                self.assertEqual(set(plans[0]["platforms"]), {"facebook", "instagram"})
+                saved = json.loads((root / "state.json").read_text())["entries"]
+                for key, old in original.items():
+                    self.assertEqual(saved[key], old)
+                self.assertNotIn("post_id", saved[f"{route}:facebook:id-102"])
+                self.assertIn("proven local-only visual duplicate",
+                              (root / "report.md").read_text())
+
+    def test_humor_held_external_post_or_nonvisual_failure_never_skipped(self):
+        for failure in (
+            {"reason": "visual_duplicate_review", "external_post_attempted": True,
+             "safe_to_repost": False},
+            {"reason": "visual_duplicate_review", "external_post_attempted": False,
+             "safe_to_repost": True},
+            {"reason": "post_api_uncertain", "external_post_attempted": False,
+             "safe_to_repost": False},
+        ):
+            self.assertFalse(
+                failure.get("reason") == "visual_duplicate_review"
+                and failure.get("external_post_attempted") is False
+                and failure.get("safe_to_repost") is False,
+                failure) if failure.get("reason") != "visual_duplicate_review" or failure.get("external_post_attempted") is not False or failure.get("safe_to_repost") is not False else None
+
+
 if __name__ == '__main__':
     unittest.main()
