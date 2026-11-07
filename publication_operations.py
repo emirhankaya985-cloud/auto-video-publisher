@@ -168,11 +168,11 @@ def verify_publications_with_retry(state, run_id, read_history, *, sleep=time.sl
 def _caption_digest(value):
     """Match publisher caption normalization without heavy media dependencies."""
     value = re.sub(r"https://www\.etsy\.com/\S+", "", value or "")
-    value = re.sub(r"\\bEtsy:\\s*", "", value, flags=re.I)
+    value = re.sub(r"\bEtsy:\s*", "", value, flags=re.I)
     return hashlib.sha256(" ".join(value.split()).encode()).hexdigest()
 
 
-def audit_unresolved_remote(state, read_history):
+def audit_unresolved_remote(state, read_history, *, read_container=None):
     """GET-only candidate search; never resolves, mutates, or republishes an intent.
 
     A caption match is *not* a trustworthy source-video identity. A provider's
@@ -191,6 +191,17 @@ def audit_unresolved_remote(state, read_history):
                  'platform': platform if platform in ('facebook', 'instagram') else 'unknown',
                  'status': row['status'], 'safe_to_repost': False}
         prior = row.get('failure') if isinstance(row.get('failure'), dict) else {}
+        container_id = str(prior.get('container_id') or '')
+        if (read_container is not None and platform == 'instagram'
+                and route in allowed_routes and container_id.isdecimal()
+                and len(container_id) <= 32):
+            try:
+                phase = read_container(route, container_id)
+                if phase not in {'FINISHED', 'IN_PROGRESS', 'ERROR', 'EXPIRED', 'PUBLISHED'}:
+                    phase = 'unverified'
+            except Exception:
+                phase = 'unverified'
+            entry['existing_container_phase'] = phase
         if prior.get('reason') == 'visual_duplicate_review':
             entry['reason'] = 'visual_duplicate_requires_owner_review'
             result.append(entry)
@@ -264,7 +275,27 @@ def main():
         report['verification'] = verify_publications_with_retry(
             state, os.environ['GITHUB_RUN_ID'], history
         )
-        report['previous_unresolved_remote'] = audit_unresolved_remote(state, history)
+        def container_phase(route, container_id):
+            import requests
+            from cloud_omnichannel_publisher import GRAPH_API_VERSION
+            from publisher_recovery import read_with_retry
+            nonlocal pages
+            if pages is None:
+                pages = {p['page_name']: p for p in load_meta_auth()['pages']}
+            page = pages[ROUTES[route][1]]
+            response = read_with_retry(
+                requests.get,
+                f"https://graph.facebook.com/{GRAPH_API_VERSION}/{container_id}",
+                params={"fields": "status_code,status", "access_token": page['page_token']},
+                timeout=20, allow_redirects=False, graph_read=True)
+            if response.status_code != 200:
+                raise RuntimeError("container_history_not_available")
+            data = response.json()
+            if not isinstance(data, dict) or str(data.get('id') or container_id) != container_id:
+                raise RuntimeError("container_identity_mismatch")
+            return data.get('status_code') or data.get('status')
+        report['previous_unresolved_remote'] = audit_unresolved_remote(
+            state, history, read_container=container_phase)
     report['checked_at'] = datetime.now(timezone.utc).isoformat()
     (args.root / 'operations-report.json').write_text(
         json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
