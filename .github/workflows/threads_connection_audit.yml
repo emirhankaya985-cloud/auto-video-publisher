@@ -71,3 +71,11 @@ jobs:
           FILM_THREADS_USER_ID: ${{ vars.FILM_THREADS_USER_ID }}
           TOONZONE_THREADS_USER_ID: ${{ vars.TOONZONE_THREADS_USER_ID }}
         run: python check_threads_connection.py
+      - name: Preserve sanitized six-account identity result even on 401
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: threads-six-account-auth-readonly
+          path: threads-connection-readonly.json
+          if-no-files-found: warn
+          retention-days: 30
