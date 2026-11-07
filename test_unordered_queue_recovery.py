@@ -88,8 +88,10 @@ class UnorderedQueueTests(unittest.TestCase):
                          for p in (page_name, other)]
                 for attr, ret in {"restore": state, "load_meta_auth": {"pages": pages},
                                   "inventory": files, "target_count": 5,
-                                  "graph_rows": [], "route_enabled": True}.items():
+                                  "graph_rows": []}.items():
                     stack.enter_context(patch.object(runtime, attr, return_value=ret))
+                stack.enter_context(patch.object(runtime, "route_enabled",
+                                                 side_effect=lambda r: r == route))
                 stack.enter_context(patch.object(runtime, "apply_verified_migration"))
                 stack.enter_context(patch.object(runtime, "route_paused", return_value=False))
                 stack.enter_context(patch.object(runtime, "copies",
