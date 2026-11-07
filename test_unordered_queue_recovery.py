@@ -108,20 +108,27 @@ class UnorderedQueueTests(unittest.TestCase):
                 self.assertIn("proven local-only visual duplicate",
                               (root / "report.md").read_text())
 
-    def test_humor_held_external_post_or_nonvisual_failure_never_skipped(self):
-        for failure in (
-            {"reason": "visual_duplicate_review", "external_post_attempted": True,
-             "safe_to_repost": False},
-            {"reason": "visual_duplicate_review", "external_post_attempted": False,
-             "safe_to_repost": True},
-            {"reason": "post_api_uncertain", "external_post_attempted": False,
-             "safe_to_repost": False},
+    def test_unordered_visual_duplicate_bypass_never_uses_uncertain_post(self):
+        good = {"status": "held", "failure": {
+            "reason": "visual_duplicate_review",
+            "external_post_attempted": False,
+            "safe_to_repost": False,
+            "conflicting_platforms": ["facebook", "instagram"]}}
+        for route in ("tarladaki", "penguen", "gonle", "daily_laugh"):
+            self.assertTrue(runtime.can_advance_past_local_visual_hold(route, good))
+        self.assertFalse(runtime.can_advance_past_local_visual_hold("film", good))
+        self.assertFalse(runtime.can_advance_past_local_visual_hold("toonzone", good))
+        for bad in (
+            dict(good, status="uncertain"),
+            dict(good, status="done"),
+            dict(good, failure={**good["failure"], "external_post_attempted": True}),
+            dict(good, failure={**good["failure"], "safe_to_repost": True}),
+            dict(good, failure={**good["failure"], "reason": "api_post_uncertain"}),
+            dict(good, failure={**good["failure"], "conflicting_platforms": []}),
+            dict(good, failure={**good["failure"], "conflicting_platforms": ["youtube"]}),
         ):
-            self.assertFalse(
-                failure.get("reason") == "visual_duplicate_review"
-                and failure.get("external_post_attempted") is False
-                and failure.get("safe_to_repost") is False,
-                failure) if failure.get("reason") != "visual_duplicate_review" or failure.get("external_post_attempted") is not False or failure.get("safe_to_repost") is not False else None
+            self.assertFalse(runtime.can_advance_past_local_visual_hold("tarladaki", bad),
+                             bad)
 
 
 if __name__ == '__main__':
