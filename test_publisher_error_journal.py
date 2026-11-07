@@ -67,6 +67,29 @@ class ErrorJournalTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             error_event("not-a-stage", "txt_unavailable")
 
+    def test_http_categories_preserve_provider_specificity_without_authorizing_reposts(self):
+        from types import SimpleNamespace
+        expected = {
+            400: "request_or_media_validation",
+            401: "authentication",
+            403: "permission_denied",
+            429: "rate_limited",
+            500: "provider_unavailable",
+            503: "provider_unavailable",
+        }
+        for status, label in expected.items():
+            with self.subTest(status=status):
+                exc = SimpleNamespace(http_status=status)
+                event = error_event("instagram_publish", "other",
+                                    route="penguen", platform="threads", error=exc)
+                self.assertEqual(event["http_status"], status)
+                self.assertEqual(event["http_failure_class"], label)
+                self.assertEqual(event["platform"], "threads")
+                self.assertEqual(event["retry_policy"], "never_blindly_retry_meta_post")
+        for bad in (None, True, "400"):
+            self.assertEqual(error_event("other", "other",
+                error=SimpleNamespace(http_status=bad))["http_failure_class"], "unverified")
+
     def test_report_contains_all_errors_and_failing_ci_steps(self):
         event = {"run_id": "915", "reason": "txt_unavailable",
                  "stage": "txt_caption", "video": "13.mp4"}
