@@ -19,6 +19,34 @@ EXPECTED_INSTAGRAM_ID = "17841477404255851"
 THUMBNAIL_DISTANCE_MAX = 0.12
 
 
+def compare_thumbnail_geometry(original_png, live_thumbnail):
+    """Compare read-only thumbnail with pad/crop/stretch transformations.
+
+    Returns distances to distinguish a source mismatch from normal platform
+    aspect-ratio transformations; no variant proves a video was published.
+    """
+    from PIL import Image, ImageOps, ImageChops, ImageStat
+
+    with Image.open(original_png) as source, Image.open(live_thumbnail) as observed:
+        source = source.convert("RGB")
+        observed = observed.convert("RGB")
+        options = {
+            "letterbox_pad": ImageOps.pad(source, observed.size, color=(0, 0, 0)),
+            "center_crop": ImageOps.fit(source, observed.size),
+            "stretch": source.resize(observed.size),
+        }
+        reference = observed.resize((90, 160))
+        measured = {}
+        for name, expected in options.items():
+            delta = ImageChops.difference(expected.resize((90, 160)), reference)
+            measured[name] = round(sum(ImageStat.Stat(delta).rms) / (3 * 255), 6)
+        return {"distances": measured,
+                "best_mode": min(measured, key=measured.get),
+                "best_distance": min(measured.values()),
+                "original_dimensions": list(source.size),
+                "live_dimensions": list(observed.size)}
+
+
 def select_current(catalog, ledger, live, covers):
     """Join only exact source/ID owned-list matches, never caption guessing."""
     if not isinstance(ledger, dict) or not isinstance(ledger.get("entries"), dict):
@@ -82,8 +110,12 @@ def audit(page, *, inventory, download, graph_rows, restore, thumbnail, cover_di
                                 "https://www.instagram.com/")):
                         raise ValueError("incorrect_instagram_media_identity")
                     dist = float(cover_distance(cover, observed))
-                    result.update(distance=round(dist, 6), cover_sha256=meta["sha256"],
-                                  status=("matching_original_cover" if dist <= THUMBNAIL_DISTANCE_MAX
+                    geometric = compare_thumbnail_geometry(cover, observed)
+                    best = geometric["best_distance"]
+                    result.update(distance=round(dist, 6), **geometric,
+                                  cover_sha256=meta["sha256"],
+                                  status=("matching_original_cover"
+                                          if best <= THUMBNAIL_DISTANCE_MAX
                                           else "live_thumbnail_differs_from_drive_cover"))
                 except (OSError, ValueError, RuntimeError, TypeError, KeyError):
                     result["reason"] = "remote_thumbnail_or_cover_read_failed"
