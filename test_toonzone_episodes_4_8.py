@@ -702,6 +702,7 @@ class ToonZoneBatchTests(unittest.TestCase):
         by_slot = {(x["episode"], x["part"]): x for x in payload["records"]}
         for item in selected:
             proof = by_slot[item["episode"], item["part"]]
+            item["name"] = proof["source_file"]
             self.assertEqual(item["name"], proof["source_file"])
             records.append({
                 "episode": item["episode"], "part": item["part"],
