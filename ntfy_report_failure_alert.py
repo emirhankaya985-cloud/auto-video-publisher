@@ -7,6 +7,9 @@ from telegram_notifications import send_telegram, telegram_configured
 
 
 def notify_failure():
+    if os.getenv("QUIET_FAILURE_NOTIFICATIONS") == "true":
+        print(json.dumps({"state": "silenced_by_owner", "alert_sent": False}), flush=True)
+        return 0
     if not (os.getenv("NTFY_TOPIC_URL", "").strip() or
             os.getenv("NTFY_TOPIC", "").strip() or telegram_configured()):
         print(json.dumps({"state": "skipped", "reason": "ntfy_secret_missing"}), flush=True)

@@ -256,7 +256,8 @@ def main():
         and all(row.get("stage") == "previous_intent_hold"
                 and row.get("reason") == "unreconciled_previous_intent"
                 for row in events))
-    if category == "alert" or events:
+    # Owner preference: retain every incident in artifacts, but send success receipts only.
+    if (category == "alert" or events) and os.getenv("PUBLISH_QUIET_FAILURES") != "true":
         # One actionable warning per run; every sanitized event stays intact
         # in the error-journal and 90-day artifact, even if the alert is short.
         details = []
@@ -282,7 +283,7 @@ def main():
     run_url = f"https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/{run_id}"
     acknowledged = {"telegram": 0, "ntfy": 0}
     failures = 0
-    if require_both:
+    if require_both and (messages or os.getenv("PUBLISH_QUIET_FAILURES") != "true"):
         # Publishing remains committed; missing phone channels are separately
         # recorded as a DELIVERY failure, never a reason to repeat Meta POST.
         missing = []
@@ -296,7 +297,7 @@ def main():
             failures += 1
             record_error("ntfy_notification", "notification_delivery_failed",
                          error=RuntimeError("ntfy configuration missing"))
-        if missing and (telegram_on or ntfy_on):
+        if missing and (telegram_on or ntfy_on) and os.getenv("PUBLISH_QUIET_FAILURES") != "true":
             messages.append(("🚨 Bildirim kanalı eksik",
                              "Gönderi yeniden yayımlanmayacak. Eksik kanal: "
                              + ", ".join(missing)

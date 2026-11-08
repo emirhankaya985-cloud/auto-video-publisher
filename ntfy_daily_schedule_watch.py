@@ -82,6 +82,10 @@ def main():
     if verdict["status"] == "healthy":
         print(json.dumps({"state": "healthy", "alert_sent": False}), flush=True)
         return 0
+    if os.getenv("QUIET_FAILURE_NOTIFICATIONS") == "true":
+        print(json.dumps({"state": verdict["status"], "alert_sent": False,
+                          "silenced_by_owner": True}), flush=True)
+        return 1  # Retain the failed health signal in CI without sending phone alerts.
     try:
         if verdict["status"] == "missing_or_failed":
             title = "🚨 Günlük rapor otomasyonu eksik"

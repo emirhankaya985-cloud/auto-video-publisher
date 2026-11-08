@@ -30,6 +30,7 @@ jobs:
       - name: Verify scheduled prior-night daily report and alert only if missing
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          QUIET_FAILURE_NOTIFICATIONS: 'true'
           NTFY_TOPIC_URL: ${{ secrets.NTFY_TOPIC_URL }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}

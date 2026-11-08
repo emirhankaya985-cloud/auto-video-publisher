@@ -246,6 +246,58 @@ class TelegramPublishReportTests(unittest.TestCase):
             self.assertEqual(report.main(), 0)
             send.assert_not_called()
 
+    def test_owner_quiet_mode_keeps_error_records_and_sends_only_confirmed_posts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_path = Path(tmp) / "state.json"
+            state_path.write_text(json.dumps({"entries": {
+                "a": {"run_id": "333", "route": "tarladaki", "platform": "instagram",
+                      "status": "done", "post_id": "verified-ig", "file": "306.mp4"},
+                "b": {"run_id": "333", "route": "daily_laugh", "platform": "facebook",
+                      "status": "held", "file": "195.mp4"},
+            }}), encoding="utf-8")
+            events = [{"run_id": "333", "stage": "source_video",
+                       "reason": "visual_duplicate_review", "route": "daily_laugh",
+                       "platform": "facebook", "video": "195.mp4"}]
+            with patch.object(report, "STATE_PATH", state_path), patch.object(
+                report, "read_errors", return_value=events
+            ), patch.object(report, "telegram_configured", return_value=True), patch.object(
+                report, "send_telegram", return_value={"server_ack": True}
+            ) as telegram, patch.object(
+                report, "send_ntfy", return_value={"server_ack": True}
+            ) as ntfy, patch.dict(os.environ, {
+                "GITHUB_RUN_ID": "333", "VERIFY_STEP_OUTCOME": "success",
+                "PLAN_STEP_OUTCOME": "success", "PUBLISH_STEP_OUTCOME": "failure",
+                "NTFY_TOPIC": "test-topic", "REQUIRE_DUAL_NOTIFICATIONS": "true",
+                "PUBLISH_QUIET_FAILURES": "true",
+            }, clear=True):
+                self.assertEqual(report.main(), 0)
+            telegram.assert_called_once()
+            ntfy.assert_called_once()
+            self.assertIn("video yayınlandı", telegram.call_args.args[0])
+            self.assertNotIn("uyarısı", telegram.call_args.args[0].lower())
+
+    def test_owner_quiet_mode_does_not_send_error_only_notice(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_path = Path(tmp) / "state.json"
+            state_path.write_text(json.dumps({"entries": {}}), encoding="utf-8")
+            events = [{"run_id": "333", "stage": "workflow_publish",
+                       "reason": "workflow_step_failed"}]
+            with patch.object(report, "STATE_PATH", state_path), patch.object(
+                report, "read_errors", return_value=events
+            ), patch.object(report, "telegram_configured", return_value=True), patch.object(
+                report, "send_telegram"
+            ) as telegram, patch.object(
+                report, "send_ntfy"
+            ) as ntfy, patch.dict(os.environ, {
+                "GITHUB_RUN_ID": "333", "VERIFY_STEP_OUTCOME": "success",
+                "PLAN_STEP_OUTCOME": "success", "PUBLISH_STEP_OUTCOME": "failure",
+                "NTFY_TOPIC": "test-topic", "REQUIRE_DUAL_NOTIFICATIONS": "true",
+                "PUBLISH_QUIET_FAILURES": "true",
+            }, clear=True):
+                self.assertEqual(report.main(), 0)
+            telegram.assert_not_called()
+            ntfy.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -130,6 +130,19 @@ class MissingDailyReportTests(unittest.TestCase):
         self.assertEqual(sender.call_count, 1)
         self.assertNotIn("private-topic-url", output.getvalue())
 
+    def test_owner_quiet_mode_keeps_failed_verdict_without_sending(self):
+        output = io.StringIO()
+        with patch.dict(os.environ, {"QUIET_FAILURE_NOTIFICATIONS": "true"}, clear=True), patch(
+            "ntfy_daily_schedule_watch.check_daily_run",
+            return_value={"status": "missing_or_failed"}
+        ), patch("ntfy_daily_schedule_watch.send_ntfy") as ntfy, patch(
+            "ntfy_daily_schedule_watch.send_telegram"
+        ) as telegram, redirect_stdout(output):
+            self.assertEqual(watch.main(), 1)
+        ntfy.assert_not_called()
+        telegram.assert_not_called()
+        self.assertIn('"silenced_by_owner": true', output.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

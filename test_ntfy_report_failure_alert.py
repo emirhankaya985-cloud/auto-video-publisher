@@ -66,6 +66,17 @@ class FailureAlertTests(unittest.TestCase):
         self.assertNotIn("private-topic", output.getvalue())
         self.assertIn("failure_alert_not_delivered", output.getvalue())
 
+    def test_owner_quiet_mode_never_sends_failure_notice(self):
+        output = io.StringIO()
+        with patch.dict(os.environ, {"QUIET_FAILURE_NOTIFICATIONS": "true",
+                                    "NTFY_TOPIC": "private-topic"}, clear=True), patch(
+            "ntfy_report_failure_alert.send_ntfy"
+        ) as ntfy, patch("ntfy_report_failure_alert.send_telegram") as telegram, redirect_stdout(output):
+            self.assertEqual(alert.notify_failure(), 0)
+        ntfy.assert_not_called()
+        telegram.assert_not_called()
+        self.assertIn("silenced_by_owner", output.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

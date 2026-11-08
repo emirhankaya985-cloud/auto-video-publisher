@@ -231,6 +231,7 @@ jobs:
         id: notify_plan
         env:
           PUBLISH_ALERT_MODE: prepare
+          PUBLISH_QUIET_FAILURES: 'true' # Owner opted out of failure push alerts; keep incident artifacts.
           REQUIRE_DUAL_NOTIFICATIONS: 'true'
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}

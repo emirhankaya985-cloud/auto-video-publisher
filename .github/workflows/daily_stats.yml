@@ -120,7 +120,7 @@ jobs:
           path: link-runtime/publication_progress.json
           if-no-files-found: warn
           retention-days: 90
-      - name: Failure notice (does not replace the failed daily report)
+      - name: Persist failure without phone alert (owner quiet mode)
         if: ${{ failure() }}
         continue-on-error: true
         env:
@@ -128,4 +128,5 @@ jobs:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          QUIET_FAILURE_NOTIFICATIONS: 'true'
         run: python ntfy_report_failure_alert.py
