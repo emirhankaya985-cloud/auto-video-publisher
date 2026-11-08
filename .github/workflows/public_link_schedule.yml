@@ -300,6 +300,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 90
 
-      - name: Fail visibly when YouTube preparation failed
-        if: always() && steps.youtube_prepare.outcome == 'failure'
-        run: exit 1
+      # YouTube failures are independently visible in youtube-accepted-audit
+      # and the durable incident's youtube_prepare / youtube_publish outcomes.
+      # Never turn a Meta-only publisher run red merely because a separate
+      # Google identity is invalid; Meta safety and publish failures still fail.

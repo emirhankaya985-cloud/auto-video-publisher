@@ -149,9 +149,20 @@ def prepare():
             state['youtube_prepare_errors'].append(route + ': missing_secret')
             record_error('youtube_prepare', 'missing_secret', route=route, platform='youtube')
             continue
-        identity = check_channel(target)
-        if identity.get('status') != 'verified' or identity.get('channel_id') != expected:
-            raise RuntimeError('YouTube channel identity not verified: ' + route)
+        # A broken OAuth grant on one account must not stop healthy YouTube
+        # routes from preparing their own independent, archived intents.
+        # Fail closed for the affected route and keep a sanitized incident.
+        try:
+            identity = check_channel(target)
+        except Exception:
+            identity = None
+        if (not isinstance(identity, dict)
+                or identity.get('status') != 'verified'
+                or identity.get('channel_id') != expected):
+            state['youtube_prepare_errors'].append(route + ': identity_unverified')
+            record_error('youtube_prepare', 'credentials_or_permissions',
+                         route=route, platform='youtube')
+            continue
         caption = item.get('captions', {}).get('facebook') or item.get('captions', {}).get('instagram')
         if not isinstance(caption, str) or not caption.strip():
             raise RuntimeError('YouTube caption missing')
