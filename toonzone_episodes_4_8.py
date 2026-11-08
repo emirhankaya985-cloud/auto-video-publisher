@@ -453,9 +453,27 @@ def audit(run_id, *, reserve=False):
             "individual_status_counts": counts,
             "provider_list_observed": len(live),
             "publication_authorized": False, "posts_created": 0,
+            "safe_to_reserve": False,
+            "unverified_archive_count": len(exc.records),
             "reason": "provider_list_does_not_confirm_archived_ids",
+            "next_action": "remote_history_identity_reconciliation_required",
         })
-        raise
+        if reserve:
+            # A reserved/publish run must keep the strict hard stop. Never
+            # convert an unresolved historical Meta ID into a new upload.
+            raise
+        # Read-only audit COMPLETED: archived IDs remain unverifiable.
+        # A known safety hold is not a crashed audit, but is never a
+        # publication success. The workflow gate reads safe_to_reserve=False.
+        report = history.read(REPORT)
+        print(json.dumps({
+            "status": report["status"],
+            "safe_to_reserve": False,
+            "publication_authorized": False,
+            "unverified_archive_count": len(exc.records),
+            "posts_created": 0,
+        }), flush=True)
+        return report
     already = conflicts(live, archive["records"], main_posts)
     records = archive["records"]
     prepared = []
@@ -494,6 +512,7 @@ def audit(run_id, *, reserve=False):
               "source_files_verified": len(prepared),
               "instagram_identity_verified": True, "live_history_read": True,
               "publication_authorized": release_authorized(reserve),
+              "safe_to_reserve": True,
               "posts_created": 0}
     ROOT.mkdir(exist_ok=True)
     history.save(REPORT, report)
