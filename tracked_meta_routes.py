@@ -140,6 +140,16 @@ def main():
         except Exception:
             print('{"correlation":"unavailable","new_target_alert_preserved":true}',flush=True)
 
+    # The owner requested no repeated deficit/error push notifications.
+    # Keep a nonzero job result, the exact read-only verdict artifact, and
+    # the step summary: quiet mode must not disguise a missing post as healthy.
+    if os.getenv("QUIET_FAILURE_NOTIFICATIONS") == "true":
+        print(json.dumps({"notification": "quiet_by_owner",
+                          "status": verdict["status"],
+                          "target": route,
+                          "verification_preserved": True}), flush=True)
+        return 1
+
     missing = verdict.get("missing")
     deficits = ", ".join(f"{p}: {n} eksik" for p, n in (missing or {}).items() if n)
     subject = "ToonZone" if route == "toonzone" else "Daily Laugh Lab"

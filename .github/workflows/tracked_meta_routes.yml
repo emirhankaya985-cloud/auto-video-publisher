@@ -31,6 +31,8 @@ jobs:
     env:
       GITHUB_TOKEN: ${{ github.token }}
       CORRELATE_PUBLISHER_ALERTS: true
+      # Preserve exact missed-target verdicts in artifacts, not repeated phone alarms.
+      QUIET_FAILURE_NOTIFICATIONS: 'true'
       TARGET_ROUTE: ${{ inputs.route || (github.event.schedule == '40 10 * * *' && 'toonzone' || 'daily_laugh') }}
       META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
       # Same saved Page token inventory as publisher; counts still require live GETs.
