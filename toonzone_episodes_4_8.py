@@ -521,6 +521,78 @@ def release_authorized(reserve, *, environ=None):
                 and env.get("TOONZONE_RELEASE_4_8") == "true")
 
 
+
+def historical_publish_receipts(records, main_state, *, registry_path=None):
+    """Archive-vs-original-Graph-receipt check, never a CURRENT live-media proof.
+
+    The file is grounded in the twenty original publisher job logs that
+    recorded both Meta media_publish acceptance and a real Reel permalink.
+    A registry match cannot bypass any read-only GET, reserve or publish gate.
+    """
+    registry_path = registry_path or (
+        Path(__file__).resolve().parent / "docs"
+        / "toonzone-4-8-original-instagram-publish-receipts.json"
+    )
+    try:
+        data = json.loads(Path(registry_path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise RuntimeError("historical_publish_receipts_unavailable") from None
+    if (not isinstance(data, dict) or data.get("schema") != 1
+            or data.get("platform") != "instagram" or data.get("account") != "ToonZone"
+            or not isinstance(data.get("records"), list)
+            or len(data["records"]) != 20):
+        raise RuntimeError("historical_publish_receipts_invalid")
+    by_slot = {}
+    used_ids = set()
+    for row in data["records"]:
+        if not isinstance(row, dict):
+            raise RuntimeError("historical_publish_receipts_invalid")
+        slot = row.get("episode"), row.get("part")
+        if (slot not in EXPECTED or slot in by_slot
+                or not str(row.get("post_id") or "").isdecimal()
+                or not str(row.get("source_run_id") or "").isdecimal()
+                or str(row["post_id"]) in used_ids
+                or not re.fullmatch(
+                    r"https://www\\.instagram\\.com/reel/[A-Za-z0-9_-]+/",
+                    str(row.get("permalink") or ""),
+                )
+                or not isinstance(row.get("source_file"), str)
+                or not row["source_file"].startswith(f"S01E{slot[0]:02d}_")
+                or not row["source_file"].endswith(f"_Part{slot[1]}.mp4")):
+            raise RuntimeError("historical_publish_receipts_invalid")
+        by_slot[slot] = row
+        used_ids.add(str(row["post_id"]))
+    if len(by_slot) != len(EXPECTED):
+        raise RuntimeError("historical_publish_receipts_incomplete")
+    if not isinstance(main_state, dict) or not isinstance(main_state.get("entries"), dict):
+        raise RuntimeError("historical_main_ledger_unavailable")
+    matched = 0
+    for missing in records:
+        slot = missing.get("episode"), missing.get("part")
+        row = by_slot.get(slot)
+        ledger = main_state["entries"].get(
+            f"toonzone:instagram:{missing.get('source_id')}"
+        )
+        if (row is not None and isinstance(ledger, dict)
+                and row["source_file"] == missing.get("file")
+                and str(row["post_id"]) == str(missing.get("archived_post_id"))
+                and ledger.get("file") == row["source_file"]
+                and str(ledger.get("post_id")) == str(row["post_id"])
+                and str(ledger.get("run_id")) == str(row["source_run_id"])
+                and ledger.get("route") == "toonzone"
+                and ledger.get("platform") == "instagram"
+                and ledger.get("status") == "done"):
+            matched += 1
+    return {
+        "historical_publish_receipts_matching_ledger": matched,
+        "historical_publish_receipts_checked": len(records),
+        "historical_publish_reel_urls_available": matched,
+        "current_live_verified_by_historical_receipts": 0,
+        "historical_only": True,
+        "receipt_registry": str(Path(registry_path).name),
+    }
+
+
 def audit(run_id, *, reserve=False):
     from public_link_runtime import FOLDERS, inventory, graph_rows, download, probe, restore as restore_main
     page = page_for_toonzone()
@@ -566,9 +638,10 @@ def audit(run_id, *, reserve=False):
             except Exception:
                 facebook_coverage = {"facebook_live_list_read": False,
                                      "facebook_read_status": "unavailable"}
+            original_proof = historical_publish_receipts(exc.records, main_state)
             ROOT.mkdir(parents=True, exist_ok=True)
             history.save(REPORT, {
-                **inventory_coverage, **facebook_coverage,
+                **inventory_coverage, **facebook_coverage, **original_proof,
                 "run_id": run_id, "status": "held_live_history_mismatch",
                 "expected_parts": 20,
                 "expected_instagram_account_id": user_id,
@@ -593,6 +666,8 @@ def audit(run_id, *, reserve=False):
                 "safe_to_reserve": False,
                 "publication_authorized": False,
                 "unverified_archive_count": report["unverified_archive_count"],
+                "historical_publish_receipts_matching_ledger":
+                    report["historical_publish_receipts_matching_ledger"],
                 "posts_created": 0,
             }), flush=True)
             return report
