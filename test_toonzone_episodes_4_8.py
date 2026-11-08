@@ -394,6 +394,81 @@ class ToonZoneBatchTests(unittest.TestCase):
                 self.assertNotIn("TEST-SECRET", repr(result))
                 response.close.assert_called_once()
 
+    def test_owner_free_read_accepts_only_canonical_username_and_archived_caption(self):
+        from unittest.mock import Mock
+        from public_link_runtime import caption_key
+        item = target.selected(self.catalog())[0]
+        pid = "18100507712530539"
+        row = {"episode": 4, "part": 1, "file": item["name"],
+               "source_id": item["id"], "archived_post_id": pid,
+               "status": "ambiguous", "graph_error_code": 100}
+        state = {"entries": {f"toonzone:instagram:{item['id']}": {
+            "status": "done", "post_id": pid,
+            "caption_hash": caption_key("S01E04 Part 1/4"),
+        }}}
+        page = {"page_id": "1298191963387372", "page_token": "PRIVATE-CREDENTIAL"}
+        body = {"id": pid, "username": "toonzone.tr",
+                "caption": "S01E04 Part 1/4", "media_type": "VIDEO",
+                "timestamp": "2026-11-08T21:00:00+00:00",
+                "permalink": "https://www.instagram.com/reel/VerifiedExample/"}
+        response = Mock(status_code=200)
+        response.json.return_value = body
+        with patch("toonzone_instagram_season.graph_get",
+                   return_value={"id": target.ACCOUNT_ID, "username": "toonzone.tr"}):
+            get = Mock(return_value=response)
+            report = target.probe_ig_without_owner(
+                [row], page, target.ACCOUNT_ID, state, get=get)[0]
+        self.assertEqual(report["status"], "verified")
+        self.assertEqual(report["reason"], "exact_id_canonical_username_video_caption")
+        self.assertEqual(report["basic_read_status"], "verified")
+        self.assertEqual(report["_verified_caption"], "S01E04 Part 1/4")
+        self.assertEqual(get.call_count, 1)
+        self.assertNotIn("owner", get.call_args.kwargs["params"]["fields"])
+        self.assertIn("username", get.call_args.kwargs["params"]["fields"])
+        self.assertNotIn("PRIVATE-CREDENTIAL", repr(report))
+
+    def test_owner_free_read_never_accepts_wrong_username_or_basic_only(self):
+        from unittest.mock import Mock
+        from public_link_runtime import caption_key
+        item = target.selected(self.catalog())[0]
+        pid = "18100507712530539"
+        state = {"entries": {f"toonzone:instagram:{item['id']}": {
+            "status": "done", "post_id": pid,
+            "caption_hash": caption_key("S01E04 Part 1/4"),
+        }}}
+        page = {"page_id": "1298191963387372", "page_token": "PRIVATE-CREDENTIAL"}
+        body = {"id": pid, "caption": "S01E04 Part 1/4",
+                "media_type": "VIDEO", "timestamp": "2026-11-08T21:00:00Z",
+                "permalink": "https://www.instagram.com/reel/Example/"}
+        def row():
+            return {"episode": 4, "part": 1, "file": item["name"],
+                    "source_id": item["id"], "archived_post_id": pid,
+                    "status": "ambiguous", "graph_error_code": 100}
+        with patch("toonzone_instagram_season.graph_get",
+                   return_value={"id": target.ACCOUNT_ID, "username": "toonzone.tr"}):
+            wrong = Mock(status_code=200)
+            wrong.json.return_value = dict(body, username="someone.else")
+            result = target.probe_ig_without_owner(
+                [row()], page, target.ACCOUNT_ID, state,
+                get=Mock(return_value=wrong))[0]
+            self.assertEqual(result["status"], "ambiguous")
+            self.assertEqual(result["basic_read_status"], "username_mismatch_or_missing")
+
+            denied = Mock(status_code=400)
+            denied.json.return_value = {"error": {"code": 100, "error_subcode": 33,
+                                                    "message": "private-token-must-not-leak"}}
+            basic = Mock(status_code=200)
+            basic.json.return_value = body  # Has no username or ownership proof.
+            get = Mock(side_effect=[denied, basic])
+            outcome = target.probe_ig_without_owner(
+                [row()], page, target.ACCOUNT_ID, state, get=get)[0]
+            self.assertEqual(outcome["status"], "ambiguous")
+            self.assertEqual(outcome["basic_read_status"], "readable_but_owner_unconfirmed")
+            self.assertEqual(get.call_count, 2)
+            self.assertNotIn("private-token-must-not-leak", repr(outcome))
+            denied.close.assert_called_once()
+            basic.close.assert_called_once()
+
     def test_individual_get_errors_never_prove_deletion_or_authorize_repost(self):
         from unittest.mock import Mock
         item = target.selected(self.catalog())[0]
