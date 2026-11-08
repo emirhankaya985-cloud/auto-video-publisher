@@ -12,6 +12,71 @@ class ToonZoneBatchTests(unittest.TestCase):
                      name=f"S01E{e:02d}_Episode_Part{p}.mp4")
                 for e in range(1, 13) for p in range(1, 5)]
 
+    def test_historical_72_receipts_do_not_imply_current_visibility(self):
+        catalog = self.catalog()
+        state = {"schema": 1, "entries": {}}
+        for item in catalog:
+            if not (4 <= item["episode"] <= 12):
+                continue
+            for platform in ("facebook", "instagram"):
+                pid = str(1000000000000000
+                          + item["episode"] * 1000 + item["part"] * 10
+                          + (1 if platform == "facebook" else 2))
+                state["entries"][f"toonzone:{platform}:{item['id']}"] = {
+                    "route": "toonzone", "platform": platform,
+                    "status": "done", "file": item["name"],
+                    "run_id": "40000123456", "post_id": pid,
+                }
+        count = target.historical_season_receipts(catalog, state)
+        self.assertEqual(count["historical_facebook_done_with_id"], 36)
+        self.assertEqual(count["historical_instagram_done_with_id"], 36)
+        self.assertEqual(count["historical_total_done_with_id"], 72)
+        self.assertTrue(count["historical_complete_72"])
+        self.assertFalse(count["historical_means_currently_visible"])
+        self.assertEqual(count["historical_missing_receipts"], [])
+        first = next(item for item in catalog if item["episode"] == 4 and item["part"] == 1)
+        ig = state["entries"][f"toonzone:instagram:{first['id']}"]["post_id"]
+        fb = state["entries"][f"toonzone:facebook:{first['id']}"]["post_id"]
+        instagram = target.current_provider_receipt_visibility(
+            catalog, state, [{"id": ig}], "instagram")
+        facebook = target.current_provider_receipt_visibility(
+            catalog, state, [{"id": fb}], "facebook")
+        self.assertEqual(instagram["instagram_historical_ids_present_in_live_list"], 1)
+        self.assertEqual(instagram["instagram_historical_ids_absent_from_live_list"], 35)
+        self.assertEqual(facebook["facebook_historical_ids_present_in_live_list"], 1)
+        self.assertFalse(instagram["instagram_absent_proves_deleted"])
+        self.assertFalse(facebook["facebook_absent_proves_deleted"])
+
+    def test_missing_receipt_and_duplicate_history_are_not_accepted(self):
+        catalog = self.catalog()
+        state = {"schema": 1, "entries": {}}
+        for item in catalog:
+            if not 4 <= item["episode"] <= 12:
+                continue
+            for platform in ("facebook", "instagram"):
+                state["entries"][f"toonzone:{platform}:{item['id']}"] = {
+                    "route": "toonzone", "platform": platform,
+                    "status": "done", "file": item["name"],
+                    "run_id": "40000123456",
+                    "post_id": str(item["episode"] * 1000 + item["part"] * 10 +
+                                   (1 if platform == "facebook" else 2)),
+                }
+        first = next(row for row in catalog if row["episode"] == 4 and row["part"] == 1)
+        state["entries"].pop(f"toonzone:facebook:{first['id']}")
+        report = target.historical_season_receipts(catalog, state)
+        self.assertEqual(report["historical_total_done_with_id"], 71)
+        self.assertFalse(report["historical_complete_72"])
+        self.assertEqual(report["historical_missing_receipts"],
+                         ["S01E04 Part1 facebook"])
+        state["entries"][f"toonzone:facebook:{first['id']}"] = {
+            "route": "toonzone", "platform": "facebook", "status": "done",
+            "file": first["name"], "run_id": "40000123456", "post_id": "4011",
+        }
+        another = next(row for row in catalog if row["episode"] == 4 and row["part"] == 2)
+        state["entries"][f"toonzone:facebook:{another['id']}"]["post_id"] = "4011"
+        with self.assertRaisesRegex(RuntimeError, "duplicate_post_id"):
+            target.historical_season_receipts(catalog, state)
+
     def test_owner_4_12_inventory_has_thirty_six_exact_cover_names(self):
         from pathlib import Path
         catalog = self.catalog()
