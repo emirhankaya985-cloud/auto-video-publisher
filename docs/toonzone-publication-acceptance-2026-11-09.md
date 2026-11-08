@@ -26,16 +26,25 @@ Source: [run 42527047105](https://github.com/emirhankaya985-cloud/auto-video-pub
 - The separate current Instagram media list contained 31 videos. Exactly 5 of the 36 original S01E04–E12 IG IDs were present.
 - Specifically S01E04–S01E08 **20/20** historical IG media IDs did not appear in the current IG media list. Their individual Graph GET and alternate owner-free/username/basic reads returned HTTP400 Graph code `100` subcode `33`. A different currently listed IG media ID was readable with HTTP200 and the exact correct owner. **This proves an access/object visibility mismatch, not deletion or permission to repost.**
 - Facebook `/videos` listed 51 videos in the latest read and 36/36 original S01E04–E12 Facebook IDs were present. Only six current FB captions used the S01E04–12 Part markers; other title formats do not invalidate exact-ID matches.
-- Drive inventory: 36/36 requested MP4 source names and 36/36 exact matching PNG cover names exist. Cover image content, full source bytes, first-frame match and provider-visible thumbnail have **not** been verified for all 36.
+- Drive inventory: 36/36 requested MP4 source names and 36/36 exact matching PNG cover names exist. A new **real Drive byte-level audit** (below) successfully downloaded and validated all 36 PNGs. The full MP4 bytes, posted first-frame equivalence and remote Instagram thumbnail remain unverified.
 
 ## Operational acceptance and next technical gate
 
 1. HISTORICAL_META_POST_ACCEPTANCE: **PASS** (36 FB + 36 IG genuine prior publishing receipts).
 2. CURRENT_FB_POST_ID_VISIBILITY: **PASS 36/36** (ID presence only, not a thumbnail/content comparison).
 3. CURRENT_IG_POST_ID_VISIBILITY: **BLOCKED, 5/36 visible, 31/36 currently unmatched**.
-4. COVER_FIRST_FRAME_AND_REMOTE_THUMBNAIL: **UNVERIFIED**.
+4. DRIVE_EXACT_COVER_PNG_BYTES: **PASS 36/36** (full decode, original exact names, unique SHA256 for every part). COVER_FIRST_FRAME_AND_REMOTE_THUMBNAIL: **UNVERIFIED**.
 5. NEW_POSTS_CREATED_BY_THIS_ACCEPTANCE_AUDIT: **0**. Never claim a new publish from a green read-only workflow.
 6. Do not clear archived `done`/intent state or issue any replacement IG POST for one of the 31 absent IDs without independent exact account/published-media reconciliation or explicit confirmed removal plus source/cover/rights safety. Provider code100/33 alone is never a deletion certificate.
 7. User opted out of failure notifications. Persist errors and evidence in GitHub silently; retain success receipts and the requested 23:59 report. Hourly ToonZone/Film rescue automation carries this evidence; no duplicate notification automation needed.
 
 Implementation PRs: [#201](https://github.com/emirhankaya985-cloud/auto-video-publisher/pull/201) 36-source/cover and FB candidates, [#203](https://github.com/emirhankaya985-cloud/auto-video-publisher/pull/203) canonical owner-free IG GET fallback, [#204](https://github.com/emirhankaya985-cloud/auto-video-publisher/pull/204) historic-vs-current 72-receipt acceptance accounting.
+
+
+## 9 Kasım — 36 kapak dosyası gerçek byte kabulü
+
+- Implementation [PR #207](https://github.com/emirhankaya985-cloud/auto-video-publisher/pull/207) merged main. Live read-only [GitHub run 42527916806](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/42527916806) **success**, artifact `toonzone-36-cover-byte-acceptance` ID `13636431458`, `result.json`.
+- The actual public Drive PNG file for **each of the 36 S01E04–E12 parts** was downloaded into a temporary directory, checked for PNG magic, PIL structural validation, complete decoded pixel data, dimensions and SHA256. **36/36** validated; **0** missing, corrupted or duplicate-byte covers.
+- Example: S01E04 Part1 original exact PNG `S01E04_Death_Punchies_Part1.png`, **1086×1448**, SHA256 `e46f65513e118ecaaf905976ab865470a34a0c5f27287a15bae1c2cf75225197`.
+- **New provider writes: 0**. This proves file integrity and exact filename-to-part identity, but NOT that Instagram's historical published video still exists, nor that the remote media thumbnail matches that source cover. Do not call all 72 media currently accessible.
+- The old 20 IG Graph 100/33 responses and 31/36 missing live-list IDs remain outstanding provider visibility matters. Never blind-republish old source IDs; retain all 72 historical post receipts.
