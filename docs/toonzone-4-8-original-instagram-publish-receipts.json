@@ -1,0 +1,169 @@
+{
+  "schema": 1,
+  "source": "Original GitHub Actions Meta publisher job logs: matching ToonZone file, media_publish accepted media_id, real permalink read, post_id receipt",
+  "scope": "historical_publish_confirmation_only_not_current_live_verification",
+  "account": "ToonZone",
+  "platform": "instagram",
+  "records": [
+    {
+      "episode": 4,
+      "part": 1,
+      "source_file": "S01E04_Death_Punchies_Part1.mp4",
+      "post_id": "18100507712530539",
+      "source_run_id": "40479513634",
+      "permalink": "https://www.instagram.com/reel/De_lnslEsPH/"
+    },
+    {
+      "episode": 4,
+      "part": 2,
+      "source_file": "S01E04_Death_Punchies_Part2.mp4",
+      "post_id": "18140322613717074",
+      "source_run_id": "40481501400",
+      "permalink": "https://www.instagram.com/reel/De_mHoEjX1J/"
+    },
+    {
+      "episode": 4,
+      "part": 3,
+      "source_file": "S01E04_Death_Punchies_Part3.mp4",
+      "post_id": "18147162460585759",
+      "source_run_id": "40487111073",
+      "permalink": "https://www.instagram.com/reel/De_oC49CTM3/"
+    },
+    {
+      "episode": 4,
+      "part": 4,
+      "source_file": "S01E04_Death_Punchies_Part4.mp4",
+      "post_id": "18130674616847801",
+      "source_run_id": "40494529077",
+      "permalink": "https://www.instagram.com/reel/De_u1f5iafz/"
+    },
+    {
+      "episode": 5,
+      "part": 1,
+      "source_file": "S01E05_Free_Cake_Part1.mp4",
+      "post_id": "18126441904952321",
+      "source_run_id": "40665970123",
+      "permalink": "https://www.instagram.com/reel/DfCJMaXDXCc/"
+    },
+    {
+      "episode": 5,
+      "part": 2,
+      "source_file": "S01E05_Free_Cake_Part2.mp4",
+      "post_id": "18645508876030859",
+      "source_run_id": "40667349940",
+      "permalink": "https://www.instagram.com/reel/DfCKBEsjzPB/"
+    },
+    {
+      "episode": 5,
+      "part": 3,
+      "source_file": "S01E05_Free_Cake_Part3.mp4",
+      "post_id": "18142390114613556",
+      "source_run_id": "40674803448",
+      "permalink": "https://www.instagram.com/reel/DfCQfY5DsQp/"
+    },
+    {
+      "episode": 5,
+      "part": 4,
+      "source_file": "S01E05_Free_Cake_Part4.mp4",
+      "post_id": "17894327823683031",
+      "source_run_id": "40682173704",
+      "permalink": "https://www.instagram.com/reel/DfCXAmiDDYX/"
+    },
+    {
+      "episode": 6,
+      "part": 1,
+      "source_file": "S01E06_Meat_Your_Maker_Part1.mp4",
+      "post_id": "18103674230456215",
+      "source_run_id": "40851659042",
+      "permalink": "https://www.instagram.com/reel/DfEuSkcEV0i/"
+    },
+    {
+      "episode": 6,
+      "part": 2,
+      "source_file": "S01E06_Meat_Your_Maker_Part2.mp4",
+      "post_id": "18119589502800458",
+      "source_run_id": "40852949390",
+      "permalink": "https://www.instagram.com/reel/DfEvBEXEwDX/"
+    },
+    {
+      "episode": 6,
+      "part": 3,
+      "source_file": "S01E06_Meat_Your_Maker_Part3.mp4",
+      "post_id": "18103507559529282",
+      "source_run_id": "40860487544",
+      "permalink": "https://www.instagram.com/reel/DfE1ZPWDtZF/"
+    },
+    {
+      "episode": 6,
+      "part": 4,
+      "source_file": "S01E06_Meat_Your_Maker_Part4.mp4",
+      "post_id": "18130841098692118",
+      "source_run_id": "40867600328",
+      "permalink": "https://www.instagram.com/reel/DfE70QRCCNR/"
+    },
+    {
+      "episode": 7,
+      "part": 1,
+      "source_file": "S01E07_Grilled_Cheese_Deluxe_Part1.mp4",
+      "post_id": "18251899579309163",
+      "source_run_id": "41036563337",
+      "permalink": "https://www.instagram.com/reel/DfHUBswkiTw/"
+    },
+    {
+      "episode": 7,
+      "part": 2,
+      "source_file": "S01E07_Grilled_Cheese_Deluxe_Part2.mp4",
+      "post_id": "18215704591366755",
+      "source_run_id": "41043426075",
+      "permalink": "https://www.instagram.com/reel/DfHaSobgL6F/"
+    },
+    {
+      "episode": 7,
+      "part": 3,
+      "source_file": "S01E07_Grilled_Cheese_Deluxe_Part3.mp4",
+      "post_id": "18088939253290083",
+      "source_run_id": "41058894274",
+      "permalink": "https://www.instagram.com/reel/DfHgXxFCdrg/"
+    },
+    {
+      "episode": 7,
+      "part": 4,
+      "source_file": "S01E07_Grilled_Cheese_Deluxe_Part4.mp4",
+      "post_id": "18469608673142772",
+      "source_run_id": "41067982369",
+      "permalink": "https://www.instagram.com/reel/DfHwVBWiIaI/"
+    },
+    {
+      "episode": 8,
+      "part": 1,
+      "source_file": "S01E08_The_Unicorns_Have_Got_to_Go_Part1.mp4",
+      "post_id": "18126938824911610",
+      "source_run_id": "41202675929",
+      "permalink": "https://www.instagram.com/reel/DfKNW7xD49m/"
+    },
+    {
+      "episode": 8,
+      "part": 2,
+      "source_file": "S01E08_The_Unicorns_Have_Got_to_Go_Part2.mp4",
+      "post_id": "18183684142441045",
+      "source_run_id": "41210986765",
+      "permalink": "https://www.instagram.com/reel/DfKaCbDDjHV/"
+    },
+    {
+      "episode": 8,
+      "part": 3,
+      "source_file": "S01E08_The_Unicorns_Have_Got_to_Go_Part3.mp4",
+      "post_id": "18210036283369625",
+      "source_run_id": "41215699503",
+      "permalink": "https://www.instagram.com/reel/DfKgrzKijhb/"
+    },
+    {
+      "episode": 8,
+      "part": 4,
+      "source_file": "S01E08_The_Unicorns_Have_Got_to_Go_Part4.mp4",
+      "post_id": "18155679148486410",
+      "source_run_id": "41301342606",
+      "permalink": "https://www.instagram.com/reel/DfMouu2inRB/"
+    }
+  ]
+}
