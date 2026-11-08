@@ -335,12 +335,16 @@ class ToonZoneBatchTests(unittest.TestCase):
                               return_value=[{"status": "ambiguous", "reason": "test_only"}]), \
                  patch("public_link_runtime.download_verified_publication_video",
                        side_effect=AssertionError("not allowed to upload")):
-                with self.assertRaisesRegex(RuntimeError, "post_missing_from_live"):
-                    target.audit("987654", reserve=False)
+                result = target.audit("987654", reserve=False)
             report = json.loads((root / "audit.json").read_text())
+            self.assertEqual(result, report)
             self.assertEqual(report["status"], "held_live_history_mismatch")
             self.assertFalse(report["publication_authorized"])
+            self.assertFalse(report["safe_to_reserve"])
+            self.assertEqual(report["unverified_archive_count"], 1)
             self.assertEqual(report["posts_created"], 0)
+            self.assertFalse((root / "plan.json").exists())
+            self.assertFalse((root / "alert-history.json").exists())
             self.assertEqual(len(report["archived_ids_absent_from_list"]), 1)
             self.assertEqual(report["archived_ids_absent_from_list"][0]["archived_post_id"],
                              "18100507712530539")
@@ -479,6 +483,66 @@ class ToonZoneBatchTests(unittest.TestCase):
         self.assertEqual(result["basic"]["status"], "returned_identity_mismatch")
         self.assertEqual(get.call_count, 2)
 
+
+
+    def test_mismatch_is_still_fatal_for_reservation_and_never_uploads(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        import publisher_alert_history as history
+
+        row = target.selected(self.catalog())[0]
+        entries = {f"toonzone:instagram:{row['id']}": {
+            "route": "toonzone", "platform": "instagram",
+            "file": row["name"], "status": "done",
+            "post_id": "18100507712530539",
+        }}
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            with patch.dict(os.environ, {
+                    "TOONZONE_RIGHTS_APPROVED": "true",
+                    "TOONZONE_RELEASE_4_8": "true",
+            }, clear=True), \
+                 patch.object(target, "ROOT", root), \
+                 patch.object(target, "REPORT", root / "audit.json"), \
+                 patch.object(target, "PLAN", root / "plan.json"), \
+                 patch.object(target, "HISTORY", root / "alert-history.json"), \
+                 patch.object(target, "page_for_toonzone",
+                              return_value={"page_id": "123"}), \
+                 patch.object(target, "instagram_identity",
+                              return_value=target.ACCOUNT_ID), \
+                 patch.object(target, "ordered_catalog",
+                              return_value=self.catalog()), \
+                 patch.object(history, "restore",
+                              return_value={"schema": 1, "records": {}}), \
+                 patch("public_link_runtime.inventory", return_value={}), \
+                 patch("public_link_runtime.graph_rows", return_value=[]), \
+                 patch("public_link_runtime.restore",
+                       return_value={"schema": 1, "entries": entries}), \
+                 patch.object(target, "direct_probe_missing_main_posts",
+                              return_value=[{"status": "ambiguous",
+                                            "reason": "graph_code_100"}]), \
+                 patch("public_link_runtime.download_verified_publication_video") as download:
+                with self.assertRaises(target.MainPublisherLiveMissing):
+                    target.audit("987654", reserve=True)
+            report = json.loads((root / "audit.json").read_text())
+            self.assertFalse(report["safe_to_reserve"])
+            self.assertFalse(report["publication_authorized"])
+            self.assertFalse((root / "plan.json").exists())
+            self.assertFalse((root / "alert-history.json").exists())
+            download.assert_not_called()
+
+    def test_workflow_requires_positive_audit_to_release_any_part(self):
+        from pathlib import Path
+        workflow = (Path(__file__).parent / ".github" / "workflows"
+                    / "toonzone_episodes_4_8.yml").read_text(encoding="utf-8")
+        self.assertIn("release_ready: ${{ steps.eligibility.outputs.release_ready }}", workflow)
+        self.assertIn("needs.live-audit.outputs.release_ready == 'true'", workflow)
+        self.assertIn('verdict.get("safe_to_reserve") is True', workflow)
+        self.assertIn("and verdict.get(\"previously_verified\", 0) + verdict.get(\"prepared_parts\", 0) == 20", workflow)
+        self.assertIn("and verdict.get(\"posts_created\") == 0", workflow)
+        self.assertIn("vars.TOONZONE_RIGHTS_APPROVED == 'true'", workflow)
+        self.assertIn("vars.TOONZONE_RELEASE_4_8 == 'true'", workflow)
 
 
 if __name__ == "__main__":
