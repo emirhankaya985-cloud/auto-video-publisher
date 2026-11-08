@@ -222,5 +222,50 @@ class TrackedRoutesTests(unittest.TestCase):
         self.assertNotIn("secret-private-token", capture.getvalue())
 
 
+    def test_owner_quiet_mode_preserves_missing_target_and_never_pushes(self):
+        import tempfile
+        import json
+        from pathlib import Path
+        for status in ("behind", "unknown"):
+            with self.subTest(status=status), tempfile.TemporaryDirectory() as folder:
+                verdict = {"route": "toonzone", "status": status, "day": "2026-11-08",
+                           "target_per_platform": 4}
+                if status == "behind":
+                    verdict.update(counts={"facebook": 4, "instagram": 3},
+                                   missing={"facebook": 0, "instagram": 1})
+                else:
+                    verdict["reason"] = "meta_read_failed"
+                capture = io.StringIO()
+                with patch.dict(os.environ, {
+                        "TARGET_ROUTE": "toonzone",
+                        "GITHUB_STEP_SUMMARY": "",
+                        "QUIET_FAILURE_NOTIFICATIONS": "true",
+                        "CORRELATE_PUBLISHER_ALERTS": "false",
+                        "NTFY_TOPIC": "unused",
+                    }, clear=True), \
+                     patch.object(watch, "Path", side_effect=lambda p: Path(folder) / p), \
+                     patch.object(watch, "check_route", return_value=verdict), \
+                     patch.object(watch, "send_ntfy") as ntfy, \
+                     patch.object(watch, "send_telegram") as telegram, \
+                     patch.object(watch, "telegram_configured") as configured, \
+                     redirect_stdout(capture):
+                    self.assertEqual(watch.main(), 1)
+                ntfy.assert_not_called()
+                telegram.assert_not_called()
+                configured.assert_not_called()
+                saved = json.loads((Path(folder) / "target-verdict.json").read_text())
+                self.assertEqual(saved, verdict)
+                self.assertIn('"quiet_by_owner"', capture.getvalue())
+                self.assertNotIn("unused", capture.getvalue())
+
+    def test_meta_target_workflow_uses_owner_quiet_flag(self):
+        from pathlib import Path
+        workflow = (Path(__file__).parent / ".github" / "workflows"
+                    / "tracked_meta_routes.yml").read_text(encoding="utf-8")
+        self.assertEqual(workflow.count("QUIET_FAILURE_NOTIFICATIONS: 'true'"), 1)
+        self.assertIn("run: python tracked_meta_routes.py", workflow)
+        self.assertIn("name: tracked-route-verdict", workflow)
+
+
 if __name__ == "__main__":
     unittest.main()
