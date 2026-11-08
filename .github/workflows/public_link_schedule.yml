@@ -53,7 +53,9 @@ jobs:
       # Bounded two-item catch-up after 18:00; never bypasses per-route quota or safety locks.
       AUTO_BACKFILL_ENABLED: ${{ vars.AUTO_BACKFILL_ENABLED == 'true' && 'true' || 'false' }}
       # Only User token can discover verified Page tokens; invalid/expired token fails closed.
-      YOUTUBE_PUBLISHING_ENABLED: ${{ vars.YOUTUBE_PUBLISHING_ENABLED != 'false' && 'true' || 'false' }}
+      # Owner deferred YouTube remediation; keep this production lane Meta-only.
+      # Do not probe OAuth channels or enqueue YouTube intents until reauthorized.
+      YOUTUBE_PUBLISHING_ENABLED: 'false'
       # Only after the owner has restored videos.insert permissions; never
       # a broad unbounded retry flag. New ID grants one source attempt.
       YOUTUBE_FORBIDDEN_RELEASE_ID: ${{ vars.YOUTUBE_FORBIDDEN_RELEASE_ID }}
