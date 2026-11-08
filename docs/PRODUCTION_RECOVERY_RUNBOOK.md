@@ -753,3 +753,11 @@ Run 42103999147: full exact Drive cover plus compact profile created 13739862-by
 - Kullanıcının 8 Kasım açık talebi: YouTube'yu sonraya bırakıp Meta beğenilerini deneme yerine çalıştırmak.
 - Kontrollü düzeltme: `meta_cross_engagement.yml` planlı aralıkta `single_like` kullanır, en fazla **1 gerçek like / 15 dakikalık çalıştırma**; sadece doğrulanmış kaynak/actor eşleşmesi; ToonZone kaynak önceliği; GitHub intent önce, POST bir defa, belirsiz olayda tekrar yok. Kaydetme/yeniden paylaşma desteklenmediği veya kapalı olduğu için API yazısı yapılmaz.
 - Canlı kabul: Workflow CI + merge yeterli değildir. `cross-engagement-result` içinde `accepted`, gerçek API ACK ve Telegram makbuzunu ayrıca kontrol et; hiç uygun gönderi yoksa sıfır yazım normaldir. Provider `368`, `401`, `403`, `429` korumaları kaldırılmaz.
+
+## 9 Kasım 2026 — Meta önceliğinde bağımsız YouTube kimlik gürültüsünü ayırma
+
+- Kanıt: [42521169732](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/42521169732) çalışmasında Meta Tarladaki Fasulye `306.mp4` Instagram gönderisi ID `18138987529634112` ile başarılı; ancak ayrı YouTube `daily_laugh` kimlik kontrolü başarısız. [PR #196](https://github.com/emirhankaya985-cloud/auto-video-publisher/pull/196) hatalı YouTube kanalının diğer kanalları durdurmasını ve Meta sonucu yanlış etkilemesini engelledi.
+- 9 Kasım kullanıcı tercihi: önce Meta yayın sırası ve istikrarı, sonra diğer platformlar; YouTube yetkilendirme hataları bu aşamada ilerleme önceliği değildir.
+- Önlem: aktif `public_link_schedule.yml` içindeki `YOUTUBE_PUBLISHING_ENABLED` doğrudan `'false'` olacak. Böylece Meta koşumunda gereksiz Google OAuth kimlik kontrolü, intent hazırlığı ve video yükleme adımı çalışmaz. YouTube bağımsız denetim görevleri ve mevcut arşivler korunur; token veya önceki video kayıtlarına dokunulmaz.
+- Tekrarlayan yerel görsel benzerlik engelleri güvenli `held` kalır; güncel yayıncı bu beklemeyi artık tüm çalışma için yeni API arızası saymaz. `PUBLISH_QUIET_FAILURES='true'` ile kullanıcıya gereksiz hata push gönderilmez; GitHub olayı/arşivi ve doğrulanan gönderi alındıları korunur.
+- Canlı kabul: Testler ve PR merge yeterli değildir; yeni planlı Meta koşumunda `youtube_prepare=skipped`, gerçek Meta gönderi ID'si/uzak geçmiş eşleşmesi, korunan duplicate safety ve kanal sunucu ACK'si ayrıca doğrulanmalıdır.
