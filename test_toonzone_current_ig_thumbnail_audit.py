@@ -69,6 +69,21 @@ class ToonZoneCurrentThumbnailTests(unittest.TestCase):
         self.assertEqual(result["remote_unlisted_posts_verified"], 0)
         self.assertTrue(result["no_meta_writes"])
 
+    def test_crop_geometry_can_explain_normal_aspect_ratio_change(self):
+        from PIL import ImageOps
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)
+            source = path / "cover.png"
+            observed = path / "thumb.jpg"
+            Image.new("RGB", (1086, 1448), (30, 90, 150)).save(source, "PNG")
+            with Image.open(source) as image:
+                ImageOps.fit(image.convert("RGB"), (500, 850)).save(observed, "JPEG")
+            outcome = target.compare_thumbnail_geometry(source, observed)
+            self.assertLess(outcome["distances"]["center_crop"], 0.12)
+            self.assertEqual(outcome["best_mode"], "center_crop")
+            self.assertEqual(outcome["original_dimensions"], [1086, 1448])
+            self.assertEqual(outcome["live_dimensions"], [500, 850])
+
     def test_mismatching_thumbnail_stays_held(self):
         catalog, covers, state, live = self.data()
         def inventory(folder):
@@ -77,7 +92,7 @@ class ToonZoneCurrentThumbnailTests(unittest.TestCase):
             Image.new("RGB", (720, 960), (24, 32, 120)).save(path, "PNG")
             return path
         def thumbnail(_page, pid, observed):
-            Image.new("RGB", (720, 960), (12, 13, 80)).save(observed, "JPEG")
+            Image.new("RGB", (720, 960), (250, 240, 10)).save(observed, "JPEG")
             return {"id": pid, "media_type": "VIDEO",
                     "permalink": "https://www.instagram.com/reel/aValidReel/"}
         result = target.audit({"page_id": "1298191963387372"},
