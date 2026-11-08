@@ -761,3 +761,10 @@ Run 42103999147: full exact Drive cover plus compact profile created 13739862-by
 - Önlem: aktif `public_link_schedule.yml` içindeki `YOUTUBE_PUBLISHING_ENABLED` doğrudan `'false'` olacak. Böylece Meta koşumunda gereksiz Google OAuth kimlik kontrolü, intent hazırlığı ve video yükleme adımı çalışmaz. YouTube bağımsız denetim görevleri ve mevcut arşivler korunur; token veya önceki video kayıtlarına dokunulmaz.
 - Tekrarlayan yerel görsel benzerlik engelleri güvenli `held` kalır; güncel yayıncı bu beklemeyi artık tüm çalışma için yeni API arızası saymaz. `PUBLISH_QUIET_FAILURES='true'` ile kullanıcıya gereksiz hata push gönderilmez; GitHub olayı/arşivi ve doğrulanan gönderi alındıları korunur.
 - Canlı kabul: Testler ve PR merge yeterli değildir; yeni planlı Meta koşumunda `youtube_prepare=skipped`, gerçek Meta gönderi ID'si/uzak geçmiş eşleşmesi, korunan duplicate safety ve kanal sunucu ACK'si ayrıca doğrulanmalıdır.
+
+## 9 Kasım 2026 — Salt-okunur Meta hedef alarmı: telefon gürültüsü
+
+- Sorun: `tracked_meta_routes.py` ToonZone veya Daily Laugh günlük hedefi eksik ya da okunamıyor diye belirlediğinde, ana yayıncının `PUBLISH_QUIET_FAILURES=true` sessizlik ayarından bağımsız Telegram/ntfy hata uyarısı gönderiyordu. Önceden `CORRELATE_PUBLISHER_ALERTS` sadece bilinen ve eşleşen yayıncı olaylarını bastırıyordu; her yeni hedef açığını bastırmıyordu.
+- Kullanıcı tercihi: Gereksiz hata bildirimi istemiyor. Böyle bir açığı başarı gibi göstermeden GitHub sonuçlarını izlemek istiyor.
+- Düzeltme: `tracked_meta_routes.yml` için `QUIET_FAILURE_NOTIFICATIONS='true'`; monitor önce gerçek Meta GET sonuçlarını ve `target-verdict.json` delilini üretir, sonra `behind/unknown` ise **telefon POST'u yapmadan** başarısız iş sonucu bırakır. Zaman planını veya yayın state'ini değiştirmez.
+- Güvence: `healthy` sadece gerçek gönderi ID'leriyle belirlenir, `unknown` eksik video sayılmaz. Kullanıcı istemedikçe telefon hata uyarısı geri açılmaz. Yeni doğrulanmış video alındıları ve ayrı durum komutları etkilenmez.
