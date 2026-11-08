@@ -144,10 +144,63 @@ class BridgeTests(unittest.TestCase):
             state, plan = Path(temp) / 'state.json', Path(temp) / 'plan.json'
             state.write_text('{}')
             plan.write_text(json.dumps([{'route': 'tarladaki', 'id': 'file1', 'name': 'video.mp4', 'captions': {'facebook': 'caption'}}]))
-            with patch.object(bridge, 'STATE', state), patch.object(bridge, 'PLAN', plan), patch.dict(os.environ, {'GITHUB_RUN_ID': '1', 'TOKEN_CHANNEL1_JSON': 'secret'}, clear=True), patch.object(bridge, 'check_channel', return_value={'status': 'verified', 'channel_id': 'WRONG'}):
-                with self.assertRaises(RuntimeError):
-                    bridge.prepare()
-            self.assertEqual(json.loads(state.read_text()), {})
+            with patch.object(bridge, 'STATE', state), patch.object(bridge, 'PLAN', plan), \
+                 patch.dict(os.environ, {'GITHUB_RUN_ID': '1', 'TOKEN_CHANNEL1_JSON': 'secret'}, clear=True), \
+                 patch.object(bridge, 'check_channel', return_value={'status': 'verified', 'channel_id': 'WRONG'}), \
+                 patch.object(bridge, 'record_error') as record:
+                bridge.prepare()
+            saved = json.loads(state.read_text())
+            self.assertEqual(saved['youtube_entries'], {})
+            self.assertEqual(saved['youtube_prepare_errors'], ['tarladaki: identity_unverified'])
+            record.assert_called_once_with('youtube_prepare', 'credentials_or_permissions',
+                                           route='tarladaki', platform='youtube')
+
+    def test_bad_channel_identity_does_not_block_other_verified_channel(self):
+        with tempfile.TemporaryDirectory() as temp:
+            state, plan = Path(temp) / 'state.json', Path(temp) / 'plan.json'
+            state.write_text('{}')
+            plan.write_text(json.dumps([
+                {'route': 'daily_laugh', 'id': 'badSource', 'name': 'bad.mp4',
+                 'captions': {'facebook': 'Not publishable without identity'}},
+                {'route': 'gonle', 'id': 'goodSource', 'name': 'good.mp4',
+                 'captions': {'facebook': 'Authorized caption'}},
+            ]))
+            expected = bridge.ROUTES['gonle'][2]
+            def verify(route):
+                if route == 'daily_laugh':
+                    return {'status': 'wrong_channel', 'channel_id': 'other'}
+                if route == 'gonle_dusen':
+                    return {'status': 'verified', 'channel_id': expected}
+                raise AssertionError('unexpected route')
+            with patch.object(bridge, 'STATE', state), patch.object(bridge, 'PLAN', plan), \
+                 patch.dict(os.environ, {'GITHUB_RUN_ID': '1', 'TOKEN_DAILY_LAUGH_LAB_JSON': 'secret',
+                                         'TOKEN_GONLE_DUSEN_JSON': 'secret'}, clear=True), \
+                 patch.object(bridge, 'check_channel', side_effect=verify), \
+                 patch.object(bridge, 'record_error') as record:
+                bridge.prepare()
+            saved = json.loads(state.read_text())
+            self.assertNotIn('daily_laugh:badSource', saved['youtube_entries'])
+            self.assertEqual(saved['youtube_entries']['gonle:goodSource']['status'], 'intent')
+            self.assertEqual(saved['youtube_prepare_errors'], ['daily_laugh: identity_unverified'])
+            record.assert_called_once_with('youtube_prepare', 'credentials_or_permissions',
+                                           route='daily_laugh', platform='youtube')
+
+    def test_channel_identity_probe_exception_is_held_without_replay(self):
+        with tempfile.TemporaryDirectory() as temp:
+            state, plan = Path(temp) / 'state.json', Path(temp) / 'plan.json'
+            state.write_text('{}')
+            plan.write_text(json.dumps([{'route': 'daily_laugh', 'id': 'source',
+                                         'name': 'video.mp4', 'captions': {'facebook': 'caption'}}]))
+            with patch.object(bridge, 'STATE', state), patch.object(bridge, 'PLAN', plan), \
+                 patch.dict(os.environ, {'GITHUB_RUN_ID': '1',
+                                         'TOKEN_DAILY_LAUGH_LAB_JSON': 'secret'}, clear=True), \
+                 patch.object(bridge, 'check_channel', side_effect=RuntimeError('PRIVATE-TOKEN')), \
+                 patch.object(bridge, 'record_error'):
+                bridge.prepare()
+            saved = json.loads(state.read_text())
+            self.assertFalse(saved['youtube_entries'])
+            self.assertEqual(saved['youtube_prepare_errors'], ['daily_laugh: identity_unverified'])
+            self.assertNotIn('PRIVATE', json.dumps(saved))
 
     def test_existing_title_blocks_duplicate_upload(self):
         youtube = Mock()
