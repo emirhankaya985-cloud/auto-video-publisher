@@ -674,9 +674,10 @@ def main():
         tasks, report = (build_one_like(posts, actors, ledger, run_id, source_id, now=now)
                          if single_like else build_plan(posts, actors, ledger, run_id,
                                                         source_id, now=now))
-        if single_like and live and (len(tasks) > 1 or (tasks and
-                (tasks[0]["operation"] != "like"
-                 or tasks[0]["actor"] == tasks[0]["owner"]))):
+        if single_like and live and (
+                len(tasks) > 1
+                or any(t["operation"] != "like" or t["actor"] == t["owner"]
+                       for t in tasks)):
             raise ValueError("single-like plan not safe")
         blocked_counts = dict(Counter(f"{r['platform']}/{r['operation']}/{r['status']}" for r in report))
         save(PLAN, tasks)
@@ -697,9 +698,10 @@ def main():
     elif live:
         ledger = json.loads(STATE.read_text())
         tasks = json.loads(PLAN.read_text())
-        if single_like and (len(tasks) > 1 or (tasks and
-                (tasks[0].get("operation") != "like"
-                 or tasks[0].get("actor") == tasks[0].get("owner"))):
+        if single_like and (
+                len(tasks) > 1
+                or any(t.get("operation") != "like" or t.get("actor") == t.get("owner")
+                       for t in tasks)):
             raise ValueError("single-like execution scope invalid")
         execute(tasks, actors, ledger, run_id, persist=lambda x: save(STATE, x))
         counts = {}
