@@ -72,6 +72,75 @@ def season_inventory_coverage(catalog, covers):
             "cover_bytes_verified_4_12": False}
 
 
+def historical_season_receipts(catalog, state):
+    """Inventory exact historical 4–12 done+post_id evidence in both providers.
+
+    This counts durable original receipts, NOT presently visible provider
+    media and NOT a new permission to repost. Match source ID and exact file
+    in the original main ledger, rejecting ID reuse across distinct slots.
+    """
+    if not isinstance(state, dict) or not isinstance(state.get("entries"), dict):
+        raise RuntimeError("main_publisher_ledger_unavailable")
+    expected = [(episode, part) for episode in range(4, 13) for part in range(1, 5)]
+    selected_rows = [item for item in catalog if 4 <= item["episode"] <= 12]
+    if [(item["episode"], item["part"]) for item in selected_rows] != expected:
+        raise RuntimeError("historical_season_source_order_invalid")
+    counts = {"instagram": 0, "facebook": 0}
+    missing = []
+    seen = set()
+    for item in selected_rows:
+        for platform in ("facebook", "instagram"):
+            record = state["entries"].get(f"toonzone:{platform}:{item['id']}")
+            label = f"S01E{item['episode']:02d} Part{item['part']} {platform}"
+            if (not isinstance(record, dict) or record.get("route") != "toonzone"
+                    or record.get("platform") != platform
+                    or record.get("file") != item["name"]
+                    or record.get("status") != "done"
+                    or not str(record.get("post_id") or "").isdecimal()
+                    or not str(record.get("run_id") or "").isdecimal()):
+                missing.append(label)
+                continue
+            marker = (platform, str(record["post_id"]))
+            if marker in seen:
+                raise RuntimeError("historical_season_duplicate_post_id")
+            seen.add(marker)
+            counts[platform] += 1
+    return {
+        "historical_facebook_done_with_id": counts["facebook"],
+        "historical_instagram_done_with_id": counts["instagram"],
+        "historical_total_done_with_id": sum(counts.values()),
+        "historical_complete_72": counts["facebook"] == 36 and counts["instagram"] == 36,
+        "historical_missing_receipts": missing,
+        "historical_means_currently_visible": False,
+    }
+
+
+def current_provider_receipt_visibility(catalog, state, live, platform):
+    """Match exact archived post IDs against one currently read provider list.
+
+    Filename or caption-only sightings do not establish the original post's
+    current identity. A disappearing provider ID is UNKNOWN, not deleted.
+    """
+    if platform not in ("instagram", "facebook") or not isinstance(live, list):
+        raise ValueError("invalid provider visibility input")
+    live_ids = {str(row.get("id") or "") for row in live if isinstance(row, dict)}
+    present = 0
+    for item in catalog:
+        if not (4 <= item["episode"] <= 12):
+            continue
+        archived = state["entries"].get(f"toonzone:{platform}:{item['id']}")
+        if (isinstance(archived, dict) and archived.get("status") == "done"
+                and archived.get("file") == item["name"]
+                and str(archived.get("post_id") or "") in live_ids):
+            present += 1
+    return {
+        f"{platform}_historical_ids_present_in_live_list": present,
+        f"{platform}_historical_ids_absent_from_live_list": 36 - present,
+        f"{platform}_provider_list_items_read": len(live),
+        f"{platform}_absent_proves_deleted": False,
+    }
+
+
 def facebook_caption_candidates(rows):
     """Read-only candidates only; never equate captions with source/post proof."""
     slots = set()
@@ -536,6 +605,19 @@ def audit(run_id, *, reserve=False):
     if not isinstance(live, list):
         raise RuntimeError("instagram_live_history_unavailable")
     main_state = restore_main()
+    historical_coverage = historical_season_receipts(catalog, main_state)
+    instagram_visibility = current_provider_receipt_visibility(
+        catalog, main_state, live, "instagram")
+    try:
+        facebook_live = graph_rows(page, "facebook")
+        facebook_coverage = facebook_caption_candidates(facebook_live)
+        facebook_visibility = current_provider_receipt_visibility(
+            catalog, main_state, facebook_live, "facebook")
+    except Exception:
+        facebook_coverage = {"facebook_live_list_read": False,
+                             "facebook_read_status": "unavailable"}
+        facebook_visibility = {"facebook_historical_ids_present_in_live_list": None,
+                               "facebook_historical_ids_absent_from_live_list": None}
     try:
         main_posts = main_publisher_posts(items, live, main_state)
     except MainPublisherLiveMissing as exc:
@@ -561,14 +643,10 @@ def audit(run_id, *, reserve=False):
                          for row in verified_fallback]
             main_posts = main_publisher_posts(items, live + synthetic, main_state)
         else:
-            try:
-                facebook_coverage = facebook_caption_candidates(graph_rows(page, "facebook"))
-            except Exception:
-                facebook_coverage = {"facebook_live_list_read": False,
-                                     "facebook_read_status": "unavailable"}
             ROOT.mkdir(parents=True, exist_ok=True)
             history.save(REPORT, {
-                **inventory_coverage, **facebook_coverage,
+                **inventory_coverage, **historical_coverage,
+                **instagram_visibility, **facebook_coverage, **facebook_visibility,
                 "run_id": run_id, "status": "held_live_history_mismatch",
                 "expected_parts": 20,
                 "expected_instagram_account_id": user_id,
@@ -626,7 +704,8 @@ def audit(run_id, *, reserve=False):
         prepared.append(dict(row, key=key, text=caption, cover_id=cover["id"],
                              cover_path=str(path), cover_sha256=digest(path)))
     prepared = preflight_sources(prepared)
-    report = {**inventory_coverage,
+    report = {**inventory_coverage, **historical_coverage,
+              **instagram_visibility, **facebook_coverage, **facebook_visibility,
               "run_id": run_id, "target_episodes": [4, 5, 6, 7, 8],
               "expected_parts": 20, "previously_verified": len(already),
               "regular_publisher_live_id_matches": len(main_posts),
