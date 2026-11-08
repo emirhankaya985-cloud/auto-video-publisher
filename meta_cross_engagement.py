@@ -589,7 +589,7 @@ def restore():
 def build_one_like(posts, actors, ledger, run_id, source_run_id, *, now):
     """One authorized, cross-account like only; no write before live preflight.
 
-    This is a limited, owner-requested one-time API smoke trial, NOT a
+    This is a bounded one-like-per-run owner-authorized path, NOT a
     bulk-engagement runner. Do not reserve any save or repost intents.
     """
     if ledger.get("schema") != 1 or not isinstance(ledger.get("actions"), dict):
@@ -599,8 +599,12 @@ def build_one_like(posts, actors, ledger, run_id, source_run_id, *, now):
         if f"{platform}/like" in holds:
             continue
         checked = 0
+        # Meta first: work through ToonZone's verified recent videos before
+        # other accounts, without bypassing past action receipts or actor grants.
+        toonzone_owners = {a["id"] for a in actors.values()
+                           if a["platform"] == platform and a["name"] == "ToonZone"}
         for source in sorted((p for p in posts if p["platform"] == platform),
-                             key=lambda p: p["post_id"]):
+                             key=lambda p: (p["owner"] not in toonzone_owners, p["post_id"])):
             for actor in sorted((a for a in actors.values()
                                  if a["platform"] == platform and a["id"] != source["owner"]
                                  and permission(platform, "like") <= a["grants"]),
@@ -638,7 +642,10 @@ def main():
     if os.getenv("GITHUB_REPOSITORY") != REPO or not run_id.isdigit() or not (source_id.isdigit() or source_id == "latest"):
         raise ValueError("invalid workflow identity")
     mode = os.getenv("ENGAGEMENT_MODE")
-    single_like = (mode == "single_like" and os.getenv("GITHUB_EVENT_NAME") == "push"
+    # Main-branch owner approval marker or a regular schedule may perform
+    # one verified like only. Manual dispatch stays read-only; no bulk apply.
+    single_like = (mode == "single_like"
+                   and os.getenv("GITHUB_EVENT_NAME") in {"push", "schedule"}
                    and os.getenv("GITHUB_REF") == "refs/heads/main")
     live = (os.getenv("META_CROSS_ENGAGEMENT_ENABLED") == "true"
             and (mode == "apply" or single_like))
@@ -667,8 +674,9 @@ def main():
         tasks, report = (build_one_like(posts, actors, ledger, run_id, source_id, now=now)
                          if single_like else build_plan(posts, actors, ledger, run_id,
                                                         source_id, now=now))
-        if single_like and live and (len(tasks) != 1 or tasks[0]["operation"] != "like"
-                                     or tasks[0]["actor"] == tasks[0]["owner"]):
+        if single_like and live and (len(tasks) > 1 or (tasks and
+                (tasks[0]["operation"] != "like"
+                 or tasks[0]["actor"] == tasks[0]["owner"]))):
             raise ValueError("single-like plan not safe")
         blocked_counts = dict(Counter(f"{r['platform']}/{r['operation']}/{r['status']}" for r in report))
         save(PLAN, tasks)
@@ -689,8 +697,9 @@ def main():
     elif live:
         ledger = json.loads(STATE.read_text())
         tasks = json.loads(PLAN.read_text())
-        if single_like and (len(tasks) != 1 or tasks[0].get("operation") != "like"
-                            or tasks[0].get("actor") == tasks[0].get("owner")):
+        if single_like and (len(tasks) > 1 or (tasks and
+                (tasks[0].get("operation") != "like"
+                 or tasks[0].get("actor") == tasks[0].get("owner"))):
             raise ValueError("single-like execution scope invalid")
         execute(tasks, actors, ledger, run_id, persist=lambda x: save(STATE, x))
         counts = {}
