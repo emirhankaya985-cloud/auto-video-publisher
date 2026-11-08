@@ -578,5 +578,56 @@ class EngagementTests(unittest.TestCase):
                 self.assertEqual(json.loads((root/"report.json").read_text())["mode"],"dry_run")
 
 
+    def test_scheduled_live_run_with_no_eligible_likes_is_safe_no_op(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            env = {
+                "GITHUB_REPOSITORY": m.REPO,
+                "GITHUB_RUN_ID": "200",
+                "SOURCE_RUN_ID": "latest",
+                "GITHUB_REF": "refs/heads/main",
+                "GITHUB_EVENT_NAME": "schedule",
+                "ENGAGEMENT_SCOPE": "recent_window",
+                "ENGAGEMENT_MODE": "single_like",
+                "META_CROSS_ENGAGEMENT_ENABLED": "true",
+                "META_AUDIT_FOCUS": "",
+            }
+            with patch.dict(m.os.environ, env, clear=True), \
+                 patch.object(m, "STATE", root / "engagement.json"), \
+                 patch.object(m, "PLAN", root / "plan.json"), \
+                 patch.object(m, "REPORT", root / "report.json"), \
+                 patch("sys.argv", ["meta_cross_engagement.py", "plan"]), \
+                 patch.object(m, "load_meta_auth", return_value={}), \
+                 patch.object(m, "accounts", return_value=actors()), \
+                 patch.object(m, "latest_source_id", return_value="100") as choose, \
+                 patch.object(m, "restore", return_value={"schema": 1, "actions": {}}), \
+                 patch.object(m, "read_source", return_value={"entries": {}}), \
+                 patch.object(m, "perform") as post:
+                m.main()
+                self.assertFalse(choose.call_args.kwargs["allow_prestate_fallback"])
+                self.assertEqual(json.loads((root / "plan.json").read_text()), [])
+                self.assertEqual(json.loads((root / "report.json").read_text())["mode"], "apply")
+                self.assertTrue((root / "engagement.json").exists())
+                with patch("sys.argv", ["meta_cross_engagement.py", "execute"]):
+                    m.main()
+                post.assert_not_called()
+
+    def test_scheduled_toonzone_like_one_per_run_with_verified_actor(self):
+        aa = actors()
+        aa[("instagram", "55")] = dict(platform="instagram", id="55", name="ToonZone",
+                                        grants=set(GRANTS), token="token", owner_page="11")
+        posts = [dict(platform="instagram", post_id="111", owner="33"),
+                 dict(platform="instagram", post_id="999", owner="55")]
+        ledger = {"schema": 1, "actions": {}}
+        with patch.object(m, "verified_media", return_value=None), \
+             patch.dict(m.os.environ, {"META_CROSS_REPOST_ENABLED": "false"}):
+            planned, _ = m.build_one_like(posts, aa, ledger, "200", "100", now=NOW)
+        self.assertEqual(len(planned), 1)
+        self.assertEqual(planned[0]["operation"], "like")
+        self.assertEqual(planned[0]["owner"], "55")
+        self.assertNotEqual(planned[0]["actor"], planned[0]["owner"])
+        self.assertFalse(any(t["operation"] in ("save", "repost") for t in planned))
+
+
 if __name__ == "__main__":
     unittest.main()
