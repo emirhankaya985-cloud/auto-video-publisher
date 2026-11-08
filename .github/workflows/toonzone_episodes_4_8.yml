@@ -40,6 +40,8 @@ jobs:
   live-audit:
     needs: tests
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    outputs:
+      release_ready: ${{ steps.eligibility.outputs.release_ready }}
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
@@ -62,6 +64,28 @@ jobs:
           fi
       - name: Check verified live media history and twenty exact Drive covers - NO POSTS
         run: python toonzone_episodes_4_8.py audit
+      - name: Gate publication from exact safety audit evidence - NO POSTS
+        id: eligibility
+        if: success()
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          verdict = json.loads(Path("toonzone-4-8-runtime/audit.json").read_text())
+          ready = (
+              verdict.get("safe_to_reserve") is True
+              and verdict.get("live_history_read") is True
+              and verdict.get("instagram_identity_verified") is True
+              and verdict.get("expected_parts") == 20
+              and verdict.get("previously_verified", 0) + verdict.get("prepared_parts", 0) == 20
+              and verdict.get("posts_created") == 0
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write("release_ready=" + ("true" if ready else "false") + "\n")
+          print(json.dumps({"read_only_audit": "verified_for_reserve" if ready else "held_no_publish",
+                            "release_ready": ready, "meta_writes": 0}))
+          PY
       - if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -79,6 +103,7 @@ jobs:
       github.ref == 'refs/heads/main' &&
       github.event_name == 'workflow_dispatch' &&
       inputs.mode == 'publish' &&
+      needs.live-audit.outputs.release_ready == 'true' &&
       vars.TOONZONE_RIGHTS_APPROVED == 'true' &&
       vars.TOONZONE_RELEASE_4_8 == 'true' &&
       github.run_attempt == 1
