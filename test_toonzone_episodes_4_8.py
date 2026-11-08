@@ -12,6 +12,33 @@ class ToonZoneBatchTests(unittest.TestCase):
                      name=f"S01E{e:02d}_Episode_Part{p}.mp4")
                 for e in range(1, 13) for p in range(1, 5)]
 
+    def test_owner_4_12_inventory_has_thirty_six_exact_cover_names(self):
+        from pathlib import Path
+        catalog = self.catalog()
+        covers = {Path(item["name"]).stem + ".png": {"id": "cover-" + item["id"]}
+                  for item in catalog if 4 <= item["episode"] <= 12}
+        report = target.season_inventory_coverage(catalog, covers)
+        self.assertEqual(report["requested_4_12_parts"], 36)
+        self.assertEqual(report["source_names_found_4_12"], 36)
+        self.assertEqual(report["cover_names_found_4_12"], 36)
+        self.assertFalse(report["cover_bytes_verified_4_12"])
+        self.assertEqual(report["missing_cover_names_4_12"], [])
+        del covers["S01E09_Episode_Part2.png"]
+        missing = target.season_inventory_coverage(catalog, covers)
+        self.assertEqual(missing["cover_names_found_4_12"], 35)
+        self.assertEqual(missing["missing_cover_names_4_12"], ["S01E09_Episode_Part2.png"])
+
+    def test_facebook_caption_candidate_cannot_prove_publication(self):
+        rows = [{"id": "1", "description": "ToonZone · S01E04 · Part 1/4"},
+                {"id": "2", "description": "ToonZone · S01E12 · Part 4/4"},
+                {"id": "3", "description": "S01E13 Part1"},
+                {"id": "4", "description": "S01E12 Part4"}]
+        result = target.facebook_caption_candidates(rows)
+        self.assertEqual(result["facebook_caption_candidate_count_4_12"], 2)
+        self.assertFalse(result["facebook_source_identity_verified"])
+        self.assertEqual(result["facebook_caption_candidate_slots_4_12"],
+                         ["S01E04 Part1", "S01E12 Part4"])
+
     def test_exact_twenty_part_order(self):
         rows = target.selected(self.catalog())
         self.assertEqual(len(rows), 20)
