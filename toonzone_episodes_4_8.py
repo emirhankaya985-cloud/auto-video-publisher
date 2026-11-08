@@ -343,6 +343,117 @@ def direct_probe_missing_main_posts(records, page, account_id, state, *, get=Non
 
 
 
+
+def probe_ig_without_owner(individual, page, account_id, state, *, get=None):
+    """Second independent read of code-100 IG IDs with username, not owner.
+
+    Graph may reject a media node's owner field independently of the media
+    itself. Only the SAME media ID, canonical account username, VIDEO, matching
+    saved caption hash, valid timestamp and permalink can confirm a post.
+    A successful bare GET without username is evidence, not account proof.
+    No provider writes, no token or error-message logging.
+    """
+    import requests
+    from datetime import datetime
+    from public_link_runtime import caption_key
+    from publisher_recovery import read_with_retry
+    from cloud_omnichannel_publisher import GRAPH_API_VERSION
+    from toonzone_instagram_season import graph_get
+
+    rows = [row for row in individual if row.get("status") == "ambiguous"
+            and row.get("graph_error_code") == 100]
+    if not rows:
+        return individual
+    try:
+        account = graph_get(page, account_id, "id,username")
+        expected = str(account.get("username") or "").casefold().lstrip("@")
+        if str(account.get("id") or "") != account_id or not expected:
+            raise ValueError("missing canonical profile")
+    except (OSError, RuntimeError, ValueError, TypeError):
+        for row in rows:
+            row["basic_read_status"] = "canonical_profile_unavailable"
+        return individual
+
+    get = get or requests.get
+    for row in rows:
+        old = state["entries"].get(f"toonzone:instagram:{row['source_id']}")
+        if (not isinstance(old, dict) or old.get("status") != "done"
+                or str(old.get("post_id") or "") != row["archived_post_id"]):
+            raise RuntimeError("toonzone_archive_changed_before_basic_probe")
+        post_id = row["archived_post_id"]
+        row["basic_read_status"] = "unverified"
+        for label, fields in (
+            ("with_username", "id,caption,media_type,permalink,timestamp,username"),
+            ("basic", "id,caption,media_type,permalink,timestamp"),
+        ):
+            response = None
+            try:
+                response = read_with_retry(
+                    get, f"https://graph.facebook.com/{GRAPH_API_VERSION}/{post_id}",
+                    headers={"Authorization": "Bearer " + page["page_token"]},
+                    params={"fields": fields}, timeout=25, allow_redirects=False,
+                    graph_read=True,
+                )
+                status = getattr(response, "status_code", None)
+                body = response.json()
+                row["basic_read_http_status"] = status if type(status) is int else None
+                if not isinstance(body, dict):
+                    row["basic_read_status"] = "invalid_provider_response"
+                    break
+                if status != 200 or "error" in body:
+                    error = body.get("error")
+                    code = error.get("code") if isinstance(error, dict) else None
+                    subcode = error.get("error_subcode") if isinstance(error, dict) else None
+                    row["basic_read_graph_code"] = code if type(code) is int else None
+                    row["basic_read_graph_subcode"] = subcode if type(subcode) is int else None
+                    if label == "with_username" and code == 100:
+                        continue  # A field-level code 100 warrants only a no-owner read.
+                    row["basic_read_status"] = "provider_rejected"
+                    break
+                if str(body.get("id") or "") != post_id:
+                    row["basic_read_status"] = "id_mismatch"
+                    break
+                caption = body.get("caption")
+                stamp = body.get("timestamp")
+                permalink = body.get("permalink")
+                try:
+                    dt = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+                    valid_date = dt.tzinfo is not None
+                except (TypeError, AttributeError, ValueError):
+                    valid_date = False
+                if (body.get("media_type") != "VIDEO" or not valid_date
+                        or not isinstance(permalink, str)
+                        or not permalink.startswith("https://www.instagram.com/")
+                        or not isinstance(caption, str)
+                        or published_slot(caption) != (row["episode"], row["part"])
+                        or not isinstance(old.get("caption_hash"), str)
+                        or caption_key(caption) != old["caption_hash"]):
+                    row["basic_read_status"] = "media_or_saved_source_mismatch"
+                    break
+                if label == "basic":
+                    row["basic_read_status"] = "readable_but_owner_unconfirmed"
+                    break
+                returned_username = str(body.get("username") or "").casefold().lstrip("@")
+                if not returned_username or returned_username != expected:
+                    row["basic_read_status"] = "username_mismatch_or_missing"
+                    break
+                row["status"] = "verified"
+                row["reason"] = "exact_id_canonical_username_video_caption"
+                row["basic_read_status"] = "verified"
+                # Internal in-memory value, stripped before writing the redacted audit.
+                row["_verified_caption"] = caption
+                break
+            except (OSError, RuntimeError, ValueError, TypeError):
+                row["basic_read_status"] = "read_exception"
+                break
+            finally:
+                if response is not None:
+                    closer = getattr(response, "close", None)
+                    if callable(closer):
+                        closer()
+    return individual
+
+
 def conflicts(live, existing, main_posts=None):
     """Fail closed on any target slot already on Instagram, even old campaigns."""
     live_ids = {}
@@ -433,47 +544,58 @@ def audit(run_id, *, reserve=False):
         # The archive is read-only and no publication is permitted here.
         control = individual_get_positive_control(live, page)
         individual = direct_probe_missing_main_posts(exc.records, page, user_id, main_state)
+        individual = probe_ig_without_owner(individual, page, user_id, main_state)
         counts = {status: sum(x["status"] == status for x in individual)
                   for status in ("verified", "not_found", "access_blocked", "ambiguous")}
-        try:
-            facebook_coverage = facebook_caption_candidates(graph_rows(page, "facebook"))
-        except Exception:
-            facebook_coverage = {"facebook_live_list_read": False,
-                                 "facebook_read_status": "unavailable"}
-        ROOT.mkdir(parents=True, exist_ok=True)
-        history.save(REPORT, {
-            **inventory_coverage, **facebook_coverage,
-            "run_id": run_id, "status": "held_live_history_mismatch",
-            "expected_parts": 20,
-            "expected_instagram_account_id": user_id,
-            "meta_page_id": str(page["page_id"]),
-            "archived_ids_absent_from_list": exc.records,
-            "individual_post_checks": individual,
-            "individual_get_positive_control": control,
-            "individual_status_counts": counts,
-            "provider_list_observed": len(live),
-            "publication_authorized": False, "posts_created": 0,
-            "safe_to_reserve": False,
-            "unverified_archive_count": len(exc.records),
-            "reason": "provider_list_does_not_confirm_archived_ids",
-            "next_action": "remote_history_identity_reconciliation_required",
-        })
-        if reserve:
-            # A reserved/publish run must keep the strict hard stop. Never
-            # convert an unresolved historical Meta ID into a new upload.
-            raise
-        # Read-only audit COMPLETED: archived IDs remain unverifiable.
-        # A known safety hold is not a crashed audit, but is never a
-        # publication success. The workflow gate reads safe_to_reserve=False.
-        report = history.read(REPORT)
-        print(json.dumps({
-            "status": report["status"],
-            "safe_to_reserve": False,
-            "publication_authorized": False,
-            "unverified_archive_count": len(exc.records),
-            "posts_created": 0,
-        }), flush=True)
-        return report
+        verified_fallback = [row for row in individual
+                             if row.get("status") == "verified"
+                             and isinstance(row.get("_verified_caption"), str)]
+        redacted = [{k: v for k, v in row.items() if not k.startswith("_")}
+                    for row in individual]
+        # Never turn an unknown old post into another provider POST. Resume
+        # only if EVERY previously missing ID has a canonical-profile proof.
+        fully_reconciled = len(verified_fallback) == len(exc.records)
+        if fully_reconciled:
+            synthetic = [{"id": row["archived_post_id"],
+                          "caption": row["_verified_caption"]}
+                         for row in verified_fallback]
+            main_posts = main_publisher_posts(items, live + synthetic, main_state)
+        else:
+            try:
+                facebook_coverage = facebook_caption_candidates(graph_rows(page, "facebook"))
+            except Exception:
+                facebook_coverage = {"facebook_live_list_read": False,
+                                     "facebook_read_status": "unavailable"}
+            ROOT.mkdir(parents=True, exist_ok=True)
+            history.save(REPORT, {
+                **inventory_coverage, **facebook_coverage,
+                "run_id": run_id, "status": "held_live_history_mismatch",
+                "expected_parts": 20,
+                "expected_instagram_account_id": user_id,
+                "meta_page_id": str(page["page_id"]),
+                "archived_ids_absent_from_list": exc.records,
+                "individual_post_checks": redacted,
+                "individual_get_positive_control": control,
+                "individual_status_counts": counts,
+                "basic_read_verified": len(verified_fallback),
+                "provider_list_observed": len(live),
+                "publication_authorized": False, "posts_created": 0,
+                "safe_to_reserve": False,
+                "unverified_archive_count": len(exc.records) - len(verified_fallback),
+                "reason": "provider_list_does_not_confirm_archived_ids",
+                "next_action": "remote_history_identity_reconciliation_required",
+            })
+            if reserve:
+                raise
+            report = history.read(REPORT)
+            print(json.dumps({
+                "status": report["status"],
+                "safe_to_reserve": False,
+                "publication_authorized": False,
+                "unverified_archive_count": report["unverified_archive_count"],
+                "posts_created": 0,
+            }), flush=True)
+            return report
     already = conflicts(live, archive["records"], main_posts)
     records = archive["records"]
     prepared = []
