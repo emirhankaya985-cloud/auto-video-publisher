@@ -51,6 +51,45 @@ def published_slot(caption):
     return None
 
 
+def season_inventory_coverage(catalog, covers):
+    """Account for all 36 owner-requested source/cover names without provider writes.
+
+    A matching Drive filename is readiness evidence, NOT proof that the
+    bytes are genuine, readable, or currently authorized for publication.
+    """
+    target = [item for item in catalog if 4 <= item["episode"] <= 12]
+    expected = [(episode, part) for episode in range(4, 13) for part in range(1, 5)]
+    if [(item["episode"], item["part"]) for item in target] != expected:
+        raise RuntimeError("requested_season_catalog_incomplete")
+    if len({item["id"] for item in target}) != 36:
+        raise RuntimeError("requested_season_source_identity_collision")
+    missing = [Path(item["name"]).stem + ".png" for item in target
+               if Path(item["name"]).stem + ".png" not in covers]
+    return {"requested_4_12_parts": 36,
+            "source_names_found_4_12": len(target),
+            "cover_names_found_4_12": 36 - len(missing),
+            "missing_cover_names_4_12": missing,
+            "cover_bytes_verified_4_12": False}
+
+
+def facebook_caption_candidates(rows):
+    """Read-only candidates only; never equate captions with source/post proof."""
+    slots = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        text = str(row.get("description") or row.get("caption") or "")
+        episode = re.search(r"\bS01E(\d{2})\b", text, re.I)
+        part = re.search(r"\bPart\s*([1-4])\b", text, re.I)
+        if episode and part and 4 <= int(episode[1]) <= 12:
+            slots.add((int(episode[1]), int(part[1])))
+    return {"facebook_live_list_read": True,
+            "facebook_caption_candidate_count_4_12": len(slots),
+            "facebook_caption_candidate_slots_4_12":
+                [f"S01E{episode:02d} Part{part}" for episode, part in sorted(slots)],
+            "facebook_source_identity_verified": False}
+
+
 class MainPublisherLiveMissing(RuntimeError):
     """Provider GET cannot confirm main-ledger posts; never publish them again."""
 
@@ -377,8 +416,10 @@ def audit(run_id, *, reserve=False):
     user_id = instagram_identity(page)
     if user_id != ACCOUNT_ID:
         raise RuntimeError("toonzone_instagram_identity_changed")
-    items = selected(ordered_catalog(inventory(FOLDERS["toonzone"])))
+    catalog = ordered_catalog(inventory(FOLDERS["toonzone"]))
+    items = selected(catalog)
     covers = inventory(FOLDERS["covers"])
+    inventory_coverage = season_inventory_coverage(catalog, covers)
     archive = history.restore(names=NAMES, workflow_path=WORKFLOW)
     live = graph_rows(page, "instagram")
     if not isinstance(live, list):
@@ -394,8 +435,14 @@ def audit(run_id, *, reserve=False):
         individual = direct_probe_missing_main_posts(exc.records, page, user_id, main_state)
         counts = {status: sum(x["status"] == status for x in individual)
                   for status in ("verified", "not_found", "access_blocked", "ambiguous")}
+        try:
+            facebook_coverage = facebook_caption_candidates(graph_rows(page, "facebook"))
+        except Exception:
+            facebook_coverage = {"facebook_live_list_read": False,
+                                 "facebook_read_status": "unavailable"}
         ROOT.mkdir(parents=True, exist_ok=True)
         history.save(REPORT, {
+            **inventory_coverage, **facebook_coverage,
             "run_id": run_id, "status": "held_live_history_mismatch",
             "expected_parts": 20,
             "expected_instagram_account_id": user_id,
@@ -439,7 +486,8 @@ def audit(run_id, *, reserve=False):
         prepared.append(dict(row, key=key, text=caption, cover_id=cover["id"],
                              cover_path=str(path), cover_sha256=digest(path)))
     prepared = preflight_sources(prepared)
-    report = {"run_id": run_id, "target_episodes": [4, 5, 6, 7, 8],
+    report = {**inventory_coverage,
+              "run_id": run_id, "target_episodes": [4, 5, 6, 7, 8],
               "expected_parts": 20, "previously_verified": len(already),
               "regular_publisher_live_id_matches": len(main_posts),
               "prepared_parts": len(prepared), "exact_covers_verified": len(prepared),
