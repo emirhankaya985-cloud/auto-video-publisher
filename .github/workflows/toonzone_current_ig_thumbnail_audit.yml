@@ -1,0 +1,58 @@
+name: ToonZone current IG thumbnail vs exact Drive PNG (read only)
+on:
+  pull_request:
+    paths:
+      - 'toonzone_current_ig_thumbnail_audit.py'
+      - 'test_toonzone_current_ig_thumbnail_audit.py'
+      - '.github/workflows/toonzone_current_ig_thumbnail_audit.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'toonzone_current_ig_thumbnail_audit.py'
+      - 'test_toonzone_current_ig_thumbnail_audit.py'
+      - '.github/workflows/toonzone_current_ig_thumbnail_audit.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: toonzone-current-thumb-readonly
+  cancel-in-progress: false
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: |
+          pip install --require-hashes -r requirements.txt
+          pip install gdown==6.4.2 pillow==13.0.0
+      - run: python -m unittest -v test_toonzone_current_ig_thumbnail_audit.py
+  live-readonly:
+    needs: tests
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      GH_TOKEN: ${{ github.token }}
+      META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: |
+          pip install --require-hashes -r requirements.txt
+          pip install gdown==6.4.2 pillow==13.0.0
+      - name: Compare only existing IG media thumbnails with exact PNG - NO POSTS, NO ALERTS
+        run: python toonzone_current_ig_thumbnail_audit.py
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: toonzone-current-ig-thumbnail-readonly
+          path: toonzone-current-ig-thumbnails/result.json
+          if-no-files-found: error
+          retention-days: 90
