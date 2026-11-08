@@ -16,6 +16,23 @@ class Tests(unittest.TestCase):
    self.assertFalse(route_paused('tarladaki'))
    self.assertFalse(route_paused('penguen'))
    self.assertTrue(route_paused('gonle'))
+ def test_toonzone_stays_held_for_any_missing_rights_switch(self):
+  from publication_safety import platform_allowed
+  switches = {'ENABLE_TOONZONE_ROUTES':'true',
+              'ENABLE_NEW_META_ROUTES':'true',
+              'META_NEW_ROUTES_RIGHTS_APPROVED':'true'}
+  for key in switches:
+   disabled = dict(switches)
+   disabled[key] = 'false'
+   with self.subTest(missing=key), patch.dict(os.environ, disabled, clear=True):
+    self.assertTrue(route_paused('toonzone'))
+    self.assertFalse(platform_allowed('toonzone', 'instagram'))
+  with patch.dict(os.environ, switches, clear=True):
+   self.assertFalse(route_paused('toonzone'))
+   self.assertTrue(platform_allowed('toonzone', 'facebook'))
+   self.assertTrue(platform_allowed('toonzone', 'instagram'))
+   self.assertFalse(platform_allowed('toonzone', 'youtube'))
+
  def test_unlisted_route_denied(self):
   with patch.dict(os.environ, {'BATCH_ID':'b','BATCH_API_URL':'https://x','BATCH_API_TOKEN':'x','BATCH_ALLOWED_ROUTES':'penguen'}): self.assertFalse(batch_exception_allowed('tarladaki'))
  def test_controlled_gonle_instagram_test_is_dispatch_only(self):
@@ -29,11 +46,10 @@ class Tests(unittest.TestCase):
          'META_NEW_ROUTES_RIGHTS_APPROVED':'true','BATCH_ID':'b',
          'BATCH_API_URL':'https://x','BATCH_API_TOKEN':'x','BATCH_ALLOWED_ROUTES':'toonzone'}
   with patch.dict(os.environ, env, clear=True):
-   self.assertTrue(route_paused('toonzone'))
-   self.assertFalse(new_meta_route_enabled('toonzone'))
+   self.assertFalse(route_paused('toonzone'))
+   self.assertTrue(new_meta_route_enabled('toonzone'))
    self.assertFalse(batch_exception_allowed('toonzone'))
 
- @patch('publication_safety.COPYRIGHT_HELD_ROUTES', frozenset())
  def test_new_meta_routes_are_disabled_without_both_explicit_switches(self):
   from publication_safety import route_paused
   with patch.dict(os.environ, {}, clear=True):

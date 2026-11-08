@@ -15,8 +15,8 @@ def controlled_gonle_ig_test_enabled():
 
 
 def route_paused(route):
-    if route in COPYRIGHT_HELD_ROUTES:
-        return True
+    # ToonZone is gated below by THREE explicit account and rights switches.
+    # Do not mask that configured gate with an unconditional legacy hold.
     # Gönle and Daily are enabled per channel.  A global existing-routes
     # switch must never wake a half-configured fan-out route.
     if route == "gonle_ig":
@@ -77,6 +77,8 @@ def batch_exception_allowed(route):
 
 
 def platform_allowed(account, platform):
+    if account == "toonzone":
+        return platform in {"facebook", "instagram"} and not route_paused("toonzone")
     return account not in COPYRIGHT_HELD_ROUTES
 
 

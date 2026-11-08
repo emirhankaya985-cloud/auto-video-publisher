@@ -13,6 +13,8 @@ on:
       - 'meta_page_token_health.py'
       - 'test_meta_page_token_health.py'
       - 'public_link_runtime.py'
+      - 'publication_safety.py'
+      - 'test_publication_safety.py'
       - 'test_public_link_runtime.py'
       - 'meta_schedule_preflight.py'
       - 'test_meta_schedule_preflight.py'
@@ -33,4 +35,4 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install --require-hashes -r requirements.txt
       - name: Check Page identity and unknown alert semantics (no Meta API calls)
-        run: python -m unittest -v test_meta_auth_loader.py test_meta_page_token_health.py test_tracked_meta_routes.py test_public_link_runtime.py test_meta_schedule_preflight.py test_meta_preflight_journal.py
+        run: python -m unittest -v test_meta_auth_loader.py test_meta_page_token_health.py test_tracked_meta_routes.py test_public_link_runtime.py test_meta_schedule_preflight.py test_meta_preflight_journal.py test_publication_safety.py
