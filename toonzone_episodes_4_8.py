@@ -553,7 +553,7 @@ def historical_publish_receipts(records, main_state, *, registry_path=None):
                 or not str(row.get("source_run_id") or "").isdecimal()
                 or str(row["post_id"]) in used_ids
                 or not re.fullmatch(
-                    r"https://www\\.instagram\\.com/reel/[A-Za-z0-9_-]+/",
+                    r"https://www\.instagram\.com/reel/[A-Za-z0-9_-]+/",
                     str(row.get("permalink") or ""),
                 )
                 or not isinstance(row.get("source_file"), str)
