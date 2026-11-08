@@ -620,5 +620,63 @@ class ToonZoneBatchTests(unittest.TestCase):
         self.assertIn("vars.TOONZONE_RELEASE_4_8 == 'true'", workflow)
 
 
+    def test_twenty_original_meta_receipts_match_original_ledger_not_current_live(self):
+        import json
+        from pathlib import Path
+
+        registry = Path(__file__).parent / "docs" / (
+            "toonzone-4-8-original-instagram-publish-receipts.json"
+        )
+        payload = json.loads(registry.read_text(encoding="utf-8"))
+        self.assertEqual(payload["scope"],
+                         "historical_publish_confirmation_only_not_current_live_verification")
+        self.assertEqual(len(payload["records"]), 20)
+        selected = target.selected(self.catalog())
+        records = []
+        entries = {}
+        by_slot = {(x["episode"], x["part"]): x for x in payload["records"]}
+        for item in selected:
+            proof = by_slot[item["episode"], item["part"]]
+            self.assertEqual(item["name"], proof["source_file"])
+            records.append({
+                "episode": item["episode"], "part": item["part"],
+                "file": item["name"], "source_id": item["id"],
+                "archived_post_id": proof["post_id"],
+            })
+            entries[f"toonzone:instagram:{item['id']}"] = {
+                "route": "toonzone", "platform": "instagram",
+                "file": item["name"], "status": "done",
+                "post_id": proof["post_id"], "run_id": proof["source_run_id"],
+            }
+        actual = target.historical_publish_receipts(
+            records, {"schema": 1, "entries": entries}
+        )
+        self.assertEqual(actual["historical_publish_receipts_matching_ledger"], 20)
+        self.assertEqual(actual["historical_publish_receipts_checked"], 20)
+        self.assertEqual(actual["historical_publish_reel_urls_available"], 20)
+        self.assertEqual(actual["current_live_verified_by_historical_receipts"], 0)
+        self.assertTrue(actual["historical_only"])
+        # Tampered source-run identity must not be counted as proof.
+        entries[f"toonzone:instagram:{selected[0]['id']}"]["run_id"] = "99999"
+        amended = target.historical_publish_receipts(
+            records, {"schema": 1, "entries": entries}
+        )
+        self.assertEqual(amended["historical_publish_receipts_matching_ledger"], 19)
+        self.assertEqual(amended["current_live_verified_by_historical_receipts"], 0)
+
+    def test_corrupted_historical_registry_is_not_accepted_as_evidence(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "old-posts.json"
+            path.write_text(json.dumps({"schema": 1, "records": []}), encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "receipts_invalid"):
+                target.historical_publish_receipts([], {"entries": {}}, registry_path=path)
+            path.write_text("{", encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "receipts_unavailable"):
+                target.historical_publish_receipts([], {"entries": {}}, registry_path=path)
+
+
 if __name__ == "__main__":
     unittest.main()
