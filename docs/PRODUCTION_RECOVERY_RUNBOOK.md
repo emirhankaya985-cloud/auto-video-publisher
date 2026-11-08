@@ -744,3 +744,12 @@ Run 42103999147: full exact Drive cover plus compact profile created 13739862-by
 - Mevcut video kapsamı korunur. Opsiyonel etkileşim GET hatası doğrulanmış views değerini silmez; alan eksikse null/unavailable ve N/A kullanılır. Desteklenmeyen toplu parametre için yalnız HTTP400/code100 halinde sınırlı tekil GET fallback vardır. Auth/rate/transport hatasında istekler çoğaltılmaz. Kısmi sayaçlar tam toplam diye sunulmaz.
 - Canlı kanıt (değişiklik öncesi): Threads run42353919231/job128347731818 Tarladaki post18102702257061909, https://www.threads.com/@tarladakifasulye_/post/DfbthcfKD02 verified; Penguen read_http_401_code_190. Notification42354001263/job128347972166 checked9/reserved1/Telegram serverACK1/failures0. Bu ACK telefon okuması değildir. Inbox42355358768 reserved0/ACK0; buton basımının canlı uçtan uca kanıtı bulunmuyor.
 - Yerel kabul: 93 test ve17 subtest PASS; eksik değer, gerçek0, kısmi aggregation, opsiyonel GET arızası, desteklenmeyen batch fallback, platform izolasyonu ve mevcut notification dedup regresyonları. Yeni etkileşim sayaçları canlı ölçülene kadar UNVERIFIED; yayın state'i/secret/izin kapıları değiştirilmedi.
+
+
+## 8 Kasım 2026 — Saatlik Meta etkileşim görevi yalnız deneme modundaydı
+
+- Canlı kanıt: [42521067044](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/42521067044): `ENGAGEMENT_MODE=dry_run`, 51 kaynak gönderi, 332 potansiyel desteklenen etkileşim, `writes=0`. Yeşil workflow, gerçek beğeni kanıtı değildir.
+- Önceki tekil canlı kabul: [42424976420](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/42424976420): Instagram `like/accepted=1`, Telegram sunucu alındısı; bu yalnız bir adet başarılı API denemesidir.
+- Kullanıcının 8 Kasım açık talebi: YouTube'yu sonraya bırakıp Meta beğenilerini deneme yerine çalıştırmak.
+- Kontrollü düzeltme: `meta_cross_engagement.yml` planlı aralıkta `single_like` kullanır, en fazla **1 gerçek like / 15 dakikalık çalıştırma**; sadece doğrulanmış kaynak/actor eşleşmesi; ToonZone kaynak önceliği; GitHub intent önce, POST bir defa, belirsiz olayda tekrar yok. Kaydetme/yeniden paylaşma desteklenmediği veya kapalı olduğu için API yazısı yapılmaz.
+- Canlı kabul: Workflow CI + merge yeterli değildir. `cross-engagement-result` içinde `accepted`, gerçek API ACK ve Telegram makbuzunu ayrıca kontrol et; hiç uygun gönderi yoksa sıfır yazım normaldir. Provider `368`, `401`, `403`, `429` korumaları kaldırılmaz.
