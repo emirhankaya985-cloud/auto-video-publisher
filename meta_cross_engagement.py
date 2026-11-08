@@ -679,7 +679,12 @@ def main():
                 or any(t["operation"] != "like" or t["actor"] == t["owner"]
                        for t in tasks)):
             raise ValueError("single-like plan not safe")
-        blocked_counts = dict(Counter(f"{r['platform']}/{r['operation']}/{r['status']}" for r in report))
+        # A zero-eligible scheduled tick is a legitimate no-op. Its
+        # diagnostic has a status but no platform/operation, unlike task rows.
+        blocked_counts = dict(Counter(
+            f"{r.get('platform', 'all')}/{r.get('operation', 'like')}/{r['status']}"
+            for r in report if isinstance(r, dict) and isinstance(r.get('status'), str)
+        ))
         save(PLAN, tasks)
         save(REPORT, {"mode": "apply" if live else "dry_run", "planned": len(tasks),
                       "source_run_id": source_id, "source_posts": len(posts),
