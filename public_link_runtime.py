@@ -1904,7 +1904,8 @@ def publish():
                 if hold_visual_duplicate(item, state, source_fingerprint):
                     # A potentially duplicated source is held for human review,
                     # never retried automatically. Preserve every prior post.
-                    failures.append(item["page"] + ": visual duplicate held for review")
+                    # The local-only duplicate hold is expected safety, not a provider failure.
+                    # Journal it, but do not turn unrelated successful posts into a red run.
                     record_error("source_video", "visual_duplicate_review",
                                  route=item["route"], video=item["name"],
                                  safe_to_retry=False)
