@@ -48,3 +48,14 @@ Implementation PRs: [#201](https://github.com/emirhankaya985-cloud/auto-video-pu
 - Example: S01E04 Part1 original exact PNG `S01E04_Death_Punchies_Part1.png`, **1086×1448**, SHA256 `e46f65513e118ecaaf905976ab865470a34a0c5f27287a15bae1c2cf75225197`.
 - **New provider writes: 0**. This proves file integrity and exact filename-to-part identity, but NOT that Instagram's historical published video still exists, nor that the remote media thumbnail matches that source cover. Do not call all 72 media currently accessible.
 - The old 20 IG Graph 100/33 responses and 31/36 missing live-list IDs remain outstanding provider visibility matters. Never blind-republish old source IDs; retain all 72 historical post receipts.
+
+
+## 9 Kasım — Instagram canlı küçük resim ve kırpma denetimi
+
+- [PR #208](https://github.com/emirhankaya985-cloud/auto-video-publisher/pull/208) ve [PR #209](https://github.com/emirhankaya985-cloud/auto-video-publisher/pull/209) merged. Gerçek Meta read-only run [42528911697](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/42528911697), artifact `toonzone-current-ig-thumbnail-readonly` ID `13636910407`, status `held_some_current_thumbnail_mismatch_or_unavailable`.
+- IG geçmişte yayımlanmış 36 gönderi ID'sinden **5'i** aynı hesabın bugünkü `/media` listesinde var, **31'i** listede yok. Listede olan 5 Reel için resmi `thumbnail_url` görüntüsü indirildi. Her biri özgün 36 dosyalı Drive PNG ile karşılaştırıldı: 5/5 farklı, 0/5 eşleşen, 0 indirme hatası.
+- Kırpma yanılmasını elemek için source `1086×1448`, observed `640×1136` görüntüler letterbox pad, center crop ve stretch ile karşılaştırıldı. En küçük normalleştirilmiş piksel farkları: S01E11 Part4 `0.335513`, S01E12 Part1 `0.303528`, Part2 `0.303226`, Part3 `0.303167`, Part4 `0.304951`; kabul eşiği `0.12`. Yalnız görüntü kırpması bu beş büyük farkı açıklamıyor.
+- GÜNCEL CANLI KAPAK KABULÜ: **FAIL/HOLD (0/5)**. Bu, özgün PNG dosyalarının sağlam olmadığı anlamına gelmez: Drive byte kabulü hâlâ PASS 36/36. 31 listelenmeyen gönderinin kapağı ne doğru ne yanlış diye sınıflandırılabilir; nesne erişimi yok.
+- Published Reel cover değişimi Graph API'den güvenilir bir yazma işlemi olarak desteklenmiyor; mevcut gönderiler silinmeden hesabın Instagram mobil uygulamasında `Edit → Cover` denetimi gerekebilir (hesaba göre seçenek değişebilir). Bu kayıtlara dayanarak videolar **otomatik silinmez veya yeniden paylaşılmaz**. Tarihsel 72/72 makbuz ve 36/36 Facebook güncel ID korunur.
+- Kapsamdaki beş bağlantı: [E11P4](https://www.instagram.com/reel/DfUKkyXk30_/), [E12P1](https://www.instagram.com/reel/DfUMAtvkeIS/), [E12P2](https://www.instagram.com/reel/DfURdxMgEX9/), [E12P3](https://www.instagram.com/reel/DfUaXffH0pT/), [E12P4](https://www.instagram.com/reel/DfekzDBjlA0/).
+- Tekrarlayan hata bildirimleri kullanıcıya gönderilmez; GitHub kanıtı sessizce saklanır. Uzak medya durumu düzelene kadar canlı IG kabulü tam sayılmaz.
