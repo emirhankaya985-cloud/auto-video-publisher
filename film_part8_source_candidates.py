@@ -13,7 +13,7 @@ from pathlib import Path
 
 FOLDER_ID = "1NvEuGQ83BmCMrzdK6ziI1nC_0zzshqJW"
 OUTPUT = Path("film-part8-source-candidates.json")
-NAME = re.compile(r"^Bickin_Part_(3|8)(?: \\([0-9]+\\))?\\.mp4$", re.IGNORECASE)
+NAME = re.compile(r"^Bickin_Part_(3|8)(?: \([0-9]+\))?\.mp4$", re.IGNORECASE)
 FILE_ID = re.compile(r"^[A-Za-z0-9_-]{20,128}$")
 
 
