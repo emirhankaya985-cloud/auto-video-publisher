@@ -164,13 +164,16 @@ def main():
         }
     REPORT.write_text(json.dumps(result, ensure_ascii=False, indent=2),
                       encoding="utf-8")
+    missing = [row["cover_name"] for row in result.get("parts", [])
+               if row.get("reason") == "exact_drive_cover_missing"]
     print(json.dumps({
         "status": result["status"],
         "requested_parts": result.get("requested_parts", 36),
         "verified_png_bytes": result.get("verified_png_bytes", 0),
+        "missing_exact_cover_names": missing,
         "duplicate_group_count": len(result.get("duplicate_png_sha256_groups", [])),
         "meta_writes": 0,
-    }), flush=True)
+    }, ensure_ascii=False), flush=True)
     return 0 if result.get("all_exact_png_bytes_accepted") is True else 1
 
 
