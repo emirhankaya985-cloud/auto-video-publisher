@@ -49,7 +49,7 @@ jobs:
       matrix:
         route: ${{ fromJSON(vars.META_ACCOUNT_WORKER_ROUTES || '["all"]') }}
     concurrency:
-      group: ${{ (matrix.route == 'all' || matrix.route == 'toonzone') && 'public-drive-recovery' || format('public-drive-recovery-{0}', matrix.route) }}
+      group: ${{ matrix.route == 'all' && format('legacy-publisher-job-{0}', github.run_id) || matrix.route == 'toonzone' && 'public-drive-recovery' || format('public-drive-recovery-{0}', matrix.route) }}
       cancel-in-progress: false
       queue: max
     runs-on: ubuntu-24.04
