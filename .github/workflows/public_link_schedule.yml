@@ -32,6 +32,13 @@ permissions:
   contents: read
   actions: read
 
+# Keep the exact legacy global lock until an isolated-worker rollout is
+# explicitly enabled. In isolated mode, individual jobs own the persistent
+# route locks; overlapping scheduled ticks do not block healthy accounts.
+concurrency:
+  group: ${{ vars.META_ACCOUNT_WORKER_ROUTES == '' && 'public-drive-recovery' || format('account-workers-run-{0}', github.run_id) }}
+  cancel-in-progress: false
+
 jobs:
   meta:
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'push' || vars.LINK_AUTOMATION_ENABLED == 'true'
@@ -42,7 +49,7 @@ jobs:
       matrix:
         route: ${{ fromJSON(vars.META_ACCOUNT_WORKER_ROUTES || '["all"]') }}
     concurrency:
-      group: ${{ matrix.route == 'all' && 'public-drive-recovery' || format('public-drive-recovery-{0}', matrix.route) }}
+      group: ${{ (matrix.route == 'all' || matrix.route == 'toonzone') && 'public-drive-recovery' || format('public-drive-recovery-{0}', matrix.route) }}
       cancel-in-progress: false
       queue: max
     runs-on: ubuntu-24.04
