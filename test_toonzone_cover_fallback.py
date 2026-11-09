@@ -98,16 +98,13 @@ class ToonZoneCoverFallbackTests(unittest.TestCase):
             runtime.plan()
         return json.loads((root / "plan.json").read_text()), (root / "report.md").read_text()
 
-    def test_missing_drive_cover_plans_safe_on_demand_generation(self):
+    def test_missing_drive_cover_never_plans_synthetic_fallback_even_if_enabled(self):
         with tempfile.TemporaryDirectory() as tmp:
             plans, report = self._plan(Path(tmp), {}, {"TOONZONE_AUTO_COVER_ENABLED": "true"})
-            self.assertEqual(len(plans), 1)
-            self.assertEqual(plans[0]["name"], "S01E03_Caffeinated_Concert_Tickets_Part3.mp4")
-            self.assertTrue(plans[0]["generate_toonzone_cover"])
-            self.assertNotIn("cover_id", plans[0])
-            self.assertIn("COVER FALLBACK", report)
-            self.assertIn("per-part source-video cover fallback is enabled", report)
-            self.assertNotIn("will be held; per-part cover fallback is disabled", report)
+            self.assertEqual(plans, [])
+            self.assertIn("exact ToonZone cover missing", report)
+            self.assertIn("cover fallback is disabled", report)
+            self.assertNotIn("COVER FALLBACK", report)
 
     def test_existing_part_png_remains_authoritative(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -160,7 +157,7 @@ class ToonZoneCoverFallbackTests(unittest.TestCase):
             state = json.loads(state_file.read_text())
             self.assertEqual(state["entries"]["toonzone:facebook:clip"]["status"], "ready")
 
-    def test_generated_cover_is_composited_before_facebook_upload(self):
+    def test_stale_generated_cover_plan_never_reaches_facebook_upload(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             state_file, plan_file = root / "state.json", root / "plan.json"
@@ -188,15 +185,15 @@ class ToonZoneCoverFallbackTests(unittest.TestCase):
                  patch.object(runtime, "upload_facebook_reel", return_value="123456") as facebook:
                 build.return_value = root / "S01E03_Caffeinated_Concert_Tickets_Part3.png"
                 composite.side_effect = lambda source, cover, output, **kwargs: Path(output)
-                runtime.publish()
-                self.assertEqual(build.call_count, 1)
-                self.assertEqual(composite.call_count, 1)
-                self.assertTrue(composite.call_args.kwargs["preserve_full_cover"])
-                self.assertEqual(facebook.call_count, 1)
-                self.assertTrue(facebook.call_args.args[1].endswith("covered.mp4"))
+                with self.assertRaises(SystemExit):
+                    runtime.publish()
+                build.assert_not_called()
+                composite.assert_not_called()
+                facebook.assert_not_called()
             state = json.loads(state_file.read_text())
-            self.assertEqual(state["entries"]["toonzone:facebook:clip"]["status"], "done")
-            self.assertEqual(state["entries"]["toonzone:facebook:clip"]["post_id"], "123456")
+            self.assertEqual(state["entries"]["toonzone:facebook:clip"]["status"], "ready")
+            self.assertEqual(state["entries"]["toonzone:facebook:clip"]["failure"]["reason"],
+                             "exact_owner_cover_required")
 
 
 if __name__ == "__main__":
