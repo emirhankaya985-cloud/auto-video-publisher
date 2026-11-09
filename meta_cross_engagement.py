@@ -153,6 +153,50 @@ def verified_inventory(actors):
     }
 
 
+def verified_like_coverage(actors, ledger):
+    """Read-only per-account coverage: granted API rights vs accepted Graph ACK.
+
+    A valid identity or successful workflow is not itself a successful like.
+    Never report provider IDs, tokens or unmatched historical actors.
+    """
+    if ledger.get("schema") != 1 or not isinstance(ledger.get("actions"), dict):
+        raise ValueError("invalid engagement ledger; reset forbidden")
+    output = {}
+    for platform in ("facebook", "instagram"):
+        members = {(str(actor["id"])): actor for actor in actors.values()
+                   if actor["platform"] == platform}
+        eligible = {actor["name"] for actor in members.values()
+                    if permission(platform, "like") <= actor["grants"]}
+        missing_grant = {actor["name"] for actor in members.values()
+                         if not permission(platform, "like") <= actor["grants"]}
+        accepted_by = set()
+        accepted_targets = set()
+        count = 0
+        for record in ledger["actions"].values():
+            if not isinstance(record, dict):
+                continue
+            if (record.get("operation") != "like" or record.get("platform") != platform
+                    or record.get("status") != "accepted" or record.get("api_ack") is not True):
+                continue
+            actor = members.get(str(record.get("actor", "")))
+            target = members.get(str(record.get("owner", "")))
+            if (not actor or not target or actor["id"] == target["id"]
+                    or actor["name"] not in eligible):
+                continue
+            accepted_by.add(actor["name"])
+            accepted_targets.add(target["name"])
+            count += 1
+        output[platform] = {
+            "permission_eligible_actor_routes": sorted(eligible),
+            "permission_missing_actor_routes": sorted(missing_grant),
+            "confirmed_actor_routes": sorted(accepted_by),
+            "eligible_routes_without_confirmed_like": sorted(eligible - accepted_by),
+            "confirmed_target_routes": sorted(accepted_targets),
+            "confirmed_like_count_in_retained_ledger": count,
+        }
+    return output
+
+
 def account_enabled(name, platform):
     route = next((r for r, n in ROUTE_NAMES.items() if n == name), None)
     if route is None:
@@ -746,17 +790,20 @@ def main():
             f"{r.get('platform', 'all')}/{r.get('operation', 'like')}/{r['status']}"
             for r in report if isinstance(r, dict) and isinstance(r.get('status'), str)
         ))
+        like_coverage = verified_like_coverage(actors, ledger)
         save(PLAN, tasks)
         save(REPORT, {"mode": "apply" if live else "dry_run", "planned": len(tasks),
                       "source_run_id": source_id, "source_posts": len(posts),
                       "source_fallback_skipped_runs": skipped_sources,
                       "verified_accounts": len(actors), **inventory, **focus_info,
+                      "verified_like_coverage": like_coverage,
                       "blocked": report, "blocked_counts": blocked_counts,
                       "provider_holds": ledger.get("provider_holds", {})})
         if live:
             save(STATE, ledger)
         print(json.dumps({"mode": "apply" if live else "dry_run", "planned": len(tasks),
                           "source_posts": len(posts), "verified_accounts": len(actors), **inventory,
+                          "verified_like_coverage": like_coverage,
                           "source_fallback_skipped_runs": skipped_sources,
                           **focus_info,
                           "blocked": len(report), "blocked_counts": blocked_counts,
