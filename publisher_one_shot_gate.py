@@ -26,6 +26,12 @@ NOV7_CATCHUP_MARKER = "docs/owner-authorized-catchup-2026-11-07.md"
 NOV7_CATCHUP_SUBJECT = "ops: owner-authorized-once-meta-catchup-2026-11-07"
 NOV7_CATCHUP_DATE = "2026-11-07"
 
+# Owner explicitly authorized today's missing eligible posts on 9 November.
+# The marker MUST be added by this exact subject on main (one run only).
+NOV9_CATCHUP_MARKER = "docs/owner-authorized-catchup-2026-11-09.md"
+NOV9_CATCHUP_SUBJECT = "ops: owner-authorized-once-meta-catchup-2026-11-09"
+NOV9_CATCHUP_DATE = "2026-11-09"
+
 
 
 def is_owner_catchup_push(event, ref, subject, added_paths, *, today=None, run_attempt=None):
@@ -55,6 +61,18 @@ def is_today_catchup_push(event, ref, subject, added_paths, *, today=None, run_a
             and TODAY_CATCHUP_MARKER in added_paths
             and today == TODAY_CATCHUP_DATE
             and str(run_attempt) == "1")
+
+
+def is_nov9_catchup_push(event, ref, subject, added_paths, *, today=None, run_attempt=None):
+    """Only the explicitly authorized 9 Nov newly added marker can publish."""
+    if today is None:
+        today = datetime.now(timezone(timedelta(hours=3))).date().isoformat()
+    if run_attempt is None:
+        run_attempt = os.getenv("GITHUB_RUN_ATTEMPT", "1")
+    return (event == "push" and ref == "refs/heads/main"
+            and subject == NOV9_CATCHUP_SUBJECT
+            and NOV9_CATCHUP_MARKER in added_paths
+            and today == NOV9_CATCHUP_DATE and str(run_attempt) == "1")
 
 
 def is_nov7_catchup_push(event, ref, subject, added_paths, *, today=None, run_attempt=None):
@@ -93,7 +111,8 @@ def determine_mode(event, ref, subject="", added_paths=(), requested_mode="audit
         v4 = is_v4_recovery_push(event, ref, subject, added_paths)
         catchup = (is_owner_catchup_push(event, ref, subject, added_paths)
                    or is_today_catchup_push(event, ref, subject, added_paths)
-                   or is_nov7_catchup_push(event, ref, subject, added_paths))
+                   or is_nov7_catchup_push(event, ref, subject, added_paths)
+                   or is_nov9_catchup_push(event, ref, subject, added_paths))
         return "publish" if normal or rescue or v4 or catchup else "audit"
     return "audit"
 

@@ -13,6 +13,7 @@ on:
       - 'docs/owner-authorized-catchup-2026-11-01.md'
       - 'docs/owner-authorized-catchup-2026-11-02.md'
       - 'docs/owner-authorized-catchup-2026-11-07.md'
+      - 'docs/owner-authorized-catchup-2026-11-09.md'
   schedule:
     # Run a worker only near that account's actual due slots, not seven
     # expensive GitHub runners every half-hour (owner: zero-cost operation).
@@ -104,8 +105,11 @@ jobs:
       TOONZONE_AUTO_COVER_ENABLED: 'false'
       # Owner explicitly requested today's catch-up before the evening check.
       # Subsequent dates automatically return to the existing per-route times.
-      COMPLETE_DAY_DATE: '2026-11-02'
-      CATCHUP_BATCH_DATE: '2026-11-07'
+      # This exact one-shot main push may fill today's missing due/full-day
+      # quota; ordinary scheduled runs retain their previous day constraints.
+      # The release gate separately requires a NEW dated marker and attempt 1.
+      COMPLETE_DAY_DATE: "${{ github.event_name == 'push' && startsWith(github.event.head_commit.message, 'ops: owner-authorized-once-meta-catchup-2026-11-09') && '2026-11-09' || '2026-11-02' }}"
+      CATCHUP_BATCH_DATE: "${{ github.event_name == 'push' && startsWith(github.event.head_commit.message, 'ops: owner-authorized-once-meta-catchup-2026-11-09') && '2026-11-09' || '2026-11-07' }}"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
