@@ -1293,7 +1293,8 @@ def plan(audit=False):
             from toonzone_season1_gate import season1_receipts, season2_release_allowed
             season1_check = season1_receipts(
                 [v for name, v in catalogs[source].items() if name.lower().endswith(".mp4")],
-                catalogs["covers"], state, histories)
+                catalogs["covers"], state,
+                {p: histories.get(p, []) for p in ("facebook", "instagram")})
             save(ROOT / "toonzone-season1-live-receipts.json", season1_check)
             season1_receipts_by_part = {
                 (row["slot"], row["platform"]): row
