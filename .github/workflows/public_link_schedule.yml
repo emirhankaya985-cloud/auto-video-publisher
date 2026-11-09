@@ -32,17 +32,24 @@ permissions:
   contents: read
   actions: read
 
-concurrency:
-  group: public-drive-recovery
-  cancel-in-progress: false
-
 jobs:
   meta:
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'push' || vars.LINK_AUTOMATION_ENABLED == 'true'
+    # Legacy scheduler remains the default. Once evidence is accepted, the
+    # exact JSON route list enables independent jobs without rewriting slots.
+    strategy:
+      fail-fast: false
+      matrix:
+        route: ${{ fromJSON(vars.META_ACCOUNT_WORKER_ROUTES || '["all"]') }}
+    concurrency:
+      group: ${{ matrix.route == 'all' && 'public-drive-recovery' || format('public-drive-recovery-{0}', matrix.route) }}
+      cancel-in-progress: false
+      queue: max
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
       GH_TOKEN: ${{ github.token }}
+      ACCOUNT_ROUTE: ${{ matrix.route == 'all' && '' || matrix.route }}
       META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
       # A failed Film identity holds only Film. Every publishing route still
       # requires its own verified Page identity; no token/rights bypass.
@@ -169,7 +176,7 @@ jobs:
         if: success() && steps.release_gate.outputs.publish_allowed == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: link-state-intent
+          name: link-state-intent${{ matrix.route == 'all' && '' || format('-{0}', matrix.route) }}
           path: link-runtime/state.json
           if-no-files-found: error
           retention-days: 90
@@ -195,7 +202,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: publication-operations
+          name: publication-operations${{ matrix.route == 'all' && '' || format('-{0}', matrix.route) }}
           path: |
             link-runtime/operations-backup.zip
             link-runtime/operations-report.json
@@ -208,7 +215,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: link-state-result
+          name: link-state-result${{ matrix.route == 'all' && '' || format('-{0}', matrix.route) }}
           path: link-runtime/state.json
           if-no-files-found: ignore
           retention-days: 90
@@ -216,7 +223,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: toonzone-generated-part-covers
+          name: toonzone-generated-part-covers${{ matrix.route == 'all' && '' || format('-{0}', matrix.route) }}
           path: link-runtime/generated_toonzone_covers/*.png
           if-no-files-found: ignore
           retention-days: 90
@@ -224,7 +231,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: link-caption-audit
+          name: link-caption-audit${{ matrix.route == 'all' && '' || format('-{0}', matrix.route) }}
           path: link-runtime/report.md
           if-no-files-found: ignore
           retention-days: 30
@@ -251,7 +258,7 @@ jobs:
         if: ${{ always() && steps.notify_plan.outcome == 'success' && steps.notify_plan.outputs.alert_archive_needed == 'true' }}
         uses: actions/upload-artifact@v4
         with:
-          name: link-alert-intent
+          name: link-alert-intent${{ matrix.route == 'all' && '' || format('-{0}', matrix.route) }}
           path: link-runtime/alert-history.json
           if-no-files-found: error
           retention-days: 7
@@ -270,7 +277,7 @@ jobs:
         if: ${{ always() && steps.notify_plan.outputs.alert_archive_needed == 'true' }}
         uses: actions/upload-artifact@v4
         with:
-          name: link-alert-result
+          name: link-alert-result${{ matrix.route == 'all' && '' || format('-{0}', matrix.route) }}
           path: link-runtime/alert-history.json
           if-no-files-found: ignore
           retention-days: 7
@@ -293,7 +300,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: link-incident-report
+          name: link-incident-report${{ matrix.route == 'all' && '' || format('-{0}', matrix.route) }}
           path: link-runtime/incidents.json
           if-no-files-found: warn
           retention-days: 90
@@ -301,7 +308,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: link-error-journal
+          name: link-error-journal${{ matrix.route == 'all' && '' || format('-{0}', matrix.route) }}
           path: link-runtime/errors.jsonl
           if-no-files-found: ignore
           retention-days: 90
