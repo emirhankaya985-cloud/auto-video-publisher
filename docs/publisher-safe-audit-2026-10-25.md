@@ -22,3 +22,12 @@ never invoke media_publish, upload video, or phone notifications.
 ## 28 October 2026 — verified film source-copy audit
 
 After PR #30 and 599 passing regression cases, inspect the live catalog and exact existing remote post for the two Avanak Apti Part 3 sources. Require MP4 validation and equal full byte SHA-256 before recording a local alias to the confirmed old post. Expected report: DUPLICATE VERIFIED for the already-published Part 3 copy and NEXT for the ordered Part 4. This is audit-only, with no Meta uploads, media_publish, phone notifications, remote source/claim mutation or rights bypass. Actual Part 4 publication must be observed independently from a normal scheduled run.
+
+## 9 November 2026 — account-isolation acceptance (GET-only)
+
+After merging PR #223, run a one-time read-only seven-account smoke audit.
+This commit subject is deliberately not an authorized publication marker, so
+publisher_one_shot_gate must return audit; no Meta POSTs, uploads, claim writes,
+or Telegram/ntfy publication notifications are authorized. Verify each matrix
+job's own identity preflight, ledger restore, audit report and scoped artifact;
+then verify the fan-in only produces a read-only combined legacy receipt.
