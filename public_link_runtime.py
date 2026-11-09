@@ -812,7 +812,8 @@ def film_part8_local_only_export_hold(route, files, entries):
         and failure.get("reason") == "visual_duplicate_review"
         and failure.get("external_post_attempted") is False
         and failure.get("safe_to_repost") is False
-        and "facebook" in failure.get("conflicting_platforms", [])
+        and isinstance(failure.get("conflicting_platforms"), list)
+        and "facebook" in failure["conflicting_platforms"]
     )
 
 
