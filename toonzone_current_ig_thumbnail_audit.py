@@ -73,6 +73,27 @@ def save_cover_comparison(original_png, live_thumbnail, output, *, episode, part
     return output
 
 
+def save_safe_area_cover(original_png, output):
+    """Keep the *entire original* within IG's centered 1:1 grid safe region.
+
+    This is a resized preview PNG ONLY, not an upload or deletion. A 1080x1920
+    file with the 810x1080 source centered lets all original part/title text
+    survive the square profile thumbnail crop. Never edit original Drive PNG.
+    """
+    from PIL import Image, ImageOps
+    output = Path(output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with Image.open(original_png) as source:
+        image = source.convert("RGB")
+        # Full source fits within the center 1080px-high safe square.
+        fitted = ImageOps.contain(image, (810, 1080))
+    canvas = Image.new("RGB", (1080, 1920), (0, 0, 0))
+    canvas.paste(fitted, ((1080 - fitted.width) // 2,
+                          (1920 - fitted.height) // 2))
+    canvas.save(output, "PNG", optimize=True)
+    return output
+
+
 def select_current(catalog, ledger, live, covers):
     """Join only exact source/ID owned-list matches, never caption guessing."""
     if not isinstance(ledger, dict) or not isinstance(ledger.get("entries"), dict):
@@ -153,6 +174,14 @@ def audit(page, *, inventory, download, graph_rows, restore, thumbnail,
                                 f"S01E{item['episode']:02d}-Part{item['part']}-comparison.jpg"
                             ), episode=item["episode"], part=item["part"])
                         result["comparison_preview"] = visual.name
+                        if result["status"] == "live_thumbnail_differs_from_drive_cover":
+                            # Do not mutate Instagram or the original Drive file.
+                            # Prepare a correctly framed image for owner review.
+                            repaired = save_safe_area_cover(
+                                cover, Path(evidence_dir).parent / "replacement-covers" / item["cover_name"]
+                            )
+                            result["replacement_cover_file"] = repaired.name
+                            result["replacement_cover_dimensions"] = [1080, 1920]
                 except (OSError, ValueError, RuntimeError, TypeError, KeyError):
                     result["reason"] = "remote_thumbnail_or_cover_read_failed"
             results.append(result)

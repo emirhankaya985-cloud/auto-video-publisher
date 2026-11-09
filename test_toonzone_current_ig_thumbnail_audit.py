@@ -93,7 +93,15 @@ class ToonZoneCurrentThumbnailTests(unittest.TestCase):
             self.assertEqual(result["live_thumbnail_different_count"], 3)
             self.assertTrue(result["no_meta_writes"])
             self.assertEqual(len(list(evidence_dir.glob("*.jpg"))), 3)
+            replacements = Path(tmp) / "replacement-covers"
+            self.assertEqual(len(list(replacements.glob("*.png"))), 3)
             for row in result["entries"]:
+                self.assertEqual(row["replacement_cover_dimensions"], [1080, 1920])
+                with Image.open(replacements / row["replacement_cover_file"]) as safe:
+                    self.assertEqual(safe.size, (1080, 1920))
+                    # Full source is centered within the 1:1 grid-safe region.
+                    self.assertEqual(safe.getpixel((540, 960)), (20, 50, 110))
+                    self.assertEqual(safe.getpixel((540, 200)), (0, 0, 0))
                 self.assertEqual(row["comparison_preview"],
                                  f"S01E{row['episode']:02d}-Part{row['part']}-comparison.jpg")
                 with Image.open(evidence_dir / row["comparison_preview"]) as sheet:
