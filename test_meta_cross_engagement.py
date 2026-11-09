@@ -116,6 +116,73 @@ class EngagementTests(unittest.TestCase):
                 m.main()
             accounts.assert_not_called()
 
+    def test_inventory_flags_unverified_routes_not_all_platforms(self):
+        inventory = m.verified_inventory(actors())
+        self.assertEqual(inventory["verified_account_routes"], 2)
+        self.assertIn("ToonZone", inventory["unverified_account_routes"])
+        self.assertIn("ToonZone", inventory["facebook_unverified_routes"])
+        self.assertIn("ToonZone", inventory["instagram_unverified_routes"])
+
+    def test_fair_selector_considers_facebook_after_instagram_attempt(self):
+        aa = actors()
+        previous = task("like", "instagram", "44", "33")
+        previous["post_id"] = "222"
+        ledger = reserved(previous)
+        ledger["actions"][m.key(previous)]["status"] = "accepted"
+        ledger["actions"][m.key(previous)]["api_ack"] = True
+        posts = [dict(platform="instagram", post_id="456", owner="33"),
+                 dict(platform="facebook", post_id="123", owner="11")]
+        with patch.object(m, "verified_media", return_value=None), \
+             patch.dict(m.os.environ, {"META_CROSS_REPOST_ENABLED": "false"}):
+            tasks, _ = m.build_one_like(posts, aa, ledger, "201", "100", now=NOW)
+        self.assertEqual(len(tasks), 1)
+        self.assertEqual(tasks[0]["platform"], "facebook")
+        self.assertNotEqual(tasks[0]["owner"], tasks[0]["actor"])
+
+    def test_fair_selector_rotates_to_actor_without_recent_activity(self):
+        aa = actors()
+        aa[("instagram", "55")] = dict(platform="instagram", id="55",
+            name="ToonZone", grants=set(GRANTS), token="token", owner_page="55")
+        previous = task("like", "instagram", "33", "55")
+        previous["post_id"] = "222"
+        ledger = reserved(previous)
+        ledger["actions"][m.key(previous)]["status"] = "accepted"
+        ledger["actions"][m.key(previous)]["api_ack"] = True
+        posts = [dict(platform="instagram", post_id="999", owner="55")]
+        with patch.object(m, "verified_media", return_value=None):
+            tasks, _ = m.build_one_like(posts, aa, ledger, "201", "100", now=NOW)
+        self.assertEqual(len(tasks), 1)
+        self.assertEqual(tasks[0]["actor"], "44")
+
+    def test_invalid_source_spends_one_check_not_one_per_actor(self):
+        aa = actors()
+        aa[("instagram", "55")] = dict(platform="instagram", id="55",
+            name="ToonZone", grants=set(GRANTS), token="token", owner_page="55")
+        posts = [dict(platform="instagram", post_id="999", owner="55"),
+                 dict(platform="instagram", post_id="456", owner="33")]
+        checked = []
+        def preflight(task, accounts):
+            checked.append(task["post_id"])
+            if task["post_id"] == "999":
+                raise ValueError("source_owner_missing")
+        with patch.object(m, "verified_media", side_effect=preflight):
+            tasks, _ = m.build_one_like(posts, aa, {"schema": 1, "actions": {}},
+                                        "200", "100", now=NOW)
+        self.assertEqual(checked, ["999", "456"])
+        self.assertEqual(len(tasks), 1)
+        self.assertEqual(tasks[0]["post_id"], "456")
+
+    def test_scheduled_dedupe_outlives_three_day_recent_post_window(self):
+        previous = task()
+        ledger = reserved(previous)
+        ledger["actions"][m.key(previous)]["at"] = (NOW-timedelta(hours=60)).isoformat()
+        ledger["actions"][m.key(previous)]["status"] = "accepted"
+        tasks, report = m.build_plan([dict(platform="facebook", post_id="123", owner="11")],
+                                     actors(), ledger, "201", "100", now=NOW)
+        self.assertIn(m.key(previous), ledger["actions"])
+        self.assertNotIn(previous, tasks)
+        self.assertIn("already_recorded", {x["status"] for x in report})
+
     def test_one_like_prefers_instagram_and_never_reserves_repost(self):
         posts = [dict(platform="facebook", post_id="123", owner="11"),
                  dict(platform="instagram", post_id="456", owner="33")]
@@ -342,7 +409,7 @@ class EngagementTests(unittest.TestCase):
     def test_prior_368_hold_survives_pruning_and_blocks_new_sources(self):
         old=task("repost");ledger=reserved(old)
         record=ledger["actions"][m.key(old)]
-        record.update(status="rejected",graph_code=368,at=(NOW-timedelta(hours=49)).isoformat())
+        record.update(status="rejected",graph_code=368,at=(NOW-timedelta(days=8)).isoformat())
         posts=[dict(platform="facebook",post_id="456",owner="11")]
         planned,report=m.build_plan(posts,actors(),ledger,"201","100",now=NOW)
         self.assertFalse(any(t["operation"]=="repost" for t in planned))

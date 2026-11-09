@@ -136,12 +136,20 @@ def verified_inventory(actors):
     """
     platform_counts = Counter(actor["platform"] for actor in actors.values())
     names = sorted({actor["name"] for actor in actors.values()})
+    expected_names = set(ROUTE_NAMES.values())
     return {
         "verified_account_routes": len(names),
         "verified_account_names": names,
+        "unverified_account_routes": sorted(expected_names - set(names)),
         "verified_platform_identities": len(actors),
         "verified_facebook_identities": platform_counts["facebook"],
         "verified_instagram_identities": platform_counts["instagram"],
+        "facebook_unverified_routes": sorted(expected_names - {
+            actor["name"] for actor in actors.values() if actor["platform"] == "facebook"
+        }),
+        "instagram_unverified_routes": sorted(expected_names - {
+            actor["name"] for actor in actors.values() if actor["platform"] == "instagram"
+        }),
     }
 
 
@@ -288,9 +296,10 @@ def build_plan(posts, actors, ledger, run_id, source_run_id, *, now):
     if ledger.get("schema") != 1 or not isinstance(ledger.get("actions"), dict):
         raise ValueError("invalid engagement ledger; reset forbidden")
     holds = provider_holds(ledger)
-    # Old source runs cannot be replayed after 24h; retain intent/results 48h.
+    # Keep dedupe receipts longer than the three-calendar-day source window.
+    # A 48-hour prune could accidentally let a still-eligible video repeat.
     ledger["actions"] = {k: v for k, v in ledger["actions"].items()
-                         if stamp(v["at"]) >= now - timedelta(hours=48)}
+                         if stamp(v["at"]) >= now - timedelta(days=7)}
     tasks, report = [], []
     for source in posts:
         for actor in actors.values():
@@ -603,50 +612,85 @@ def restore():
 
 
 def build_one_like(posts, actors, ledger, run_id, source_run_id, *, now):
-    """One authorized, cross-account like only; no write before live preflight.
+    """Choose one live like with fair route/platform coverage and safe preflight.
 
-    This is a bounded one-like-per-run owner-authorized path, NOT a
-    bulk-engagement runner. Do not reserve any save or repost intents.
+    Never increase write volume: at most one individually verified like per run.
+    Do not retry reserved/ambiguous provider writes, bypass actor grants or
+    provider holds, or send saves, reposts or self-likes.
     """
     if ledger.get("schema") != 1 or not isinstance(ledger.get("actions"), dict):
         raise ValueError("invalid engagement ledger; reset forbidden")
     holds = provider_holds(ledger)
-    for platform in ("instagram", "facebook"):
+    names = {(actor["platform"], actor["id"]): actor["name"]
+             for actor in actors.values()}
+    never = datetime(1970, 1, 1, tzinfo=timezone.utc)
+    last_platform, last_actor, last_owner = {}, {}, {}
+
+    # Activity includes pending/uncertain/rejected receipts to keep a failed
+    # identity from monopolizing every new source during subsequent ticks.
+    for record in ledger["actions"].values():
+        if record.get("operation") != "like" or record.get("platform") not in {"instagram", "facebook"}:
+            continue
+        at = stamp(record["at"])
+        platform = record["platform"]
+        last_platform[platform] = max(last_platform.get(platform, never), at)
+        actor_name = names.get((platform, str(record.get("actor", ""))))
+        owner_name = names.get((platform, str(record.get("owner", ""))))
+        if actor_name:
+            last_actor[actor_name] = max(last_actor.get(actor_name, never), at)
+        if owner_name:
+            last_owner[owner_name] = max(last_owner.get(owner_name, never), at)
+
+    # ToonZone retains first priority on an entirely fresh ledger. Thereafter,
+    # accounts and platform lanes that received less recent coverage go first.
+    routes = ("ToonZone", "Film Mağarası", "Filmmagrasi", "Beyinsiz Penguen",
+              "Tarladaki Fasulye", "Gönle Düşen", "Daily Laugh Lab")
+    rank = {name: index for index, name in enumerate(routes)}
+    for platform in sorted(("instagram", "facebook"),
+                           key=lambda p: (last_platform.get(p, never), p != "instagram")):
         if f"{platform}/like" in holds:
             continue
-        checked = 0
-        # Meta first: work through ToonZone's verified recent videos before
-        # other accounts, without bypassing past action receipts or actor grants.
-        toonzone_owners = {a["id"] for a in actors.values()
-                           if a["platform"] == platform and a["name"] == "ToonZone"}
-        for source in sorted((p for p in posts if p["platform"] == platform),
-                             key=lambda p: (p["owner"] not in toonzone_owners, p["post_id"])):
-            for actor in sorted((a for a in actors.values()
-                                 if a["platform"] == platform and a["id"] != source["owner"]
-                                 and permission(platform, "like") <= a["grants"]),
-                                key=lambda a: a["id"]):
+        checked_sources = 0
+        eligible_sources = sorted(
+            (post for post in posts if post["platform"] == platform),
+            key=lambda post: (
+                last_owner.get(names.get((platform, post["owner"])), never),
+                rank.get(names.get((platform, post["owner"])), len(rank)),
+                post["post_id"],
+            ),
+        )
+        for source in eligible_sources:
+            candidates = []
+            for actor in actors.values():
+                if (actor["platform"] != platform or actor["id"] == source["owner"]
+                        or not permission(platform, "like") <= actor["grants"]):
+                    continue
                 task = dict(source, actor=actor["id"], operation="like",
                             source_run_id=source.get("source_run_id", source_run_id))
-                if key(task) in ledger["actions"]:
-                    continue
-                if checked >= 8:
-                    break
-                checked += 1
-                try:
-                    verified_media(task, actors)
-                except (GraphFailure, ValueError, KeyError):
-                    continue
-                # Reuse the hardened ledger reservation, then keep only
-                # the one verified like; no other operation can be reserved.
-                selected = {("like", platform, actor["id"]): actor}
-                # build_plan works from actor.values(); key shape is not used.
-                tasks, report = build_plan([source], selected, ledger, run_id,
-                                           source_run_id, now=now)
-                if len(tasks) != 1 or tasks[0]["operation"] != "like":
-                    raise ValueError("unexpected single-like reservation")
-                return tasks, report
-            if checked >= 8:
+                if key(task) not in ledger["actions"]:
+                    candidates.append((actor, task))
+            if not candidates:
+                continue
+            if checked_sources >= 8:
                 break
+            checked_sources += 1
+            # Owner/source proof is independent of who likes it: a bad source
+            # uses only one bounded GET and never consumes all eight checks.
+            actor, task = min(candidates, key=lambda pair: (
+                last_actor.get(pair[0]["name"], never),
+                rank.get(pair[0]["name"], len(rank)),
+                pair[0]["id"],
+            ))
+            try:
+                verified_media(task, actors)
+            except (GraphFailure, ValueError, KeyError):
+                continue
+            selected = {(platform, actor["id"]): actor}
+            tasks, report = build_plan([source], selected, ledger, run_id,
+                                       source_run_id, now=now)
+            if len(tasks) != 1 or tasks[0]["operation"] != "like":
+                raise ValueError("unexpected single-like reservation")
+            return tasks, report
     return [], [{"status": "no_eligible_verified_single_like"}]
 
 def main():
