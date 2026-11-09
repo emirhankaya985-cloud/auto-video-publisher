@@ -33,6 +33,56 @@ class CoverAcceptanceTests(unittest.TestCase):
                          (episode + part) * 19 % 255)).save(dest, format="PNG")
         return dest
 
+    def test_future_ig_transcoded_video_first_frame_is_exact_original_cover(self):
+        from PIL import ImageOps
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            cover = root / "S01E12_Demo_Part1.png"
+            video = root / "final-instagram.mp4"
+            Image.new("RGB", (720, 960), (83, 119, 201)).save(cover, "PNG")
+            video.write_bytes(b"test-only-no-Meta-POST")
+            def ffmpeg_mock(_cmd, **kwargs):
+                with Image.open(cover) as image:
+                    expected = ImageOps.pad(image.convert("RGB"), (720, 1280),
+                                            color=(0, 0, 0))
+                    expected.save(Path(_cmd[-1]), "PNG")
+            actual = audit.verify_prepared_instagram_first_frame(
+                cover, video, runner=ffmpeg_mock)
+            self.assertTrue(actual["first_frame_matches_cover"])
+            self.assertLessEqual(actual["comparison_distance"], 0.12)
+            self.assertEqual(actual["first_frame_width"], 720)
+            self.assertEqual(actual["first_frame_height"], 1280)
+
+    def test_future_ig_wrong_first_frame_blocks_before_any_meta_publish(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            cover = root / "S01E12_Demo_Part1.png"
+            video = root / "final-instagram.mp4"
+            Image.new("RGB", (720, 960), (83, 119, 201)).save(cover, "PNG")
+            video.write_bytes(b"test-only-no-Meta-POST")
+            def wrong_frame(_cmd, **kwargs):
+                Image.new("RGB", (720, 1280), (10, 10, 10)).save(_cmd[-1], "PNG")
+            with self.assertRaisesRegex(RuntimeError, "cover_held"):
+                audit.verify_prepared_instagram_first_frame(
+                    cover, video, runner=wrong_frame)
+
+    def test_future_ig_missing_frame_also_blocks_before_meta(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            cover = root / "S01E12_Demo_Part1.png"
+            video = root / "final-instagram.mp4"
+            Image.new("RGB", (720, 960), (83, 119, 201)).save(cover, "PNG")
+            video.write_bytes(b"test-only-no-Meta-POST")
+            with self.assertRaisesRegex(RuntimeError, "cover_held"):
+                audit.verify_prepared_instagram_first_frame(
+                    cover, video, runner=lambda _cmd, **kwargs: None)
+
+    def test_main_publisher_wires_future_toonzone_cover_gate_and_offset(self):
+        publisher = (Path(__file__).parent / "public_link_runtime.py").read_text()
+        self.assertIn('preserve_full_cover=(item["route"] == "toonzone")', publisher)
+        self.assertIn("verify_prepared_instagram_first_frame(cover, prepared_ig)", publisher)
+        self.assertIn('tag_options["thumb_offset"] = 0', publisher)
+
     def test_exact_all_36_png_bytes_verified_with_zero_meta_writes(self):
         result = audit.assess(self.catalog(), self.fake_covers(), download=self.download)
         self.assertEqual(result["requested_parts"], 36)
