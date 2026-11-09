@@ -178,7 +178,7 @@ def audit(page, *, inventory, download, graph_rows, restore, thumbnail,
                             # Do not mutate Instagram or the original Drive file.
                             # Prepare a correctly framed image for owner review.
                             repaired = save_safe_area_cover(
-                                cover, ROOT / "replacement-covers" / item["cover_name"]
+                                cover, Path(evidence_dir).parent / "replacement-covers" / item["cover_name"]
                             )
                             result["replacement_cover_file"] = repaired.name
                             result["replacement_cover_dimensions"] = [1080, 1920]
