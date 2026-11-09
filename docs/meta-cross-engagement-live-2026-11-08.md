@@ -12,3 +12,10 @@ Safety constraints:
 - Send Telegram receipt only for a confirmed accepted like; a successful workflow status alone is not proof of an accepted like.
 - Manual GitHub dispatch remains audit-only and focus-scoped. Do not alter video publication schedules, OAuth, Threads, or YouTube.
 - Initial live acceptance requires `cross-engagement-result` with `instagram/like/accepted` or `facebook/like/accepted`, plus archived intent and evidence from Graph responses.
+
+
+## 9 November 2026 — post-merge bounded live route-coverage acceptance
+
+Owner reiterated that every configured account should work in production, not just mock tests.
+This marker requests **one** existing workflow tick on main after approved safe fairness and seven-day dedupe changes in #215.
+Keep the one-like limit, verified source and actor identity, provider-policy holds, no self-likes, no saves/reposts, and durable pre-POST intent. This marker does not authorize bulk coordinated activity or bypass account permissions. Judge actual acceptance solely from the future workflow result artifact and Meta Graph acknowledgement, not from CI success.
