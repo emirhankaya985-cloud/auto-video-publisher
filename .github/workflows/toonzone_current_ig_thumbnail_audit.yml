@@ -1,5 +1,8 @@
 name: ToonZone current IG thumbnail vs exact Drive PNG (read only)
 on:
+  schedule:
+    # Read-only cover check at 22:07 TRT. GitHub cron can start late.
+    - cron: '7 19 * * *'
   pull_request:
     paths:
       - 'toonzone_current_ig_thumbnail_audit.py'
@@ -33,7 +36,7 @@ jobs:
       - run: python -m unittest -v test_toonzone_current_ig_thumbnail_audit.py
   live-readonly:
     needs: tests
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
