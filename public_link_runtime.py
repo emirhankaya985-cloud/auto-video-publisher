@@ -202,19 +202,44 @@ def github_get(path):
     return response
 
 
+def selected_account_route():
+    """Return a verified account scope, or preserve the legacy all-account mode.
+
+    A misspelled route must never fall back to publishing all accounts.
+    """
+    route = os.getenv("ACCOUNT_ROUTE", "").strip()
+    if route and route not in ROUTES:
+        raise RuntimeError("Unknown ACCOUNT_ROUTE; publishing held")
+    return route
+
+
 def restore():
-    """Newest run's result wins; otherwise its pre-upload intent is authoritative."""
+    """Restore only this worker's ledger; migrate once from the legacy archive."""
+
     def artifact_list(name):
         payload = github_get(f"actions/artifacts?per_page=100&name={name}").json()
         if not isinstance(payload, dict) or not isinstance(payload.get("artifacts"), list):
             raise RuntimeError("GitHub durum listesi geçersiz; otomatik sıfırlama yapılmadı")
         return payload["artifacts"]
-    artifacts = artifact_list("link-state-result")
-    intents = artifact_list("link-state-intent")
+    account = selected_account_route()
+    suffix = f"-{account}" if account else ""
+    artifacts = artifact_list("link-state-result" + suffix)
+    intents = artifact_list("link-state-intent" + suffix)
     rows = [x for x in artifacts + intents if not x.get("expired")]
+    if not rows and (artifacts or intents):
+        # A route-specific state once existed. Never import old state or
+        # reset when its only durable evidence has expired.
+        raise RuntimeError("Önceki durum kaydının süresi dolmuş; otomatik sıfırlama yapılmadı")
+    if not rows and account:
+        # First isolated run only: migrate historical done/uncertain intents
+        # from the last serialized all-account publisher. Future runs use
+        # this account's own result/intent pair exclusively.
+        artifacts = artifact_list("link-state-result")
+        intents = artifact_list("link-state-intent")
+        rows = [x for x in artifacts + intents if not x.get("expired")]
+        if not rows and (artifacts or intents):
+            raise RuntimeError("Legacy publication evidence expired; isolated migration held")
     if not rows:
-        if artifacts or intents:
-            raise RuntimeError("Önceki durum kaydının süresi dolmuş; otomatik sıfırlama yapılmadı")
         return {"schema": 1, "entries": {}, "episode_days": {}}
     rows.sort(key=lambda x: (int(x["workflow_run"]["id"]), x["name"] == "link-state-result"), reverse=True)
     response = github_get(f"actions/artifacts/{rows[0]['id']}/zip")
@@ -1111,6 +1136,7 @@ def prioritized_route_items(day):
 
 
 def plan(audit=False):
+    account = selected_account_route()
     now = datetime.now(TR)
     day = now.date().isoformat()
     state = restore()
@@ -1173,6 +1199,8 @@ def plan(audit=False):
     duplicate_fingerprints = {}
     rescue_only = os.getenv("IG_AUDITED_RESCUE_ONLY") == "true"
     for route, (source, page_name) in prioritized_route_items(day):
+        if account and route != account:
+            continue
         if rescue_only and route not in _AUDITED_IG_V3_FILES:
             continue
         report.extend(["", f"## {page_name}"])
@@ -1834,8 +1862,12 @@ def hold_unattempted_ordered_successor(item, state):
 
 
 def publish():
+    account = selected_account_route()
     state = json.loads(STATE.read_text())
     plans = json.loads(PLAN.read_text())
+    # Enforce worker scope before loading any credentials or issuing Meta POST.
+    if account and any(item.get("route") != account for item in plans):
+        raise RuntimeError("Cross-account publication plan rejected")
     pages = {p["page_name"]: p for p in load_meta_auth()["pages"]}
     verified_pages = preflight_verified_pages()
     failures = []
