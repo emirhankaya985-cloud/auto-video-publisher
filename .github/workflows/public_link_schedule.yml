@@ -102,6 +102,9 @@ jobs:
       # Historical env kept for compatibility; owner-approved original PNG
       # is mandatory regardless of this value. Synthetic fallback is disabled.
       TOONZONE_AUTO_COVER_ENABLED: 'false'
+      # Season 2 is owner-held until S01E04-12 is verified on BOTH platforms
+      # and the owner explicitly authorizes advancing to Season 2.
+      TOONZONE_SEASON2_RELEASE_ENABLED: 'false'
       # Owner explicitly requested today's catch-up before the evening check.
       # Subsequent dates automatically return to the existing per-route times.
       COMPLETE_DAY_DATE: '2026-11-02'
@@ -259,6 +262,7 @@ jobs:
           path: |
             link-runtime/report.md
             link-runtime/toonzone-cover-gaps.json
+            link-runtime/toonzone-season1-live-receipts.json
           if-no-files-found: ignore
           retention-days: 30
       - name: Per-post Telegram and ntfy notification preparation (no sends)
