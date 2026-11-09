@@ -784,6 +784,39 @@ def film_canonical_part(name):
     return re.sub(r" \([0-9]+\)$", "", Path(name).stem).casefold()
 
 
+def film_part8_local_only_export_hold(route, files, entries):
+    """Allow the separate original Part 8 source to be examined, never the held copy.
+
+    The exported "(1)" video was held by the visual gate before any Meta POST.
+    Preserve its original ledger evidence. This does NOT prove the original is
+    correct: caption, identity, serial order, and visual checks still apply.
+    """
+    if route not in {"film", "film_second"}:
+        return False
+    original = files.get("Bickin_Part_8.mp4")
+    exported = files.get("Bickin_Part_8 (1).mp4")
+    if not isinstance(original, dict) or not isinstance(exported, dict):
+        return False
+    if (not original.get("id") or not exported.get("id")
+            or original["id"] == exported["id"]):
+        return False
+    row = entries.get(f"{route}:facebook:{exported['id']}", {})
+    failure = row.get("failure") if isinstance(row, dict) else None
+    return (
+        row.get("route") == route
+        and row.get("platform") == "facebook"
+        and row.get("file") == exported["name"] == "Bickin_Part_8 (1).mp4"
+        and row.get("status") == "held"
+        and not row.get("post_id")
+        and isinstance(failure, dict)
+        and failure.get("reason") == "visual_duplicate_review"
+        and failure.get("external_post_attempted") is False
+        and failure.get("safe_to_repost") is False
+        and isinstance(failure.get("conflicting_platforms"), list)
+        and "facebook" in failure["conflicting_platforms"]
+    )
+
+
 def route_enabled(route):
     return not route_paused("film" if route == "film_second" else route)
 
@@ -1344,6 +1377,15 @@ def plan(audit=False):
                 for k, e in state["entries"].items())]
         if source == "film":
             videos = [v for v in videos if parse_order(Path(v["name"]).stem, "film")]
+            if film_part8_local_only_export_hold(route, files, state["entries"]):
+                # The export has an exact local-only hold, not a failed Meta
+                # upload. Try the separate original Part 8 source instead;
+                # never clear, recategorize or retry the held export.
+                videos = [v for v in videos if v["name"] != "Bickin_Part_8 (1).mp4"]
+                report.append(
+                    "QUARANTINE: Bickin Part 8 export held before Meta POST; "
+                    "original source stays subject to all publish safety gates."
+                )
             videos.sort(key=lambda v: (not v["name"].lower().startswith("yoksul_1986_"), parse_order(Path(v["name"]).stem, "film")))
         elif source == "toonzone":
             videos = [v for v in videos if parse_order(Path(v["name"]).stem, "cartoon")]
