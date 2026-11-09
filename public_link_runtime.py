@@ -78,6 +78,29 @@ def save(path, value):
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def preflight_verified_pages():
+    """Read the preflight identity allowlist; never infer permission from absence."""
+    if os.getenv("META_PREFLIGHT_PARTIAL_OK", "false").lower() != "true":
+        return None
+    path = Path(os.getenv("META_PREFLIGHT_REPORT_PATH",
+                          "link-runtime/meta-preflight.json"))
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        names = payload["verified_pages"]
+        if (payload.get("schema") != 1
+                or payload.get("status") not in {"identity_verified", "partial_identity_verified"}
+                or not isinstance(names, list) or not names
+                or any(not isinstance(n, str) or n not in ROUTES_PAGE_NAMES for n in names)
+                or len(set(names)) != len(names)):
+            raise ValueError("invalid account allowlist")
+        return set(names)
+    except (OSError, KeyError, TypeError, ValueError) as exc:
+        raise RuntimeError("Meta preflight evidence is unavailable or invalid") from None
+
+
+ROUTES_PAGE_NAMES = frozenset(page for _, page in ROUTES.values())
+
+
 def caption_key(value):
     value = re.sub(r"https://www\.etsy\.com/\S+", "", value or "")
     value = re.sub(r"\bEtsy:\s*", "", value, flags=re.I)
@@ -1090,6 +1113,7 @@ def plan(audit=False):
     apply_verified_migration(state)
     quarantine_weak_caption_aliases(state)
     pages = {p["page_name"]: p for p in load_meta_auth()["pages"]}
+    verified_pages = preflight_verified_pages()
     report = [f"# Public link publisher — {day}", "", "YouTube: disabled. Drive OAuth: not used.", ""]
     catalogs = {}
     unavailable_catalogs = set()
@@ -1143,6 +1167,10 @@ def plan(audit=False):
         if rescue_only and route not in _AUDITED_IG_V3_FILES:
             continue
         report.extend(["", f"## {page_name}"])
+        if verified_pages is not None and page_name not in verified_pages:
+            report.append("HELD: this account failed identity preflight; other accounts continue.")
+            record_error("meta_account", "account_preflight_held", route=route)
+            continue
         if not route_enabled(route):
             report.append("HELD: existing route/rights switch is disabled.")
             continue
@@ -1800,9 +1828,15 @@ def publish():
     state = json.loads(STATE.read_text())
     plans = json.loads(PLAN.read_text())
     pages = {p["page_name"]: p for p in load_meta_auth()["pages"]}
+    verified_pages = preflight_verified_pages()
     failures = []
     for index, original_item in enumerate(plans):
         item = dict(original_item)
+        if verified_pages is not None and item.get("page") not in verified_pages:
+            failures.append(str(item.get("route", "unknown")) + ": account preflight held")
+            record_error("publication_preflight", "account_preflight_held",
+                         route=item.get("route"), video=item.get("name"))
+            continue
         if not ordered_predecessors_confirmed(plans, index, item, state):
             # An earlier serial part failed or is unconfirmed. Never begin
             # this part's download or Meta POST, and preserve prior evidence.
@@ -1820,7 +1854,12 @@ def publish():
             continue
         if not item["platforms"]:
             continue
-        page = pages[item["page"]]
+        page = pages.get(item["page"])
+        if page is None:
+            failures.append(str(item.get("route", "unknown")) + ": account identity unavailable")
+            record_error("publication_preflight", "meta_account_missing",
+                         route=item.get("route"), video=item.get("name"))
+            continue
         if item.get("resume_container_id"):
             try:
                 if not publish_existing_ig_intent(item, page, state):

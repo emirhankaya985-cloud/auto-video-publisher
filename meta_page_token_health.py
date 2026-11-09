@@ -2,6 +2,7 @@
 import json
 import os
 import sys
+from pathlib import Path
 import unicodedata
 import requests
 from api_capacity_guard import capacity_from_headers
@@ -117,6 +118,40 @@ def audit(auth, get=requests.get):
             "note": "Identity GET does not prove publishing permissions."}
 
 
+def verified_pages(result):
+    """Only fully verified, unambiguous page identities may publish.
+
+    A broken Film identity must not block a separately verified ToonZone.
+    A duplicate/conflicting identity fails closed for that page.
+    """
+    if not isinstance(result, dict) or not isinstance(result.get("accounts"), list):
+        return []
+    blocked = {r.get("page_name") for r in result["accounts"]
+               if isinstance(r, dict) and r.get("status") != "identity_verified"}
+    return sorted({r.get("page_name") for r in result["accounts"]
+                   if isinstance(r, dict) and r.get("status") == "identity_verified"
+                   and r.get("page_name") in EXPECTED} - blocked)
+
+
+def archive_partial_preflight(result):
+    """Persist a redacted per-account allowlist before any Meta write."""
+    verified = verified_pages(result)
+    if not verified:
+        return False
+    target = Path(os.getenv("META_PREFLIGHT_REPORT_PATH",
+                            "link-runtime/meta-preflight.json"))
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_suffix(".tmp")
+    temporary.write_text(json.dumps({
+        "schema": 1,
+        "status": "identity_verified" if result.get("status") == "identity_verified"
+                  else "partial_identity_verified",
+        "verified_pages": verified,
+    }, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+    temporary.replace(target)
+    return True
+
+
 def main():
     try:
         from meta_auth_loader import load_meta_auth
@@ -127,6 +162,10 @@ def main():
         return 1
     result = audit(auth)
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+    if os.getenv("META_PREFLIGHT_PARTIAL_OK", "false").lower() == "true":
+        # Keep a single invalid user token or zero healthy Pages fail-closed.
+        # Do NOT infer that a verified identity has publishing rights.
+        return 0 if archive_partial_preflight(result) else 1
     return 0 if result["status"] == "identity_verified" else 1
 
 
