@@ -74,6 +74,20 @@ class EngagementTests(unittest.TestCase):
         enabled_for_legacy_repost_tests.start()
         self.addCleanup(enabled_for_legacy_repost_tests.stop)
 
+    def test_inventory_reports_verified_routes_separately_from_platforms(self):
+        aa = actors()
+        aa[("facebook", "55")] = dict(platform="facebook", id="55", name="ToonZone",
+            grants=set(GRANTS), token="private-token", owner_page="55")
+        inventory = m.verified_inventory(aa)
+        self.assertEqual(inventory["verified_account_routes"], 3)
+        self.assertEqual(inventory["verified_platform_identities"], 5)
+        self.assertEqual(inventory["verified_facebook_identities"], 3)
+        self.assertEqual(inventory["verified_instagram_identities"], 2)
+        self.assertEqual(inventory["verified_account_names"],
+            ["Beyinsiz Penguen", "Tarladaki Fasulye", "ToonZone"])
+        self.assertNotIn("private-token", json.dumps(inventory))
+        self.assertNotIn('"55"', json.dumps(inventory))
+
     def test_toonzone_focus_scopes_read_only_report_to_verified_sources(self):
         aa = actors()
         aa[("instagram", "55")] = dict(platform="instagram", id="55",
