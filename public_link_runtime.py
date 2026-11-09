@@ -1287,6 +1287,32 @@ def plan(audit=False):
             record_error("meta_history", "meta_history_unavailable",
                          route=route, error=exc)
             continue
+        season1_receipts_by_part = {}
+        season2_approved = False
+        if route == "toonzone":
+            from toonzone_season1_gate import season1_receipts, season2_release_allowed
+            season1_check = season1_receipts(
+                [v for name, v in catalogs[source].items() if name.lower().endswith(".mp4")],
+                catalogs["covers"], state, histories)
+            save(ROOT / "toonzone-season1-live-receipts.json", season1_check)
+            season1_receipts_by_part = {
+                (row["slot"], row["platform"]): row
+                for row in season1_check["rows"]}
+            season2_approved = season2_release_allowed(
+                season1_check,
+                owner_release=os.getenv("TOONZONE_SEASON2_RELEASE_ENABLED", "false").lower() == "true")
+            report.append(
+                "ToonZone S01E04–12: "
+                f'{season1_check["verified_platform_receipts"]}/72 archived IDs seen in live Meta history; '
+                f'Season 2 release={"approved" if season2_approved else "held"}.')
+            if not season1_check["all_verified"]:
+                first_unverified = next(
+                    (r for r in season1_check["rows"] if r["status"] != "verified_in_history"), None)
+                if first_unverified:
+                    report.append(
+                        f'PRIORITY Season 1: {first_unverified["slot"]} '
+                        f'{first_unverified["platform"]} reason={first_unverified["reason"]}; '
+                        'do not infer deletion or blindly re-upload.')
         caption_indexes = {p: index_history_captions(rows) for p, rows in histories.items()}
         remote = {p: index[0] for p, index in caption_indexes.items()}
         ambiguous_captions = {p: index[1] for p, index in caption_indexes.items()}
@@ -1397,6 +1423,28 @@ def plan(audit=False):
         blocked_platforms = set()
         planned_film_parts = set()
         for item in videos:
+            if source == "toonzone":
+                order = parse_order(Path(item["name"]).stem, "cartoon")
+                if order and order[0] >= 2 and not season2_approved:
+                    report.append(
+                        "HELD: ToonZone Season 2 cannot start before all 36 Season 1 "
+                        "E04–E12 parts have 72 current verified Facebook/Instagram "
+                        "IDs and a separate owner release.")
+                    break
+                if order and order[0] == 1 and 4 <= order[1] <= 12:
+                    slot = f"S01E{order[1]:02d} Part{order[2]}"
+                    unresolved = [
+                        season1_receipts_by_part.get((slot, p), {})
+                        for p in platforms
+                    ]
+                    if any(row.get("reason") == "archived_id_not_in_live_history"
+                           for row in unresolved):
+                        report.append(
+                            "HELD: " + slot + " has archived DONE post IDs absent "
+                            "from current Meta history; verify original remote "
+                            "IDs independently before any further publication."
+                        )
+                        break
             available = [p for p in platforms if p not in blocked_platforms]
             if not available or all(counts[p] + planned_counts.get((route, p), 0) >= target_count(route, now) for p in available):
                 break
