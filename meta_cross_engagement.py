@@ -129,6 +129,22 @@ def rows(node, token, fields=None):
     raise ValueError("pagination limit")
 
 
+def verified_inventory(actors):
+    """Summarize distinct active account routes vs. FB/IG platform identities.
+
+    Include only public account names and counts, no IDs or credentials.
+    """
+    platform_counts = Counter(actor["platform"] for actor in actors.values())
+    names = sorted({actor["name"] for actor in actors.values()})
+    return {
+        "verified_account_routes": len(names),
+        "verified_account_names": names,
+        "verified_platform_identities": len(actors),
+        "verified_facebook_identities": platform_counts["facebook"],
+        "verified_instagram_identities": platform_counts["instagram"],
+    }
+
+
 def account_enabled(name, platform):
     route = next((r for r, n in ROUTE_NAMES.items() if n == name), None)
     if route is None:
@@ -657,6 +673,7 @@ def main():
     actors = accounts(load_meta_auth(), os.getenv("META_ACCESS_TOKEN", ""))
     if not actors:
         raise ValueError("no verified enabled accounts")
+    inventory = verified_inventory(actors)
     if args.action == "plan":
         skipped_sources = []
         if source_id == "latest":
@@ -689,13 +706,13 @@ def main():
         save(REPORT, {"mode": "apply" if live else "dry_run", "planned": len(tasks),
                       "source_run_id": source_id, "source_posts": len(posts),
                       "source_fallback_skipped_runs": skipped_sources,
-                      "verified_accounts": len(actors), **focus_info,
+                      "verified_accounts": len(actors), **inventory, **focus_info,
                       "blocked": report, "blocked_counts": blocked_counts,
                       "provider_holds": ledger.get("provider_holds", {})})
         if live:
             save(STATE, ledger)
         print(json.dumps({"mode": "apply" if live else "dry_run", "planned": len(tasks),
-                          "source_posts": len(posts), "verified_accounts": len(actors),
+                          "source_posts": len(posts), "verified_accounts": len(actors), **inventory,
                           "source_fallback_skipped_runs": skipped_sources,
                           **focus_info,
                           "blocked": len(report), "blocked_counts": blocked_counts,
