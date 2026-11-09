@@ -147,6 +147,9 @@ jobs:
       - name: Verify state, account and caption safety without API writes
         id: verify
         env:
+          # The pre-existing regression suite covers all routes; run it without
+          # the production worker's single-account filter.
+          PUBLISH_ACCOUNT_SCOPE: ''
           MEDIA_QUALITY_ENABLED: 'false'
           ADVANCED_DEDUPE_ENABLED: 'false'
           AUTO_SUBTITLES_ENABLED: 'false'
