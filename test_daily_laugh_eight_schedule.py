@@ -77,8 +77,10 @@ class DailyLaughEightSlotsTests(unittest.TestCase):
         self.assertNotIn("\n  schedule:", backup)
         self.assertIn("vars.AUTOMATION_ENABLED == 'true'", main)
         self.assertIn("  schedule:", active_meta)
-        self.assertIn("7,37 * * * *", active_meta)
-        self.assertIn("0,10,20,30 9 * * *", active_meta)
+        self.assertIn("7 0,1,2,3,12,13,14,15,16,17,18,19,20,21,22,23 * * *", active_meta)
+        self.assertIn("7,17,27,37 9 * * *", active_meta)
+        self.assertIn("matrix.account_scope", active_meta)
+        self.assertIn("fail-fast: false", active_meta)
 
     def test_daily_report_target_is_eight_without_historical_inflation(self):
         name = "😂 Daily Laugh Lab"

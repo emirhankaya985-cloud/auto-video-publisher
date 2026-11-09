@@ -9,6 +9,15 @@ from api_capacity_guard import capacity_from_headers
 
 EXPECTED = {"Tarladaki Fasulye", "Beyinsiz Penguen", "Gönle Düşen",
             "Daily Laugh Lab", "Film Mağarası", "Filmmagrasi", "ToonZone"}
+SCOPE_TO_PAGE = {
+    "tarladaki": "Tarladaki Fasulye",
+    "penguen": "Beyinsiz Penguen",
+    "gonle": "Gönle Düşen",
+    "daily_laugh": "Daily Laugh Lab",
+    "film": "Film Mağarası",
+    "film_second": "Filmmagrasi",
+    "toonzone": "ToonZone",
+}
 
 # Immutable production IDs outweigh old display labels, which may be misspelled.
 KNOWN_PAGE_IDS = {
@@ -94,14 +103,31 @@ def check_page(page, get=requests.get):
 def audit(auth, get=requests.get):
     if not isinstance(auth, dict) or not isinstance(auth.get("pages"), list):
         return {"status": "blocked", "reason": "invalid_discovered_page_configuration", "accounts": []}
+    scope = os.getenv("PUBLISH_ACCOUNT_SCOPE", "").strip()
+    if scope and scope not in SCOPE_TO_PAGE:
+        return {"status": "blocked", "reason": "invalid_account_scope", "accounts": []}
+    expected = {SCOPE_TO_PAGE[scope]} if scope else EXPECTED
     rows, names, ids = [], set(), set()
+    # Reject duplicate/conflicting page identities even across scopes, without
+    # requiring sibling providers to answer an API GET for this account.
+    all_pages = [p for p in auth["pages"] if isinstance(p, dict)]
+    id_names = {}
+    for page in all_pages:
+        pid = str(page.get("page_id") or "").strip()
+        if pid and canonical_page_name(page) in EXPECTED:
+            id_names.setdefault(pid, set()).add(canonical_page_name(page))
     for page in auth["pages"]:
         if not isinstance(page, dict):
             return {"status": "blocked", "reason": "invalid_entry", "accounts": rows}
         name = canonical_page_name(page)
-        if name not in EXPECTED:
+        if name not in expected:
             continue
         pid = str(page.get("page_id") or "")
+        if scope and len(id_names.get(pid, set())) > 1:
+            rows.append({"page_name": name, "status": "blocked",
+                         "reason": "shared_page_id_conflict", "publishing_tested": False})
+            names.add(name)
+            continue
         if name in names or (pid and pid in ids):
             rows.append({"page_name": name, "status": "blocked", "reason": "duplicate_configuration",
                          "publishing_tested": False})
@@ -110,7 +136,7 @@ def audit(auth, get=requests.get):
         if pid:
             ids.add(pid)
         rows.append(check_page(page, get=get))
-    missing = sorted(EXPECTED - names)
+    missing = sorted(expected - names)
     passed = not missing and rows and all(row["status"] == "identity_verified" for row in rows)
     return {"status": "identity_verified" if passed else "attention_needed",
             "accounts": rows, "missing_page_names": missing,

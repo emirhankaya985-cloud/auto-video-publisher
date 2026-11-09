@@ -35,6 +35,8 @@ on:
       - 'test_content_hashtags.py'
       - 'instagram_media_compat.py'
       - 'test_instagram_media_compat.py'
+      - 'merge_account_states.py'
+      - 'test_isolated_accounts.py'
       - 'publisher_recovery.py'
       - 'daily_backfill.py'
       - 'test_daily_backfill.py'

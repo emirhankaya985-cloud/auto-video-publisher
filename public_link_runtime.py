@@ -66,6 +66,26 @@ ROUTES = {
 }
 
 
+
+ACCOUNT_SCOPES = frozenset(ROUTES)
+
+
+def account_scope():
+    """Explicit account identity for isolated jobs; unknown values fail closed."""
+    scope = os.getenv("PUBLISH_ACCOUNT_SCOPE", "").strip()
+    if scope and scope not in ACCOUNT_SCOPES:
+        raise RuntimeError("Unrecognized isolated publisher account")
+    return scope
+
+
+def owned_humor_source(route, file_id):
+    """Stable disjoint ownership of shared humor Drive sources across workers."""
+    if route not in {"tarladaki", "penguen"}:
+        raise ValueError("Only humor routes have shared source ownership")
+    bucket = int(hashlib.sha256(str(file_id).encode()).hexdigest(), 16) % 2
+    return bucket == (0 if route == "tarladaki" else 1)
+
+
 def save(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
     if path == STATE and isinstance(value, dict) and isinstance(value.get("entries"), dict):
@@ -209,8 +229,16 @@ def restore():
         if not isinstance(payload, dict) or not isinstance(payload.get("artifacts"), list):
             raise RuntimeError("GitHub durum listesi geçersiz; otomatik sıfırlama yapılmadı")
         return payload["artifacts"]
-    artifacts = artifact_list("link-state-result")
-    intents = artifact_list("link-state-intent")
+    scope = account_scope()
+    # A worker reads ONLY its own last result/intent. The legacy global
+    # archive is consulted once during migration, never after scoped evidence
+    # exists. A sibling's newer job cannot erase this account's pending intent.
+    suffix = "-" + scope if scope else ""
+    artifacts = artifact_list("link-state-result" + suffix)
+    intents = artifact_list("link-state-intent" + suffix)
+    if scope and not (artifacts or intents):
+        artifacts = artifact_list("link-state-result")
+        intents = artifact_list("link-state-intent")
     rows = [x for x in artifacts + intents if not x.get("expired")]
     if not rows:
         if artifacts or intents:
@@ -1168,7 +1196,10 @@ def plan(audit=False):
     history_cache = {}
     duplicate_fingerprints = {}
     rescue_only = os.getenv("IG_AUDITED_RESCUE_ONLY") == "true"
+    scope = account_scope()
     for route, (source, page_name) in prioritized_route_items(day):
+        if scope and route != scope:
+            continue
         if rescue_only and route not in _AUDITED_IG_V3_FILES:
             continue
         report.extend(["", f"## {page_name}"])
@@ -1264,6 +1295,11 @@ def plan(audit=False):
             continue
         files = catalogs[source]
         videos = [v for n, v in files.items() if n.lower().endswith(".mp4")]
+        # Humor pages share one Drive folder. Their runners may execute at
+        # the same time, so ownership must be stable without a race or shared
+        # in-memory ledger; existing historical posts are still reconciled.
+        if scope and route in {"tarladaki", "penguen"}:
+            videos = [v for v in videos if owned_humor_source(route, v["id"])]
         if rescue_only:
             videos = [v for v in videos if v["name"] == _AUDITED_IG_V3_FILES[route]]
         other_humor_hashes = set()
@@ -1821,8 +1857,14 @@ def hold_unattempted_ordered_successor(item, state):
 
 
 def publish():
+    scope = account_scope()
     state = json.loads(STATE.read_text())
     plans = json.loads(PLAN.read_text())
+    if scope and (not isinstance(plans, list) or any(
+            not isinstance(item, dict) or item.get("route") != scope
+            for item in plans)):
+        # Never trust a stale or foreign plan, even if an artifact is valid.
+        raise RuntimeError("Isolated worker received an out-of-scope publication plan")
     pages = {p["page_name"]: p for p in load_meta_auth()["pages"]}
     verified_pages = preflight_verified_pages()
     failures = []

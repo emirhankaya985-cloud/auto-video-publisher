@@ -97,7 +97,7 @@ jobs:
     needs: [tests, live-audit]
     # Share the normal publisher lock across reserve, persisted intent and POSTs.
     concurrency:
-      group: public-drive-recovery
+      group: public-drive-recovery-toonzone
       cancel-in-progress: false
     if: >-
       github.ref == 'refs/heads/main' &&

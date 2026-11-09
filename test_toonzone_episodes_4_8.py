@@ -231,7 +231,9 @@ class ToonZoneBatchTests(unittest.TestCase):
         release = yaml.safe_load(Path(".github/workflows/toonzone_episodes_4_8.yml").read_text())
         normal = yaml.safe_load(Path(".github/workflows/public_link_schedule.yml").read_text())
         job = release["jobs"]["publish"]
-        self.assertEqual(job["concurrency"]["group"], normal["concurrency"]["group"])
+        self.assertEqual(job["concurrency"]["group"], "public-drive-recovery-toonzone")
+        self.assertIn("public-drive-recovery-", normal["jobs"]["meta"]["concurrency"]["group"])
+        self.assertIn("matrix.account_scope", normal["jobs"]["meta"]["concurrency"]["group"])
         self.assertIs(job["concurrency"]["cancel-in-progress"], False)
         self.assertIn("vars.TOONZONE_RIGHTS_APPROVED == 'true'", job["if"])
         self.assertIn("github.run_attempt == 1", job["if"])
