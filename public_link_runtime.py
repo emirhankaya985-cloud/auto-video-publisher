@@ -1868,7 +1868,10 @@ def publish():
                 save(ROOT / "subtitles" / item["route"] / item["id"] / "receipt.json", subtitle_receipt)
                 if item.get("cover_id"):
                     cover = download(item["cover_id"], temp / "cover.png")
-                    video = create_instagram_cover_video(video, cover, temp / "covered.mp4")
+                    video = create_instagram_cover_video(
+                        video, cover, temp / "covered.mp4",
+                        preserve_full_cover=(item["route"] == "toonzone"),
+                    )
                 elif item.get("generate_toonzone_cover"):
                     if item["route"] != "toonzone":
                         raise RuntimeError("Otomatik kapak sadece ToonZone için kullanılabilir")
@@ -1879,7 +1882,10 @@ def publish():
                         video, item["name"],
                         ROOT / "generated_toonzone_covers" / (Path(item["name"]).stem + ".png"),
                     )
-                    video = create_instagram_cover_video(video, cover, temp / "covered.mp4")
+                    video = create_instagram_cover_video(
+                        video, cover, temp / "covered.mp4",
+                        preserve_full_cover=(item["route"] == "toonzone"),
+                    )
             except Exception as exc:
                 failures.append(item["page"] + ": " + type(exc).__name__ + ": " + _sanitize_meta_text(str(exc))[:400])
                 for platform in item["platforms"]:
@@ -1988,6 +1994,13 @@ def publish():
                                 item["name"] == _AUDITED_IG_V3_FILES[item["route"]])
                         ),
                     )
+                    if item["route"] == "toonzone":
+                        # Historical five live IG thumbnails disagree with
+                        # their original Drive PNGs. Block NEW IG uploads unless
+                        # the final transcoded MP4 actually begins with this
+                        # exact part's cover; never touch archived done posts.
+                        from toonzone_cover_acceptance import verify_prepared_instagram_first_frame
+                        verify_prepared_instagram_first_frame(cover, prepared_ig)
                 except Exception as exc:
                     key = f"{item['route']}:instagram:{item['id']}"
                     state["entries"][key].update(
@@ -2015,6 +2028,10 @@ def publish():
                     else:
                         tag_options = ({"user_tags": item["instagram_user_tags"]}
                                        if item.get("instagram_user_tags") else {})
+                        if item["route"] == "toonzone":
+                            # Select the locally proven first frame explicitly.
+                            # Only the next new Reel receives this option.
+                            tag_options["thumb_offset"] = 0
                         post = upload_instagram_reel(
                             page, str(prepared_ig), item["captions"][platform],
                             append_store_link=False, **tag_options,
