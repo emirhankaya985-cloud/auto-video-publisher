@@ -56,6 +56,10 @@ jobs:
           python -m pip install --require-hashes -r requirements.txt
           python -m pip install gdown==6.4.2
       - name: Verify no-publish deadline checker
+        # Offline mocked notification tests exercise the legacy send path.
+        # Production's quiet policy is restored for the next separate step.
+        env:
+          QUIET_FAILURE_NOTIFICATIONS: 'false'
         run: python -m unittest -v test_tracked_meta_routes.py
       - name: Check verified Facebook and Instagram video goals and alert only on deficits
         run: python tracked_meta_routes.py
