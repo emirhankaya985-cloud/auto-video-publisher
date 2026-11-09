@@ -132,7 +132,8 @@ class EngagementTests(unittest.TestCase):
         ledger["actions"][m.key(previous)]["api_ack"] = True
         posts = [dict(platform="instagram", post_id="456", owner="33"),
                  dict(platform="facebook", post_id="123", owner="11")]
-        with patch.object(m, "verified_media", return_value=None):
+        with patch.object(m, "verified_media", return_value=None), \
+             patch.dict(m.os.environ, {"META_CROSS_REPOST_ENABLED": "false"}):
             tasks, _ = m.build_one_like(posts, aa, ledger, "201", "100", now=NOW)
         self.assertEqual(len(tasks), 1)
         self.assertEqual(tasks[0]["platform"], "facebook")
@@ -408,7 +409,7 @@ class EngagementTests(unittest.TestCase):
     def test_prior_368_hold_survives_pruning_and_blocks_new_sources(self):
         old=task("repost");ledger=reserved(old)
         record=ledger["actions"][m.key(old)]
-        record.update(status="rejected",graph_code=368,at=(NOW-timedelta(hours=49)).isoformat())
+        record.update(status="rejected",graph_code=368,at=(NOW-timedelta(days=8)).isoformat())
         posts=[dict(platform="facebook",post_id="456",owner="11")]
         planned,report=m.build_plan(posts,actors(),ledger,"201","100",now=NOW)
         self.assertFalse(any(t["operation"]=="repost" for t in planned))
