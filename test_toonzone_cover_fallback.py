@@ -187,10 +187,11 @@ class ToonZoneCoverFallbackTests(unittest.TestCase):
                  patch.object(runtime, "create_instagram_cover_video") as composite, \
                  patch.object(runtime, "upload_facebook_reel", return_value="123456") as facebook:
                 build.return_value = root / "S01E03_Caffeinated_Concert_Tickets_Part3.png"
-                composite.side_effect = lambda source, cover, output: Path(output)
+                composite.side_effect = lambda source, cover, output, **kwargs: Path(output)
                 runtime.publish()
                 self.assertEqual(build.call_count, 1)
                 self.assertEqual(composite.call_count, 1)
+                self.assertTrue(composite.call_args.kwargs["preserve_full_cover"])
                 self.assertEqual(facebook.call_count, 1)
                 self.assertTrue(facebook.call_args.args[1].endswith("covered.mp4"))
             state = json.loads(state_file.read_text())
