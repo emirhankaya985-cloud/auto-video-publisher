@@ -31,3 +31,8 @@ publisher_one_shot_gate must return audit; no Meta POSTs, uploads, claim writes,
 or Telegram/ntfy publication notifications are authorized. Verify each matrix
 job's own identity preflight, ledger restore, audit report and scoped artifact;
 then verify the fan-in only produces a read-only combined legacy receipt.
+
+### 9 November — isolated worker audit rerun
+
+After fixing the production/offline-test environment boundary, repeat a one-time
+read-only scoped worker acceptance. This commit is not a publishing release.
