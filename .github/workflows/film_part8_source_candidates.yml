@@ -1,0 +1,48 @@
+name: Film Bickin Part 8 source candidates READ ONLY
+on:
+  pull_request:
+    paths:
+      - film_part8_source_candidates.py
+      - test_film_part8_source_candidates.py
+      - .github/workflows/film_part8_source_candidates.yml
+  push:
+    branches: [main]
+    paths:
+      - film_part8_source_candidates.py
+      - test_film_part8_source_candidates.py
+      - .github/workflows/film_part8_source_candidates.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: python -m unittest -v test_film_part8_source_candidates.py
+  source-inventory:
+    needs: unit-tests
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install read-only public folder listing dependency
+        run: python -m pip install gdown==6.4.2
+      - name: Inventory public film source alternatives (no media or Meta posts)
+        run: python film_part8_source_candidates.py
+      - name: Preserve exact candidates as audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: film-part8-source-candidates-readonly
+          path: film-part8-source-candidates.json
+          if-no-files-found: warn
+          retention-days: 30
