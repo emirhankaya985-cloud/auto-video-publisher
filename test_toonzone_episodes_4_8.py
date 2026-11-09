@@ -231,7 +231,13 @@ class ToonZoneBatchTests(unittest.TestCase):
         release = yaml.safe_load(Path(".github/workflows/toonzone_episodes_4_8.yml").read_text())
         normal = yaml.safe_load(Path(".github/workflows/public_link_schedule.yml").read_text())
         job = release["jobs"]["publish"]
-        self.assertEqual(job["concurrency"]["group"], normal["concurrency"]["group"])
+        # Legacy and isolated ToonZone jobs both retain the release's lock.
+        # Other isolated accounts must not be serialized behind ToonZone.
+        self.assertEqual(job["concurrency"]["group"], "public-drive-recovery")
+        self.assertIn("'public-drive-recovery'", normal["concurrency"]["group"])
+        normal_job_lock = normal["jobs"]["meta"]["concurrency"]["group"]
+        self.assertIn("matrix.route == 'toonzone'", normal_job_lock)
+        self.assertIn("'public-drive-recovery'", normal_job_lock)
         self.assertIs(job["concurrency"]["cancel-in-progress"], False)
         self.assertIn("vars.TOONZONE_RIGHTS_APPROVED == 'true'", job["if"])
         self.assertIn("github.run_attempt == 1", job["if"])
