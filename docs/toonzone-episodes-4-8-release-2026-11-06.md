@@ -5,3 +5,12 @@ Owner has explicitly requested publishing ToonZone S01E04–S01E12 (36 parts), i
 Do not treat this marker as a release of the 20-part separate Instagram campaign: that job remains `workflow_dispatch(mode=publish)` with rights and release switches, archived intent, source SHA and provider GET checks. This marker also does not authorize mass retry of already-archived 20 Instagram IDs when remote visibility is uncertain. Never delete, overwrite, or replay legacy post intents.
 
 The requested total scope is 36 parts (episodes 4–12 inclusive), first 20 covered by this existing audit. The remaining 16 episodes 9–12 must also be audited before individual publication. Facebook audit/post ID coverage is independent. Do not notify the owner of failure-only events; save the exact blocking run and sanitized diagnostics in GitHub.
+
+## 9 November 2026 — owner-requested Season 1 precedence verification
+
+Before any Season 2 uploads, audit the exact historical Season 1 episodes 4–12
+(36 individual parts on both Facebook and Instagram). The ledger claims
+completion; verify post IDs with current provider GETs. Any missing or
+inaccessible historical post must be held for independent source/ID
+reconciliation, never blindly uploaded a second time. This main-branch push
+triggers the existing read-only ToonZone audit only; no release or posting.
