@@ -42,3 +42,13 @@ read-only scoped worker acceptance. This commit is not a publishing release.
 Read-only post-PR #226 audit: print the exact next blocked ToonZone MP4
 filename and required same-stem original PNG. Do not publish, generate substitute
 artwork, delete old posts, mutate owner Drive files or send phone alerts.
+
+## 9 November 2026 — S01E04-12 strict precedence live GET-only acceptance
+
+After PR #229, audit all seven account jobs without publishing. For ToonZone,
+verify the exact 36 original covers, the 72 archived Meta IDs and current
+Page-scoped provider visibility; record missing IG IDs in
+link-runtime/toonzone-season1-live-receipts.json. Even with historical DONE
+ledger rows, no Season 2 publication may proceed without all 72 current
+confirmations and the owner release switch. Existing Instagram IDs absent
+from provider history remain held (no blind retry or duplicate POST).
