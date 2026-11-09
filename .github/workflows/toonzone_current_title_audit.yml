@@ -1,0 +1,59 @@
+name: ToonZone exact live title and Part audit (read only)
+on:
+  schedule:
+    # Daily at 22:17 TRT; GitHub can delay scheduled starts.
+    - cron: '17 19 * * *'
+  pull_request:
+    paths:
+      - 'toonzone_current_title_audit.py'
+      - 'test_toonzone_current_title_audit.py'
+      - '.github/workflows/toonzone_current_title_audit.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'toonzone_current_title_audit.py'
+      - 'test_toonzone_current_title_audit.py'
+      - '.github/workflows/toonzone_current_title_audit.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: toonzone-live-title-readonly
+  cancel-in-progress: false
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: pip install --require-hashes -r requirements.txt
+      - run: python -m unittest -v test_toonzone_current_title_audit.py
+  live-readonly:
+    needs: tests
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      GH_TOKEN: ${{ github.token }}
+      META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: |
+          pip install --require-hashes -r requirements.txt
+          pip install gdown==6.4.2 pillow==13.0.0
+      - name: Verify live Facebook and Instagram titles against archived source IDs - NO POSTS
+        run: python toonzone_current_title_audit.py
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: toonzone-current-title-part-readonly
+          path: toonzone-current-title-audit/result.json
+          if-no-files-found: error
+          retention-days: 90
