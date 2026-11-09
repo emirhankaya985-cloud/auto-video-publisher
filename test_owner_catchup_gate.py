@@ -80,7 +80,8 @@ class OwnerCatchupGateTests(unittest.TestCase):
         from pathlib import Path
         workflow = (Path(__file__).parent / ".github/workflows/public_link_schedule.yml").read_text()
         self.assertIn(OWNER_CATCHUP_MARKER, workflow)
-        self.assertIn("cron: '7,37 * * * *'", workflow)
+        self.assertIn("cron: '7 6,9,12,15,18 * * *'", workflow)
+        self.assertIn("cron: '7 7,9,11,13,15 * * *'", workflow)
         self.assertIn("run: python meta_page_token_health.py", workflow)
         self.assertLess(workflow.index("run: python meta_page_token_health.py"),
                         workflow.index("run: python public_link_runtime.py publish"))
@@ -149,7 +150,8 @@ class OwnerCatchupGateTests(unittest.TestCase):
         workflow = (Path(__file__).parent / '.github/workflows/public_link_schedule.yml').read_text()
         self.assertIn(NOV7_CATCHUP_MARKER, workflow)
         self.assertIn("CATCHUP_BATCH_DATE: '2026-11-07'", workflow)
-        self.assertIn("cron: '7,37 * * * *'", workflow)
+        self.assertIn("cron: '7 6,9,12,15,18 * * *'", workflow)
+        self.assertIn("cron: '7 7,9,11,13,15 * * *'", workflow)
         self.assertIn("run: python meta_page_token_health.py", workflow)
         self.assertIn("run: python public_link_runtime.py publish", workflow)
         self.assertIn("Persist intent before any Meta upload", workflow)
