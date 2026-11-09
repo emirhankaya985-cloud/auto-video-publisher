@@ -74,6 +74,52 @@ class EngagementTests(unittest.TestCase):
         enabled_for_legacy_repost_tests.start()
         self.addCleanup(enabled_for_legacy_repost_tests.stop)
 
+    def test_like_coverage_only_accepted_identity_matched_and_permissioned(self):
+        aa = actors()
+        ledger = {"schema": 1, "actions": {}}
+        accepted = task("like", "facebook", "22", "11")
+        ledger["actions"][m.key(accepted)] = {
+            **accepted, "status": "accepted", "api_ack": True,
+            "run_id": "200", "at": NOW.isoformat()
+        }
+        pending = task("like", "instagram", "44", "33")
+        ledger["actions"][m.key(pending)] = {
+            **pending, "status": "reserved", "api_ack": False,
+            "run_id": "200", "at": NOW.isoformat()
+        }
+        other = task("like", "instagram", "33", "44")
+        aa[("instagram", "33")]["grants"] = set()
+        ledger["actions"][m.key(other)] = {
+            **other, "status": "accepted", "api_ack": True,
+            "run_id": "200", "at": NOW.isoformat()
+        }
+        wrong = task("like", "facebook", "999", "11")
+        ledger["actions"][m.key(wrong)] = {
+            **wrong, "status": "accepted", "api_ack": True,
+            "run_id": "200", "at": NOW.isoformat()
+        }
+        health = m.verified_like_coverage(aa, ledger)
+        self.assertEqual(health["facebook"]["confirmed_actor_routes"], ["Beyinsiz Penguen"])
+        self.assertEqual(health["facebook"]["confirmed_target_routes"], ["Tarladaki Fasulye"])
+        self.assertEqual(health["facebook"]["confirmed_like_count_in_retained_ledger"], 1)
+        self.assertEqual(health["instagram"]["confirmed_actor_routes"], [])
+        self.assertEqual(health["instagram"]["permission_missing_actor_routes"],
+                         ["Tarladaki Fasulye"])
+        self.assertEqual(health["instagram"]["eligible_routes_without_confirmed_like"],
+                         ["Beyinsiz Penguen"])
+        self.assertNotIn("private-token", json.dumps(health))
+        self.assertNotIn('"999"', json.dumps(health))
+
+    def test_like_coverage_does_not_count_unverified_history_as_success(self):
+        aa = actors()
+        bogus = task("like", "facebook", "22", "11")
+        ledger = {"schema": 1, "actions": {m.key(bogus):
+                  {**bogus, "status": "accepted", "api_ack": False}}}
+        health = m.verified_like_coverage(aa, ledger)
+        self.assertEqual(health["facebook"]["confirmed_actor_routes"], [])
+        self.assertIn("Beyinsiz Penguen",
+                      health["facebook"]["eligible_routes_without_confirmed_like"])
+
     def test_inventory_reports_verified_routes_separately_from_platforms(self):
         aa = actors()
         aa[("facebook", "55")] = dict(platform="facebook", id="55", name="ToonZone",
