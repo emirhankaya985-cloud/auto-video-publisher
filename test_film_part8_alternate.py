@@ -7,6 +7,7 @@ import os
 import tempfile
 import unittest
 from copy import deepcopy
+from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import patch
 
@@ -69,37 +70,43 @@ class FilmPart8AlternateTests(unittest.TestCase):
             start = {"schema": 1, "episode_days": {}, "entries": {
                 "film_second:facebook:held-copy-id": deepcopy(self.row)
             }}
-            with patch.dict(os.environ, {
-                "GITHUB_RUN_ID": "12345",
-                "GITHUB_STEP_SUMMARY": str(root / "summary.md"),
-                "ADAPTIVE_SCHEDULE_ENABLED": "false",
-                "AUTO_BACKFILL_ENABLED": "false",
-                "CATCHUP_BATCH_DATE": "not-today",
-                "META_PREFLIGHT_PARTIAL_OK": "false",
-                "PUBLISH_ACCOUNT_SCOPE": "film_second",
-            }), patch.object(runtime, "ROOT", root), \
-                    patch.object(runtime, "STATE", root / "state.json"), \
-                    patch.object(runtime, "PLAN", root / "plan.json"), \
-                    patch.object(runtime, "FOLDERS", {"film": "shared-folder"}), \
-                    patch.object(runtime, "ROUTES", {"film_second": ("film", "Filmmagrasi")}), \
-                    patch.object(runtime, "restore", return_value=start), \
-                    patch.object(runtime, "apply_verified_migration"), \
-                    patch.object(runtime, "quarantine_weak_caption_aliases"), \
-                    patch.object(runtime, "load_meta_auth", return_value={
-                        "pages": [{"page_name": "Filmmagrasi"}]}), \
-                    patch.object(runtime, "inventory", return_value=self.files), \
-                    patch.object(runtime, "graph_rows", return_value=[]), \
-                    patch.object(runtime, "route_enabled", return_value=True), \
-                    patch.object(runtime, "target_count", return_value=1), \
-                    patch.object(runtime, "seed_done", return_value=False), \
-                    patch.object(runtime, "verified_film_duplicate", return_value=None), \
-                    patch.object(runtime, "copies", return_value=({
-                        "facebook": "Owner checked caption", "instagram": "Owner checked caption"
-                    }, "matching-txt")), \
-                    patch.object(runtime, "prepare_caption", side_effect=lambda text, *_: text), \
-                    patch("content_stock.build_stock", return_value={}), \
-                    patch("content_stock.stock_markdown", return_value=""), \
-                    patch.object(runtime, "upload_facebook_reel") as post:
+            with ExitStack() as stack:
+                stack.enter_context(patch.dict(os.environ, {
+                    "GITHUB_RUN_ID": "12345",
+                    "GITHUB_STEP_SUMMARY": str(root / "summary.md"),
+                    "ADAPTIVE_SCHEDULE_ENABLED": "false",
+                    "AUTO_BACKFILL_ENABLED": "false",
+                    "CATCHUP_BATCH_DATE": "not-today",
+                    "META_PREFLIGHT_PARTIAL_OK": "false",
+                    "PUBLISH_ACCOUNT_SCOPE": "film_second",
+                }))
+                for name, value in (
+                    ("ROOT", root),
+                    ("STATE", root / "state.json"),
+                    ("PLAN", root / "plan.json"),
+                    ("FOLDERS", {"film": "shared-folder"}),
+                    ("ROUTES", {"film_second": ("film", "Filmmagrasi")}),
+                ):
+                    stack.enter_context(patch.object(runtime, name, value))
+                stack.enter_context(patch.object(runtime, "restore", return_value=start))
+                stack.enter_context(patch.object(runtime, "apply_verified_migration"))
+                stack.enter_context(patch.object(runtime, "quarantine_weak_caption_aliases"))
+                stack.enter_context(patch.object(runtime, "load_meta_auth", return_value={
+                    "pages": [{"page_name": "Filmmagrasi"}]}))
+                stack.enter_context(patch.object(runtime, "inventory", return_value=self.files))
+                stack.enter_context(patch.object(runtime, "graph_rows", return_value=[]))
+                stack.enter_context(patch.object(runtime, "route_enabled", return_value=True))
+                stack.enter_context(patch.object(runtime, "target_count", return_value=1))
+                stack.enter_context(patch.object(runtime, "seed_done", return_value=False))
+                stack.enter_context(patch.object(runtime, "verified_film_duplicate", return_value=None))
+                stack.enter_context(patch.object(runtime, "copies", return_value=({
+                    "facebook": "Owner checked caption", "instagram": "Owner checked caption"
+                }, "matching-txt")))
+                stack.enter_context(patch.object(
+                    runtime, "prepare_caption", side_effect=lambda text, *_: text))
+                stack.enter_context(patch("content_stock.build_stock", return_value={}))
+                stack.enter_context(patch("content_stock.stock_markdown", return_value=""))
+                post = stack.enter_context(patch.object(runtime, "upload_facebook_reel"))
                 runtime.plan()
                 post.assert_not_called()
             plans = json.loads((root / "plan.json").read_text())
