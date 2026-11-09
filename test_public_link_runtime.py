@@ -844,7 +844,12 @@ class LinkRuntimeSafety(unittest.TestCase):
                 page_name = "Film Mağarası" if route == "film" else "ToonZone"
                 folders = {route: "videos", "covers": "covers"}
                 def catalog(folder):
-                    return items if folder == "videos" else {}
+                    if folder == "videos":
+                        return items
+                    if route == "toonzone":
+                        return {Path(item["name"]).stem + ".png": {"id": "cover-" + item["id"]}
+                                for item in items.values()}
+                    return {}
                 with patch.dict(os.environ, {
                         "GITHUB_STEP_SUMMARY": str(root / "summary.md"),
                         "GITHUB_RUN_ID": "77777",
@@ -866,7 +871,7 @@ class LinkRuntimeSafety(unittest.TestCase):
                     ), patch.object(runtime, "copies", return_value=(
                         {"facebook": "FB caption", "instagram": "IG caption"}, "matching-txt"
                     )), patch.object(runtime, "generate_toonzone_txts", return_value=(0, 0)), patch.object(
-                        runtime, "toonzone_cover_coverage", return_value=(0, 2)):
+                        runtime, "toonzone_cover_coverage", return_value=(2, 0) if route == "toonzone" else (0, 0)):
                     runtime.plan()
                 planned = json.loads((root / "plan.json").read_text())
                 self.assertEqual(len(planned), 2)
@@ -1296,6 +1301,7 @@ class LinkRuntimeSafety(unittest.TestCase):
             runtime.save(state_path, {"entries": {"toonzone:instagram:vid": {"status": "intent"}}})
             runtime.save(plan_path, [{"page": "ToonZone", "route": "toonzone",
                 "id": "vid", "name": "S01E01_The_Power_Part2.mp4",
+                "cover_id": "original-png",
                 "platforms": ["instagram"], "captions": {"instagram": "IG text"}}])
             def download(_id, path):
                 path.write_bytes(b"1234ftypOK")
@@ -1303,8 +1309,15 @@ class LinkRuntimeSafety(unittest.TestCase):
             err = runtime.MetaAPIError("HTTP 400 invalid media")
             err.http_status, err.code, err.subcode = 400, 100, 2207009
             err.stage = "Instagram binary upload"
-            with patch.object(runtime, "STATE", state_path), patch.object(runtime, "PLAN", plan_path), \
+            cover_check = types.ModuleType("toonzone_cover_acceptance")
+            cover_check.png_identity = Mock(return_value={"sha256": "sample"})
+            cover_check.verify_prepared_instagram_first_frame = Mock(
+                return_value={"first_frame_matches_cover": True})
+            with patch.dict(sys.modules, {"toonzone_cover_acceptance": cover_check}), \
+                    patch.object(runtime, "STATE", state_path), patch.object(runtime, "PLAN", plan_path), \
                     patch.object(runtime, "download", side_effect=download), \
+                    patch.object(runtime, "create_instagram_cover_video",
+                                 side_effect=lambda video, cover, output, **kwargs: video), \
                     patch.object(runtime, "load_meta_auth", return_value={"pages": [
                         {"page_name": "ToonZone", "page_token": "test"}]}), \
                     patch.object(runtime, "prepare_instagram_upload", side_effect=lambda path, *a, **kw: path), \

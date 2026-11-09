@@ -1151,17 +1151,13 @@ def plan(audit=False):
         matched, missing = toonzone_cover_coverage(catalogs["toonzone"], catalogs["covers"])
         report.append(f"ToonZone exact part covers: matched={matched}; missing={missing}")
         if missing:
-            if os.getenv("TOONZONE_AUTO_COVER_ENABLED", "true").lower() == "true":
-                report.append(
-                    "INFO: ToonZone Drive has missing exact PNG covers; per-part source-video "
-                    "cover fallback is enabled. Each cover must be generated and validated "
-                    "before any Meta upload; a failed generation holds that video."
-                )
-            else:
-                report.append(
-                    "WARNING: ToonZone videos without exact PNG artwork will be held; "
-                    "per-part cover fallback is disabled."
-                )
+            # Exact owner-approved cover files are mandatory for ToonZone.
+            # The former synthetic first-frame fallback could make a different
+            # visual than the intended cover even when the job was green.
+            report.append(
+                "WARNING: ToonZone videos without exact PNG artwork will be held; "
+                "per-part cover fallback is disabled."
+            )
     plans = []
     planned_counts = {}
     # Reserve the exact final caption per route/platform within this batch.
@@ -1607,17 +1603,8 @@ def plan(audit=False):
                     selected["instagram_user_tags"] = selected_tags
             if source == "toonzone":
                 cover = catalogs["covers"].get(Path(item["name"]).stem + ".png")
-                if cover:
+                if cover and str(cover.get("id") or "").strip():
                     selected["cover_id"] = cover["id"]
-                elif os.getenv("TOONZONE_AUTO_COVER_ENABLED", "true").lower() == "true":
-                    # Preserve the exact-part requirement; prepare this
-                    # video's own frame-based cover BEFORE any Meta POST.
-                    # The source itself is the only visual input.
-                    selected["generate_toonzone_cover"] = True
-                    report.append(
-                        f"COVER FALLBACK: {item['name']} has no exact Drive PNG; "
-                        "a branded cover will be generated from this part's MP4."
-                    )
                 else:
                     report.append("HELD: exact ToonZone cover missing; fallback disabled.")
                     record_error("toonzone_cover", "cover_missing",
@@ -1879,6 +1866,19 @@ def publish():
                              route=item["route"], platform="instagram", video=item["name"], error=exc)
                 save(STATE, state)
             continue
+        if item["route"] == "toonzone" and (
+                item.get("generate_toonzone_cover") or not item.get("cover_id")):
+            # Also reject a stale or forged archived plan. Do not treat the
+            # synthetic fallback's presence as permission to upload.
+            failures.append("ToonZone: exact original Drive cover required")
+            for platform in item["platforms"]:
+                entry = state["entries"].get(f"toonzone:{platform}:{item['id']}")
+                if isinstance(entry, dict) and entry.get("status") == "intent":
+                    entry["status"] = "ready"
+                    entry["failure"] = {"reason": "exact_owner_cover_required",
+                                        "safe_to_repost": True}
+            save(STATE, state)
+            continue
         with tempfile.TemporaryDirectory() as tmp:
             temp = Path(tmp)
             source_fingerprint = None
@@ -1916,24 +1916,17 @@ def publish():
                 save(ROOT / "subtitles" / item["route"] / item["id"] / "receipt.json", subtitle_receipt)
                 if item.get("cover_id"):
                     cover = download(item["cover_id"], temp / "cover.png")
+                    if item["route"] == "toonzone":
+                        # Validate actual original PNG bytes, not just Drive
+                        # filename/ID, before sending any bytes to Meta.
+                        from toonzone_cover_acceptance import png_identity
+                        png_identity(cover)
                     video = create_instagram_cover_video(
                         video, cover, temp / "covered.mp4",
                         preserve_full_cover=(item["route"] == "toonzone"),
                     )
                 elif item.get("generate_toonzone_cover"):
-                    if item["route"] != "toonzone":
-                        raise RuntimeError("Otomatik kapak sadece ToonZone için kullanılabilir")
-                    # The generated image and exact MP4 part share their name.
-                    # Fail BEFORE uploading to Meta if extraction/validation
-                    # fails; never publish without its intended cover.
-                    cover = generate_part_cover(
-                        video, item["name"],
-                        ROOT / "generated_toonzone_covers" / (Path(item["name"]).stem + ".png"),
-                    )
-                    video = create_instagram_cover_video(
-                        video, cover, temp / "covered.mp4",
-                        preserve_full_cover=(item["route"] == "toonzone"),
-                    )
+                    raise RuntimeError("toonzone_synthetic_cover_forbidden")
             except Exception as exc:
                 failures.append(item["page"] + ": " + type(exc).__name__ + ": " + _sanitize_meta_text(str(exc))[:400])
                 for platform in item["platforms"]:

@@ -77,8 +77,9 @@ jobs:
       ENABLE_FILM_ROUTES: ${{ vars.ENABLE_FILM_ROUTES }}
       FILM_RIGHTS_APPROVED: ${{ vars.FILM_RIGHTS_APPROVED }}
       ENABLE_TOONZONE_ROUTES: ${{ vars.ENABLE_TOONZONE_ROUTES }}
-      # Default enabled for rights-approved ToonZone; can be set to false.
-      TOONZONE_AUTO_COVER_ENABLED: ${{ vars.TOONZONE_AUTO_COVER_ENABLED || 'true' }}
+      # Historical env kept for compatibility; owner-approved original PNG
+      # is mandatory regardless of this value. Synthetic fallback is disabled.
+      TOONZONE_AUTO_COVER_ENABLED: 'false'
       # Owner explicitly requested today's catch-up before the evening check.
       # Subsequent dates automatically return to the existing per-route times.
       COMPLETE_DAY_DATE: '2026-11-02'
@@ -107,7 +108,9 @@ jobs:
       - name: Install media runtime only after Meta preflight passed
         timeout-minutes: 5
         run: |
-          pip install gdown==6.4.2
+          # The ToonZone original-PNG and first-frame gates require Pillow.
+          pip install gdown==6.4.2 pillow==13.0.0
+          python -c "from PIL import Image; print('ToonZone PNG decoder ready')"
           if ! command -v ffmpeg >/dev/null || ! command -v ffprobe >/dev/null; then
             # Reuse the bounded official-mirror setup from the ToonZone jobs.
             # A slow Azure mirror must not consume every pre-publication slot.
