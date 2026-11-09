@@ -36,3 +36,9 @@ then verify the fan-in only produces a read-only combined legacy receipt.
 
 After fixing the production/offline-test environment boundary, repeat a one-time
 read-only scoped worker acceptance. This commit is not a publishing release.
+
+## 9 November evening ToonZone missing-original audit
+
+Read-only post-PR #226 audit: print the exact next blocked ToonZone MP4
+filename and required same-stem original PNG. Do not publish, generate substitute
+artwork, delete old posts, mutate owner Drive files or send phone alerts.
