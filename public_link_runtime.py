@@ -594,15 +594,24 @@ def copies(route, item, files, temp, use_txt=True):
         raise RuntimeError(f"Eşleşen TXT bulunamadı: {route}/{item['name']}")
     if text and not raw and route != "toonzone":
         raise RuntimeError(f"Eşleşen TXT boş: {route}/{item['name']}")
-    if raw:
+    if route == "toonzone":
+        # Enforce a canonical Turkish title AND the exact episode/part marker.
+        # Historical Drive TXT or a stale generated TXT must never silently
+        # replace the source-derived copy with a wrong episode title.
+        # This is strictly a future-publish safety check; old IDs/intents
+        # retain their archived captions and are never edited or re-posted.
+        canonical = toonzone_txt_text(stem)
+        fb = ig = canonical
+        if text:
+            origin = ("validated-toonzone-txt" if raw == canonical
+                      else "corrected-toonzone-txt")
+        else:
+            origin = "generated-toonzone-txt"
+    elif raw:
         # Preserve actual source copy and remove only a recognized standalone
         # comment-count UI line. UI-only sources remain blocked before intent.
         raw = clean_caption_ui(raw)
         _, _, fb, ig, _ = platform_content_from_txt(raw, stem, route.removesuffix("_second"))
-    elif route == "toonzone":
-        generated = ROOT / "toonzone_txt" / (stem + ".txt")
-        fb = ig = generated.read_text(encoding="utf-8").strip() if generated.exists() else toonzone_txt_text(stem)
-        origin = "generated-toonzone-txt"
     else:
         # Other routes must never upload with generic filename-only captions.
         raise RuntimeError(f"Eşleşen TXT gerekli: {route}/{item['name']}")
