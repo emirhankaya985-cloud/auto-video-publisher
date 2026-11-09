@@ -153,6 +153,9 @@ jobs:
           # The pre-existing regression suite covers all routes; run it without
           # the production worker's single-account filter.
           PUBLISH_ACCOUNT_SCOPE: ''
+          # Production's one-page preflight receipt must not change the legacy
+          # all-route offline test fixtures or trigger mock identity holds.
+          META_PREFLIGHT_PARTIAL_OK: 'false'
           MEDIA_QUALITY_ENABLED: 'false'
           ADVANCED_DEDUPE_ENABLED: 'false'
           AUTO_SUBTITLES_ENABLED: 'false'
