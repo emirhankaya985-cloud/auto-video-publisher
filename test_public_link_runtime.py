@@ -511,15 +511,46 @@ class LinkRuntimeSafety(unittest.TestCase):
         self.assertEqual(runtime.caption_key("A  video\nEtsy: https://www.etsy.com/shop/x"), runtime.caption_key("A video"))
         self.assertNotEqual(runtime.caption_key("Part 2"), runtime.caption_key("Part 3"))
 
-    def test_matching_toonzone_txt_is_read_instead_of_fallback(self):
+    def test_toonzone_stale_drive_txt_cannot_override_correct_title_and_part(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             text = root / "caption.txt"
-            text.write_text("Actual Drive text", encoding="utf-8")
+            text.write_text("Wrong episode title\\nSezon 1 Bölüm 9 Part 4/4", encoding="utf-8")
+            item = {"name": "S01E04_Death_Punchies_Part1.mp4"}
             with patch.object(runtime, "download", return_value=text):
-                result, origin = runtime.copies("toonzone", {"name": "episode.mp4"}, {"episode.txt": {"id": "txt"}}, root)
-            self.assertEqual(origin, "matching-txt")
-            self.assertEqual(result["instagram"], "IG from TXT")
+                result, origin = runtime.copies(
+                    "toonzone", item,
+                    {"S01E04_Death_Punchies_Part1.txt": {"id": "txt"}}, root)
+            self.assertEqual(origin, "corrected-toonzone-txt")
+            self.assertIn("Death Punchies", result["facebook"].splitlines()[0])
+            self.assertIn("Sezon 1 • Bölüm 4 • Part 1/4", result["facebook"])
+            self.assertNotIn("Wrong episode title", result["instagram"])
+            self.assertNotIn("Bölüm 9", result["facebook"])
+            self.assertNotIn("IG from TXT", result["instagram"])
+
+    def test_toonzone_matching_drive_txt_remains_validated(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            name = "S01E05_Free_Cake_Part2.mp4"
+            canonical = runtime.toonzone_txt_text(Path(name).stem)
+            text = root / "caption.txt"
+            text.write_text(canonical, encoding="utf-8")
+            with patch.object(runtime, "download", return_value=text):
+                captions, origin = runtime.copies(
+                    "toonzone", {"name": name}, {Path(name).stem + ".txt": {"id": "txt"}}, root)
+            self.assertEqual(origin, "validated-toonzone-txt")
+            self.assertEqual(captions["facebook"], canonical)
+            self.assertIn("Sezon 1 • Bölüm 5 • Part 2/4", captions["instagram"])
+
+    def test_toonzone_invalid_filename_fails_closed_even_with_txt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            text = root / "caption.txt"
+            text.write_text("Wrong title", encoding="utf-8")
+            with patch.object(runtime, "download", return_value=text):
+                with self.assertRaises(ValueError):
+                    runtime.copies("toonzone", {"name": "episode.mp4"},
+                                   {"episode.txt": {"id": "txt"}}, root)
 
     def test_missing_txt_blocks_ordinary_routes(self):
         with tempfile.TemporaryDirectory() as tmp:
