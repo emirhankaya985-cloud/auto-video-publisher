@@ -53,6 +53,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: toonzone-current-ig-thumbnail-readonly
-          path: toonzone-current-ig-thumbnails/result.json
+          path: toonzone-current-ig-thumbnails/
+          # Includes labeled, resized PNG-vs-live-image evidence, never secrets.
           if-no-files-found: error
           retention-days: 90
