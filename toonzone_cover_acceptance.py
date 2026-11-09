@@ -47,6 +47,45 @@ def png_identity(path: Path):
             "sha256": digest}
 
 
+def verify_prepared_instagram_first_frame(cover_path, video_path, *, runner=None):
+    """Fail before any Meta POST if a future ToonZone Reel loses its exact cover.
+
+    Instagram's API selects a frame with thumb_offset=0. The actual transcoded
+    MP4 (not an intermediate cover overlay) must start with this part's PNG.
+    We never modify the source or published media.
+    """
+    import subprocess
+    from PIL import ImageOps, ImageChops, ImageStat
+
+    cover_path, video_path = Path(cover_path), Path(video_path)
+    if not cover_path.is_file() or not video_path.is_file():
+        raise RuntimeError("toonzone_preupload_source_or_cover_missing")
+    runner = runner or subprocess.run
+    with TemporaryDirectory(prefix="toonzone-reel-thumbnail-gate-") as folder:
+        frame = Path(folder) / "first-frame.png"
+        try:
+            runner([
+                "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error",
+                "-y", "-i", str(video_path), "-frames:v", "1", str(frame),
+            ], check=True, capture_output=True, timeout=90)
+            with Image.open(cover_path) as original, Image.open(frame) as observed:
+                if original.format != "PNG" or observed.width < 320 or observed.height < 320:
+                    raise ValueError("toonzone_cover_or_frame_invalid")
+                reference = ImageOps.pad(original.convert("RGB"), observed.size, color=(0, 0, 0))
+                resized = observed.convert("RGB")
+                delta = ImageChops.difference(reference.resize((90, 160)),
+                                              resized.resize((90, 160)))
+                distance = sum(ImageStat.Stat(delta).rms) / (3 * 255)
+                if distance > 0.12:
+                    raise ValueError("toonzone_transcoded_first_frame_not_original_cover")
+                return {"first_frame_matches_cover": True,
+                        "comparison_distance": round(distance, 6),
+                        "first_frame_width": observed.width,
+                        "first_frame_height": observed.height}
+        except (OSError, ValueError, subprocess.SubprocessError):
+            raise RuntimeError("toonzone_transcoded_first_frame_cover_held") from None
+
+
 def assess(catalog_files, covers, *, download):
     """One isolated validation per part, with no source or publishing writes."""
     catalog = ordered_catalog(catalog_files)
