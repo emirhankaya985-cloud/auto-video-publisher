@@ -17,6 +17,30 @@ SAFE_STATUSES = {
 }
 
 
+# Only stable, fixed categories. Raw OAuth/Google exceptions and URLs may
+# carry credential details and must NEVER be stored in CI artifacts or logs.
+SAFE_CONNECTION_FAILURE_KINDS = {
+    "RefreshError": "oauth_refresh_rejected",
+    "TransportError": "google_transport_failed",
+    "ConnectionError": "network_connection_failed",
+    "ConnectTimeout": "network_timeout",
+    "ReadTimeout": "network_timeout",
+    "Timeout": "network_timeout",
+    "SSLError": "network_tls_failed",
+    "HttpError": "google_api_exception",
+    "GoogleAuthError": "google_auth_failed",
+}
+
+
+def safe_failure_kind(evidence):
+    if not isinstance(evidence, dict):
+        return None
+    if evidence.get("status") != "authorization_or_connection_failed":
+        return None
+    name = evidence.get("error_type")
+    return SAFE_CONNECTION_FAILURE_KINDS.get(name, "other_authorization_or_transport_error")
+
+
 def probe_all(*, checker=check_channel):
     checked = []
     for route, (_, _title, expected_id) in TARGETS.items():
@@ -35,6 +59,9 @@ def probe_all(*, checker=check_channel):
             code = evidence.get("http_status")
             if type(code) is int and 400 <= code <= 599:
                 item["http_status"] = code
+            failure_kind = safe_failure_kind(evidence)
+            if failure_kind is not None:
+                item["failure_kind"] = failure_kind
             scope = evidence.get("upload_scope_in_file")
             if scope is True or scope is False:
                 item["upload_scope_in_file"] = scope
@@ -48,6 +75,11 @@ def probe_all(*, checker=check_channel):
     return {"status": "all_four_verified" if all(r["expected_channel_id_matched"]
              for r in checked) else "auth_or_identity_incomplete",
             "accounts_checked": len(checked), "accounts": checked,
+            "safe_failure_kind_counts": {
+                kind: sum(x.get("failure_kind") == kind for x in checked)
+                for kind in sorted({x["failure_kind"] for x in checked
+                                    if x.get("failure_kind")})
+            },
             "youtube_upload_requests": 0, "provider_writes": 0,
             "cannot_prove_insert_permission_without_a_real_upload": True}
 
