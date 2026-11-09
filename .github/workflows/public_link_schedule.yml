@@ -256,7 +256,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: link-caption-audit-${{ matrix.account_scope }}
-          path: link-runtime/report.md
+          path: |
+            link-runtime/report.md
+            link-runtime/toonzone-cover-gaps.json
           if-no-files-found: ignore
           retention-days: 30
       - name: Per-post Telegram and ntfy notification preparation (no sends)
@@ -336,6 +338,10 @@ jobs:
           path: link-runtime/errors.jsonl
           if-no-files-found: ignore
           retention-days: 90
+
+      - name: Fail closed if a due ToonZone video was skipped for missing original PNG
+        if: ${{ always() && matrix.account_scope == 'toonzone' && steps.release_gate.outputs.publish_allowed == 'true' && steps.plan.outcome == 'success' }}
+        run: python toonzone_cover_health_gate.py
 
       # YouTube failures are independently visible in youtube-accepted-audit
       # and the durable incident's youtube_prepare / youtube_publish outcomes.
