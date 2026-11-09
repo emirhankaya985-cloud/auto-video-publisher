@@ -47,6 +47,32 @@ def compare_thumbnail_geometry(original_png, live_thumbnail):
                 "live_dimensions": list(observed.size)}
 
 
+def save_cover_comparison(original_png, live_thumbnail, output, *, episode, part):
+    """Human-reviewable evidence only; does not alter source or Meta media.
+
+    Label the two actual images and preserve each full raster with padding,
+    rather than making a possibly misleading center-crop comparison.
+    """
+    from PIL import Image, ImageOps, ImageDraw
+    output = Path(output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    canvas = Image.new("RGB", (660, 635), (24, 29, 40))
+    draw = ImageDraw.Draw(canvas)
+    draw.text((16, 12), f"TOONZONE S01E{episode:02d} PART {part} - review only",
+              fill=(255, 255, 255))
+    for left, label, source in (
+        (12, "Exact Drive PNG", original_png),
+        (336, "Instagram live thumbnail", live_thumbnail),
+    ):
+        draw.text((left, 45), label, fill=(238, 240, 244))
+        with Image.open(source) as photo:
+            thumb = ImageOps.pad(photo.convert("RGB"), (312, 556),
+                                 color=(0, 0, 0))
+        canvas.paste(thumb, (left, 68))
+    canvas.save(output, format="JPEG", quality=88, optimize=True)
+    return output
+
+
 def select_current(catalog, ledger, live, covers):
     """Join only exact source/ID owned-list matches, never caption guessing."""
     if not isinstance(ledger, dict) or not isinstance(ledger.get("entries"), dict):
@@ -78,7 +104,8 @@ def select_current(catalog, ledger, live, covers):
             "not_in_live_list": archived - len(chosen), "entries": chosen}
 
 
-def audit(page, *, inventory, download, graph_rows, restore, thumbnail, cover_distance):
+def audit(page, *, inventory, download, graph_rows, restore, thumbnail,
+          cover_distance, evidence_dir=None):
     from public_link_runtime import FOLDERS
     catalog = inventory(FOLDERS["toonzone"])
     covers = inventory(FOLDERS["covers"])
@@ -117,6 +144,15 @@ def audit(page, *, inventory, download, graph_rows, restore, thumbnail, cover_di
                                   status=("matching_original_cover"
                                           if best <= THUMBNAIL_DISTANCE_MAX
                                           else "live_thumbnail_differs_from_drive_cover"))
+                    if evidence_dir is not None:
+                        # This is offline/read-only and keeps raw Meta tokens
+                        # out of the artifact. Do not alter provider media.
+                        visual = save_cover_comparison(
+                            cover, observed,
+                            Path(evidence_dir) / (
+                                f"S01E{item['episode']:02d}-Part{item['part']}-comparison.jpg"
+                            ), episode=item["episode"], part=item["part"])
+                        result["comparison_preview"] = visual.name
                 except (OSError, ValueError, RuntimeError, TypeError, KeyError):
                     result["reason"] = "remote_thumbnail_or_cover_read_failed"
             results.append(result)
@@ -152,7 +188,8 @@ def main():
             raise ValueError("wrong_toonzone_instagram_identity")
         result = audit(page, inventory=inventory, download=download,
                        graph_rows=graph_rows, restore=restore,
-                       thumbnail=thumbnail, cover_distance=cover_distance)
+                       thumbnail=thumbnail, cover_distance=cover_distance,
+                       evidence_dir=ROOT / "evidence")
     except Exception as exc:
         result = {"status": "held_thumbnail_audit_unavailable",
                   "failure_class": type(exc).__name__, "no_meta_writes": True}
