@@ -345,13 +345,14 @@ jobs:
           pattern: link-state-*
           path: link-runtime/account-artifacts
           merge-multiple: false
-      - name: Verify account isolation before any shared read-only summary
-        run: python -m unittest -v test_isolated_accounts.py
-      - name: Merge only matching-account state without overwriting sibling status
+      - name: Install pinned, no-publish reconciliation dependencies
         run: |
           python -m pip install --require-hashes -r requirements.txt
           python -m pip install gdown==6.4.2
-          python merge_account_states.py
+      - name: Verify account isolation before any shared read-only summary
+        run: python -m unittest -v test_isolated_accounts.py
+      - name: Merge only matching-account state without overwriting sibling status
+        run: python merge_account_states.py
       - name: Preserve legacy read-only state for status tools
         uses: actions/upload-artifact@v4
         with:
