@@ -89,7 +89,7 @@ class AccountIsolationTests(unittest.TestCase):
         with patch.dict(os.environ, {"ACCOUNT_ROUTE": "film"}), \
              patch.object(runtime, "github_get", side_effect=fake_get):
             self.assertEqual(runtime.restore(), state)
-        self.assertFalse(any("name=link-state-result&" in p for p in calls))
+        self.assertFalse(any(p.endswith("name=link-state-result") for p in calls))
 
     def test_expired_account_evidence_never_reverts_to_global(self):
         calls = []
@@ -113,7 +113,7 @@ class AccountIsolationTests(unittest.TestCase):
             "route": "film", "status": "uncertain"}}, "episode_days": {}}
         def fake_get(path):
             if path.startswith("actions/artifacts?"):
-                if "name=link-state-result&" in path:
+                if path.endswith("name=link-state-result"):
                     return Mock(json=lambda: {"artifacts": [{
                         "id": 25, "name": "link-state-result", "expired": False,
                         "workflow_run": {"id": 200}}]})
