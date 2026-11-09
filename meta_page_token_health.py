@@ -123,7 +123,7 @@ def audit(auth, get=requests.get):
         if name not in expected:
             continue
         pid = str(page.get("page_id") or "")
-        if len(id_names.get(pid, set())) > 1:
+        if scope and len(id_names.get(pid, set())) > 1:
             rows.append({"page_name": name, "status": "blocked",
                          "reason": "shared_page_id_conflict", "publishing_tested": False})
             names.add(name)
