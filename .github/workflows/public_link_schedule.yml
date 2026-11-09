@@ -44,6 +44,9 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+      # A failed Film identity holds only Film. Every publishing route still
+      # requires its own verified Page identity; no token/rights bypass.
+      META_PREFLIGHT_PARTIAL_OK: 'true'
       MEDIA_QUALITY_ENABLED: ${{ vars.MEDIA_QUALITY_ENABLED != 'false' && 'true' || 'false' }}
       # Owner-requested rollout after offline and real FFmpeg acceptance.
       ADVANCED_DEDUPE_ENABLED: ${{ vars.ADVANCED_DEDUPE_ENABLED != 'false' && 'true' || 'false' }}
