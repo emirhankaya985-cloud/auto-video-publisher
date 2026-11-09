@@ -181,8 +181,8 @@ class OwnerCatchupGateTests(unittest.TestCase):
                 event, ref, subject, paths, today="2026-11-09", run_attempt="1"))
         workflow = (Path(__file__).parent / ".github/workflows/public_link_schedule.yml").read_text()
         self.assertIn(NOV9_CATCHUP_MARKER, workflow)
-        self.assertIn("COMPLETE_DAY_DATE: ${{ github.event_name == 'push'", workflow)
-        self.assertIn("CATCHUP_BATCH_DATE: ${{ github.event_name == 'push'", workflow)
+        self.assertIn("COMPLETE_DAY_DATE: "${{ github.event_name == 'push'", workflow)
+        self.assertIn("CATCHUP_BATCH_DATE: "${{ github.event_name == 'push'", workflow)
         self.assertIn("Persist intent before any Meta upload", workflow)
         self.assertIn("FILM_RIGHTS_APPROVED: ${{ vars.FILM_RIGHTS_APPROVED }}", workflow)
         with tempfile.TemporaryDirectory() as tmp, \
