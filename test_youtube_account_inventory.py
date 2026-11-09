@@ -49,6 +49,40 @@ class YouTubeInventorySafetyTests(unittest.TestCase):
         self.assertNotIn("SECRET_TOKEN", json.dumps(outcome))
         self.assertNotIn("private.invalid", json.dumps(outcome))
 
+    def test_four_live_auth_failures_distinguish_refresh_from_network_safely(self):
+        results = {
+            "channel1": {"status": "authorization_or_connection_failed",
+                         "error_type": "RefreshError", "unsafe": "PRIVATE_SECRET"},
+            "channel2": {"status": "authorization_or_connection_failed",
+                         "error_type": "ReadTimeout"},
+            "daily_laugh": {"status": "authorization_or_connection_failed",
+                            "error_type": "RefreshError"},
+            "gonle_dusen": {"status": "authorization_or_connection_failed",
+                            "error_type": "SECRET_PRIVATE_EXCEPTION"},
+        }
+        report = probe_all(checker=lambda target: results[target])
+        self.assertEqual(report["status"], "auth_or_identity_incomplete")
+        self.assertEqual(report["accounts_checked"], 4)
+        self.assertEqual(report["safe_failure_kind_counts"], {
+            "network_timeout": 1,
+            "oauth_refresh_rejected": 2,
+            "other_authorization_or_transport_error": 1,
+        })
+        self.assertFalse(any(x["expected_channel_id_matched"] for x in report["accounts"]))
+        self.assertEqual(report["youtube_upload_requests"], 0)
+        self.assertEqual(report["provider_writes"], 0)
+        self.assertNotIn("PRIVATE", json.dumps(report))
+        self.assertNotIn("ReadTimeout", json.dumps(report))
+
+    def test_success_does_not_invent_a_failure_kind(self):
+        report = probe_all(checker=lambda target: {
+            "status": "verified", "channel_id": TARGETS[target][2],
+            "error_type": "RefreshError",
+        })
+        self.assertEqual(report["status"], "all_four_verified")
+        self.assertEqual(report["safe_failure_kind_counts"], {})
+        self.assertTrue(all("failure_kind" not in x for x in report["accounts"]))
+
     def test_partial_or_invalid_result_never_masquerades_as_success(self):
         checker = Mock(return_value={})
         outcome = probe_all(checker=checker)
