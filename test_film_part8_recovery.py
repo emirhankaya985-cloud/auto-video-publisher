@@ -113,6 +113,8 @@ class FilmPart8RecoveryTests(unittest.TestCase):
         with patch.object(gate, "datetime") as clock:
             clock.now.return_value = datetime(2026, 11, 10, 12, tzinfo=timezone.utc)
             self.assertEqual(gate.determine_mode(*args), "publish")
+            clock.now.return_value = datetime(2026, 11, 11, 12, tzinfo=timezone.utc)
+            self.assertEqual(gate.determine_mode(*args), "audit")
         self.assertEqual(gate.determine_mode(
             "push","refs/heads/main",gate.FILM_PART8_SUBJECT,()),"audit")
 
