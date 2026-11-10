@@ -118,6 +118,99 @@ class RelaunchSafetyTests(unittest.TestCase):
             writer.assert_not_called()
             self.assertEqual(ig["status"], "attempted")
 
+    def test_replacement_guard_requires_age_exact_original_and_owner_marker(self):
+        item, ledger, ig = self.recovery_ledger()
+        ig["status"] = "attempted"
+        marker = rel.RECOVERY_REPLACEMENT_MARKER
+        now = datetime(2026, 11, 10, 20, tzinfo=timezone.utc)
+        self.assertTrue(rel.replacement_allowed(item, ig, "IN_PROGRESS",
+                                                now=now, marker_text=marker))
+        self.assertFalse(rel.replacement_allowed(item, ig, "IN_PROGRESS",
+            now=datetime(2026, 11, 10, 19, tzinfo=timezone.utc), marker_text=marker))
+        self.assertFalse(rel.replacement_allowed(item, ig, "FINISHED", now=now, marker_text=marker))
+        self.assertFalse(rel.replacement_allowed(item, ig, "IN_PROGRESS", now=now, marker_text=""))
+        for field, value in (("replacement_run_id", "old"), ("post_id", "123")):
+            changed = dict(ig, **{field: value})
+            self.assertFalse(rel.replacement_allowed(item, changed, "IN_PROGRESS",
+                now=now, marker_text=marker))
+        ig["status"] = "replacement_upload_attempted"
+        self.assertFalse(rel.replacement_allowed(item, ig, "IN_PROGRESS",
+            now=now, marker_text=marker))
+
+    def replacement_case(self):
+        item, ledger, ig = self.recovery_ledger()
+        ig.update(status="replacement_reserved", replacement_run_id="500",
+                  replacement_original_container_id=rel.RECOVERY_CONTAINER)
+        plan = {"mode": "replace_stalled_container", "platforms": ["instagram"],
+                "text": "exact caption", "cover_id": rel.RECOVERY_COVER,
+                "source_sha256": rel.RECOVERY_SOURCE_SHA,
+                "cover_sha256": rel.RECOVERY_COVER_SHA}
+        def rows(page, platform):
+            return ([{"id": rel.RECOVERY_FB_ID, "description": "exact caption"}]
+                    if platform == "facebook" else [])
+        def digest(p):
+            return (rel.RECOVERY_SOURCE_SHA if p.name == "source.mp4"
+                    else rel.RECOVERY_COVER_SHA)
+        dependencies = {
+            "rows_fn": rows, "status_fn": Mock(return_value="IN_PROGRESS"),
+            "source_fn": lambda _id, p: p,
+            "cover_fn": lambda _id, p: p,
+            "cover_video_fn": lambda src, cover, p, **kw: p,
+            "prepare_fn": lambda inp, out, **kw: out,
+            "cover_check_fn": Mock(return_value=True), "png_check_fn": Mock(),
+            "digest_fn": digest, "verifier": Mock(return_value=True)
+        }
+        return item, ledger, ig, plan, dependencies
+
+    def test_replacement_upload_once_only_after_persisted_intent(self):
+        item, ledger, ig, plan, dependencies = self.replacement_case()
+        snapshots = []
+        def uploader(page, video_path, caption, **kw):
+            self.assertEqual(ig["status"], "replacement_upload_attempted")
+            self.assertEqual(snapshots[-1]["records"][rel.record_key(item, "instagram")]["status"],
+                             "replacement_upload_attempted")
+            self.assertEqual(kw["forbidden_container_ids"], {rel.RECOVERY_CONTAINER})
+            self.assertFalse(kw["append_store_link"])
+            self.assertEqual(kw["thumb_offset"], 0)
+            return "18012345678998765"
+        dependencies["uploader"] = Mock(side_effect=uploader)
+        with patch.object(rel.history, "save",
+                          side_effect=lambda p, data: snapshots.append(copy.deepcopy(data))), \
+             patch.object(rel.history, "now_utc",
+                          return_value=datetime(2026, 11, 10, 20, tzinfo=timezone.utc)):
+            rel.finish_stalled_replacement({"page_id": "1298191963387372"}, item,
+                plan, ledger, "500", **dependencies)
+        dependencies["uploader"].assert_called_once()
+        self.assertEqual(ig["status"], "verified")
+        self.assertEqual(ig["post_id"], "18012345678998765")
+        self.assertEqual(ig["replacement_run_id"], "500")
+
+    def test_replacement_cancelled_if_old_container_finished_no_upload(self):
+        item, ledger, ig, plan, dependencies = self.replacement_case()
+        dependencies["status_fn"] = Mock(return_value="FINISHED")
+        dependencies["uploader"] = Mock()
+        with patch.object(rel.history, "save", Mock()):
+            rel.finish_stalled_replacement({"page_id": "1298191963387372"}, item,
+                plan, ledger, "500", **dependencies)
+        dependencies["uploader"].assert_not_called()
+        self.assertEqual(ig["status"], "attempted")
+
+    def test_replacement_ambiguous_failure_never_gets_second_write(self):
+        item, ledger, ig, plan, dependencies = self.replacement_case()
+        class Rejected(Exception):
+            container_id = "17922222222222222"
+        dependencies["uploader"] = Mock(side_effect=Rejected())
+        with patch.object(rel.history, "save", Mock()):
+            with self.assertRaisesRegex(RuntimeError, "no_automatic_retry"):
+                rel.finish_stalled_replacement({"page_id": "1298191963387372"}, item,
+                    plan, ledger, "500", **dependencies)
+        self.assertEqual(ig["status"], "replacement_failed_held")
+        self.assertEqual(ig["replacement_container_id"], "17922222222222222")
+        self.assertFalse(rel.replacement_allowed(item, ig, "IN_PROGRESS",
+            now=datetime(2026, 11, 10, 21, tzinfo=timezone.utc),
+            marker_text=rel.RECOVERY_REPLACEMENT_MARKER))
+        dependencies["uploader"].assert_called_once()
+
     def test_duplicate_caption_holds_even_if_previous_id_absent(self):
         with self.assertRaises(RuntimeError):
             rel.validate_remote([{"id": "101", "caption": "x"}], "x", None)

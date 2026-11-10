@@ -27,3 +27,9 @@ Owner delegated the ToonZone recovery to the assistant. The original Instagram c
 ## 10 November 22:14 TRT — owner follow-up
 
 Owner said the ToonZone relaunch remains delegated to the assistant. Request one immediate *guarded* live check of the original S01E06 Part2 Instagram container; never reupload, and never publish when the container is IN_PROGRESS/ERROR/EXPIRED. A genuinely FINISHED old container can be resumed only once with an archived before-publish intent. This trigger does not authorize modifying other accounts or removing posts.
+
+## 10 November: stuck Instagram binary upload one-shot repair (owner instruction)
+
+ToonZone S01E06 Part2: one replacement of stalled original IG container authorized.
+
+The owner asked the assistant to fix the blocked publishing workflow. Exact origin: S01E06 Part2 source 1iSkWsT2kUzUGxM8g-GuvdxzY_0Bgezjq and original PNG 1ZoabUuyA9NvlpjkFT3YZYf_G54r8rD9-, source/cover SHA256 fixed in code. Run 42873941861 uploaded the old binary to container 17912149164580142; it got HTTP 400 and never called media_publish. Several subsequent isolated checks verified the container remained IN_PROGRESS without a published Instagram media ID; Facebook post 1483886187013259 was independently verified. If the original container is still IN_PROGRESS after 60 minutes, no original post is present on a complete live read, source hashes and account identity match and an archived new intent exists, allow ONE replacement IG upload with the exact original cover and video. Never resend the original container, never reupload Facebook, never repeat an ambiguous replacement, never proceed past Part2 until Instagram has a verified media ID. If original container switches to FINISHED, cancel replacement and use existing-container recovery. All unrelated accounts and historical posts remain unchanged.
