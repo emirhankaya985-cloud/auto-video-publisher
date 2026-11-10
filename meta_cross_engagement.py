@@ -571,7 +571,7 @@ def failed_before_source_state(run_id):
     candidates = [j for j in jobs
                   if j.get("name") == "meta" or
                   (isinstance(j.get("name"), str) and
-                   re.fullmatch(r"meta \\((?:film|film_second|toonzone|tarladaki|penguen|gonle|daily_laugh)\\)",
+                   re.fullmatch(r"meta \((?:film|film_second|toonzone|tarladaki|penguen|gonle|daily_laugh)\)",
                                 j["name"]))]
     if len(candidates) != 1:
         return False
