@@ -95,5 +95,50 @@ class FilmPart8RecoveryTests(unittest.TestCase):
             "push","refs/heads/main",gate.FILM_PART8_SUBJECT,()),"audit")
 
 
+
+    def test_known_20261110_preupload_crash_repairs_only_exact_intents(self):
+        state = {"entries": {}}
+        for platform in ("facebook", "instagram"):
+            state["entries"][f"film:{platform}:{fix.SOURCE_ID}"] = {
+                "route": "film", "platform": platform, "file": fix.SOURCE_NAME,
+                "status": "intent", "run_id": "42805359391",
+                "source_sha256": fix.SOURCE_SHA}
+        state["entries"]["film:facebook:other"] = {
+            "route":"film","platform":"facebook","file":"Bickin_Part_9.mp4",
+            "status":"intent","run_id":"42805359391"}
+        self.assertEqual(fix.reconcile_known_preupload_crash(state), 2)
+        self.assertEqual(fix.reconcile_known_preupload_crash(state), 0)
+        for platform in ("facebook", "instagram"):
+            row = state["entries"][f"film:{platform}:{fix.SOURCE_ID}"]
+            self.assertEqual(row["status"], "held")
+            self.assertIs(row["failure"]["external_post_attempted"], False)
+            self.assertIs(row["failure"]["safe_to_repost"], False)
+        self.assertEqual(state["entries"]["film:facebook:other"]["status"], "intent")
+
+    def test_identical_whole_audio_blocks_even_if_visual_samples_seem_distinct(self):
+        import tempfile
+        import json
+        from pathlib import Path
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as folder:
+            target = Path(folder) / "comparison.json"
+            item = {"route": "film", "platforms": ["facebook"],
+                    "id": fix.SOURCE_ID, "name": fix.SOURCE_NAME}
+            with patch.object(fix, "source_digest", side_effect=[fix.SOURCE_SHA, fix.OLDER_PART3_SHA]), \
+                 patch.object(fix, "visual_fingerprint", return_value={"version": 1}), \
+                 patch.object(fix, "allowed_visual_collisions", return_value=True), \
+                 patch.object(fix, "clearly_distinct_sources", return_value={
+                     "schema": 1, "distinct": True, "substantially_different_samples": 6}), \
+                 patch.object(fix, "pcm_audio_digest", return_value="same-audio"):
+                with self.assertRaisesRegex(RuntimeError, "source_is_prior_part_duplicate"):
+                    fix.audit_part8_before_publish(
+                        item, {"entries": {}}, Path(folder) / "8.mp4",
+                        lambda _id, output: output, folder,
+                        evidence_path=target)
+            proof = json.loads(target.read_text())
+            self.assertTrue(proof["complete_decoded_audio_identical"])
+            self.assertFalse(proof["distinct"])
+            self.assertFalse(proof["published_by_this_audit"])
+
 if __name__ == "__main__":
     unittest.main()
