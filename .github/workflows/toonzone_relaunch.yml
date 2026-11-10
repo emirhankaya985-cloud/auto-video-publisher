@@ -14,9 +14,12 @@ on:
       # Fixing original-ID visibility also triggers one guarded run on main.
       - toonzone_relaunch.py
   schedule:
-    # One part per run, only after both account receipts reconcile.
-    # Istanbul UTC+3. Other account schedules and likes are untouched.
-    - cron: '7,37 9-20 * * *'
+    # One part per run, only after BOTH original provider receipts reconcile.
+    # Run around the clock at 30-minute intervals to complete the previously
+    # owner-approved Season 1 catch-up without an 11-hour overnight blackout.
+    # A failed, ambiguous or rejected Meta POST still blocks the next part.
+    # Other account schedules, cover gates and likes remain untouched.
+    - cron: '7,37 * * * *'
     # TEMPORARY owner-requested overnight Season 1 finishing window:
     # Nov 11, 2026 00:02–07:47 Türkiye (UTC+3). 15-minute opportunities,
     # never overlapping one-part-at-a-time guarded Meta POSTs.
