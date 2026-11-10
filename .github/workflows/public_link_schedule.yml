@@ -14,6 +14,7 @@ on:
       - 'docs/owner-authorized-catchup-2026-11-02.md'
       - 'docs/owner-authorized-catchup-2026-11-07.md'
       - 'docs/owner-authorized-catchup-2026-11-09.md'
+      - 'docs/owner-authorized-film-part8-2026-11-10.md'
   schedule:
     # Run a worker only near that account's actual due slots, not seven
     # expensive GitHub runners every half-hour (owner: zero-cost operation).
@@ -48,6 +49,7 @@ jobs:
         # Scheduled ticks instantiate ONLY route workers for that cron.
         account_scope: >-
           ${{ fromJSON(
+            github.event_name == 'push' && github.event.head_commit.message == 'ops: authorized-once-film-bickin8-2026-11-10' && '["film"]' ||
             github.event_name != 'schedule' && '["tarladaki","penguen","gonle","daily_laugh","film","film_second","toonzone"]' ||
             github.event.schedule == '7 6,9,12,15,18 * * *' && '["tarladaki"]' ||
             github.event.schedule == '37 6,9,12,15,18 * * *' && '["penguen","gonle"]' ||
@@ -72,7 +74,10 @@ jobs:
       META_PREFLIGHT_PARTIAL_OK: 'true'
       MEDIA_QUALITY_ENABLED: ${{ vars.MEDIA_QUALITY_ENABLED != 'false' && 'true' || 'false' }}
       # Owner-requested rollout after offline and real FFmpeg acceptance.
-      ADVANCED_DEDUPE_ENABLED: ${{ vars.ADVANCED_DEDUPE_ENABLED != 'false' && 'true' || 'false' }}
+      ADVANCED_DEDUPE_ENABLED: ${{ (github.event_name == 'push' && github.event.head_commit.message == 'ops: authorized-once-film-bickin8-2026-11-10') || vars.ADVANCED_DEDUPE_ENABLED != 'false' && 'true' || 'false' }}
+      # Only the owner-requested exact new marker runs the strict source
+      # disambiguation. Normal scheduled jobs never rearm old held intents.
+      FILM_PART8_STRICT_RECHECK_ENABLED: ${{ github.event_name == 'push' && github.event.head_commit.message == 'ops: authorized-once-film-bickin8-2026-11-10' && 'true' || 'false' }}
       AUTO_SUBTITLES_ENABLED: ${{ vars.AUTO_SUBTITLES_ENABLED == 'true' && 'true' || 'false' }}
       SUBTITLE_MODEL_DIR: ${{ github.workspace }}/speech-model
       ADAPTIVE_SCHEDULE_ENABLED: ${{ vars.ADAPTIVE_SCHEDULE_ENABLED != 'false' && 'true' || 'false' }}
