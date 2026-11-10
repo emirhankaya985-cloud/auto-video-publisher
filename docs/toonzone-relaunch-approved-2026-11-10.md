@@ -15,3 +15,7 @@ Owner explicitly requested immediate publication of S01E04 Part2, Part3, and Par
 ## Part 3 immediately after Part 2 provider ACK
 
 Run 42815751138 published S01E04 Part2: Instagram verified new media ID 18132810077306461; Facebook provider accepted video ID 1134600695974298 but edge visibility required. Owner authorized Part3 next. Trigger a new guarded relaunch attempt now. Do not POST Part3 until the Part2 Facebook ID is verified with the intended live source/caption. Do not replay Part2 or change the existing ledger.
+
+## Part 4 automatic queued follow-up after Part 3
+
+Owner requested all remaining S01E04 parts right now. Queue the next run for Part 4, but its planning step must first reconcile Part 3 Facebook and Instagram provider receipts from the current live run. Never run two POSTs for one part. If any prior part has unresolved or accepted-but-not-verified status, hold Part 4 before any upload. Do not delete old posts.
