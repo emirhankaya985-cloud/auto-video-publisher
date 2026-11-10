@@ -107,7 +107,14 @@ class FilmPart8RecoveryTests(unittest.TestCase):
         self.assertTrue(gate.is_film_part8_once(*args,today="2026-11-10",run_attempt="1"))
         self.assertFalse(gate.is_film_part8_once(*args,today="2026-11-11",run_attempt="1"))
         self.assertFalse(gate.is_film_part8_once(*args,today="2026-11-10",run_attempt="2"))
-        self.assertEqual(gate.determine_mode(*args),"publish")
+        # Historical one-shot grants are valid only on their original day.
+        # Test that day's decision with a fixed clock, never today's date.
+        from datetime import datetime, timezone
+        with patch.object(gate, "datetime") as clock:
+            clock.now.return_value = datetime(2026, 11, 10, 12, tzinfo=timezone.utc)
+            self.assertEqual(gate.determine_mode(*args), "publish")
+            clock.now.return_value = datetime(2026, 11, 11, 12, tzinfo=timezone.utc)
+            self.assertEqual(gate.determine_mode(*args), "audit")
         self.assertEqual(gate.determine_mode(
             "push","refs/heads/main",gate.FILM_PART8_SUBJECT,()),"audit")
 
