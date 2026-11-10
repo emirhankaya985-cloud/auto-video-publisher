@@ -41,7 +41,12 @@ permissions:
 
 jobs:
   meta:
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push' || vars.LINK_AUTOMATION_ENABLED == 'true'
+    # ToonZone S01E04+ relaunch is held while the owner deletes old posts.
+    # Keep every other route running. The independent Meta like workflow is untouched.
+    # A fresh, separately reviewed release is required after remote cleanup proof.
+    if: >-
+      (github.event_name == 'workflow_dispatch' || github.event_name == 'push' || vars.LINK_AUTOMATION_ENABLED == 'true') &&
+      (github.event_name != 'schedule' || github.event.schedule != '7,17,27,37 9 * * *')
     strategy:
       fail-fast: false
       matrix:
@@ -50,7 +55,7 @@ jobs:
         account_scope: >-
           ${{ fromJSON(
             github.event_name == 'push' && github.event.head_commit.message == 'ops: authorized-once-film-bickin8-2026-11-10' && '["film"]' ||
-            github.event_name != 'schedule' && '["tarladaki","penguen","gonle","daily_laugh","film","film_second","toonzone"]' ||
+            github.event_name != 'schedule' && '["tarladaki","penguen","gonle","daily_laugh","film","film_second"]' ||
             github.event.schedule == '7 6,9,12,15,18 * * *' && '["tarladaki"]' ||
             github.event.schedule == '37 6,9,12,15,18 * * *' && '["penguen","gonle"]' ||
             github.event.schedule == '7 7,9,11,13,15 * * *' && '["film","film_second"]' ||
