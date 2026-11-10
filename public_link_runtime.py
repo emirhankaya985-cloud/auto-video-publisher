@@ -1644,6 +1644,21 @@ def plan(audit=False):
                         "RECOVERY: audited Avanak Apti Part 10 binary rejection; "
                         "one bounded 720p/96k attempt after remote reconciliation."
                     )
+                # One owner-authorized Film Part 8 recheck. The old hold was
+                # local-only (no Meta POST) and remains preserved in the
+                # previous scoped artifacts. A fresh remote-history read and
+                # exact source SHA are mandatory; visual comparison runs again
+                # on source bytes BEFORE any provider upload.
+                if (not audit and route == "film"
+                        and os.getenv("FILM_PART8_STRICT_RECHECK_ENABLED") == "true"):
+                    from film_part8_recovery import eligible_original_held
+                    if eligible_original_held(item, existing):
+                        existing["status"] = "ready"
+                        existing["film_part8_recheck_candidate"] = True
+                        report.append(
+                            "RECOVERY: original Bickin Part 8 had local-only "
+                            "visual hold; require extended exact-source comparison "
+                            "before any Meta upload.")
                 if existing and existing.get("status") != "ready":
                     report.append(f"HELD: {item['name']} {p} has an uncertain previous intent.")
                     # A green GitHub run is NOT proof these queues are healthy.
@@ -1733,6 +1748,12 @@ def plan(audit=False):
                               "Drive source in this run; no second Meta upload.")
                 continue
             selected = dict(item, route=route, page=page_name, platforms=pending, captions=captions, caption_source=origin)
+            if (route == "film" and item["name"] == "Bickin_Part_8.mp4"
+                    and pending and all(
+                        state["entries"].get(f"{route}:{p}:{item['id']}", {})
+                        .get("film_part8_recheck_candidate") is True
+                        for p in pending)):
+                selected["film_part8_strict_recheck"] = True
             ig_entry = state["entries"].get(f"{route}:instagram:{item['id']}", {})
             if "instagram" in pending and ig_entry.get("container_resume"):
                 if pending != ["instagram"]:
@@ -2102,9 +2123,39 @@ def publish():
                                  video=item["name"], error=exc, safe_to_retry=True)
                 save(STATE, state)
                 continue
+            if item.get("film_part8_strict_recheck") and source_fingerprint is None:
+                # No dedupe evidence is not permission to upload Bickin 8.
+                failures.append("Film Part 8: extended duplicate check unavailable")
+                for p in item["platforms"]:
+                    state["entries"][f"{item['route']}:{p}:{item['id']}"].update(
+                        status="held", failure={"reason": "extended_visual_check_unavailable",
+                                                "external_post_attempted": False,
+                                                "safe_to_repost": False})
+                save(STATE, state)
+                continue
             if source_fingerprint is not None:
                 from media_similarity import hold_visual_duplicate
-                if hold_visual_duplicate(item, state, source_fingerprint):
+                if item.get("film_part8_strict_recheck"):
+                    from film_part8_recovery import audit_part8_before_publish
+                    try:
+                        _checked_fp, proof = audit_part8_before_publish(
+                            item, state, temp / "source.mp4",
+                            download_verified_publication_video, temp)
+                    except (OSError, RuntimeError, ValueError) as exc:
+                        # The original three-frame hold is still authoritative
+                        # unless the stronger source-vs-source proof passes.
+                        hold_visual_duplicate(item, state, source_fingerprint)
+                        record_error("source_video", "film_part8_strict_recheck_held",
+                                     route=item["route"], video=item["name"],
+                                     error=exc, safe_to_retry=False)
+                        save(STATE, state)
+                        continue
+                    for p in item["platforms"]:
+                        row = state["entries"][f"{item['route']}:{p}:{item['id']}"]
+                        row["visual_fingerprint"] = source_fingerprint
+                        row["part8_strict_dedupe_proof"] = proof
+                    save(STATE, state)
+                elif hold_visual_duplicate(item, state, source_fingerprint):
                     # A potentially duplicated source is held for human review,
                     # never retried automatically. Preserve every prior post.
                     # The local-only duplicate hold is expected safety, not a provider failure.
