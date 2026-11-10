@@ -7,3 +7,7 @@ Owner's latest instruction: Do not wait for deletion of old ToonZone videos. Sta
 ## First-run infrastructure recovery (same owner approval)
 
 Run 42812978028 could not install FFmpeg from the default Azure mirror and exited before intent planning or any Meta POST. PR #236 fixes the Ubuntu mirror and preserves the dedicated relaunch campaign journal. This edit requests exactly one new execution for S01E04 Part1; future parts use the guarded schedule only after verified Meta IDs. No old profile video is deleted.
+
+## 10 November immediate Part2–4 request
+
+Owner explicitly requested immediate publication of S01E04 Part2, Part3, and Part4, in this exact order. Each attempt is conditional on confirming Part1 and earlier parts on both Instagram and Facebook with their real provider IDs; do not blindly repeat any part. Start the live relaunch workflow now for the next due item. The independent scheduled workflow should continue unattended.
