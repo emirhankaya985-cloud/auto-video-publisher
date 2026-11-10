@@ -17,6 +17,12 @@ on:
     # One part per run, only after both account receipts reconcile.
     # Istanbul UTC+3. Other account schedules and likes are untouched.
     - cron: '7,37 9-20 * * *'
+    # TEMPORARY owner-requested overnight Season 1 finishing window:
+    # Nov 11, 2026 00:02–07:47 Türkiye (UTC+3). 15-minute opportunities,
+    # never overlapping one-part-at-a-time guarded Meta POSTs.
+    # Fixed November dates prevent year-round overnight minute consumption.
+    - cron: '2,17,32,47 21-23 10 11 *'
+    - cron: '2,17,32,47 0-4 11 11 *'
 
 permissions:
   contents: read
