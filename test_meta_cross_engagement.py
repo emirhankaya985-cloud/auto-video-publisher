@@ -756,5 +756,58 @@ class EngagementTests(unittest.TestCase):
         self.assertFalse(any(t["operation"] in ("save", "repost") for t in planned))
 
 
+    def test_account_batch_rotates_one_target_but_covers_all_native_platform_posts(self):
+        aa = actors()
+        for platform, identity in (("facebook", "55"), ("instagram", "66")):
+            aa[(platform, identity)] = dict(platform=platform, id=identity,
+                name="ToonZone", grants=set(GRANTS), token="token", owner_page="55")
+        posts = [
+            dict(platform="instagram", post_id="901", owner="66"),
+            dict(platform="instagram", post_id="902", owner="66"),
+            dict(platform="facebook", post_id="903", owner="55"),
+            dict(platform="facebook", post_id="904", owner="11"),
+        ]
+        ledger = {"schema": 1, "actions": {}}
+        with patch.object(m, "verified_media", return_value=None) as check, \
+             patch.dict(m.os.environ, {"META_CROSS_REPOST_ENABLED": "false"}):
+            planned, _ = m.build_account_batch(posts, aa, ledger, "200", "100", now=NOW)
+        self.assertEqual(len(planned), 6)
+        self.assertEqual(check.call_count, 3)
+        self.assertEqual({t["operation"] for t in planned}, {"like"})
+        self.assertEqual({t["owner"] for t in planned}, {"55", "66"})
+        self.assertEqual({t["platform"] for t in planned}, {"facebook", "instagram"})
+        self.assertTrue(all(t["actor"] != t["owner"] for t in planned))
+        self.assertEqual(len(ledger["actions"]), len(planned))
+        self.assertTrue(all(x["status"] == "reserved" for x in ledger["actions"].values()))
+        # Intent/accepted receipts are never replayed; next tick selects another account.
+        for record in ledger["actions"].values():
+            record.update(status="accepted", api_ack=True)
+        with patch.object(m, "verified_media", return_value=None):
+            next_batch, _ = m.build_account_batch(posts, aa, ledger, "201", "100",
+                                                   now=NOW + timedelta(minutes=15))
+        self.assertEqual(len(next_batch), 2)
+        self.assertEqual({x["owner"] for x in next_batch}, {"11"})
+
+    def test_account_batch_skips_invalid_source_and_does_not_write_in_plan(self):
+        aa = actors()
+        aa[("instagram", "55")] = dict(platform="instagram", id="55",
+            name="ToonZone", grants=set(GRANTS), token="token", owner_page="55")
+        posts = [dict(platform="instagram", post_id="101", owner="55"),
+                 dict(platform="instagram", post_id="102", owner="55")]
+        ledger = {"schema": 1, "actions": {}}
+        def verify(t, _):
+            if t["post_id"] == "101":
+                raise ValueError("source_owner_mismatch")
+        with patch.object(m, "verified_media", side_effect=verify), \
+             patch.object(m, "perform") as writer, \
+             patch.dict(m.os.environ, {"META_CROSS_REPOST_ENABLED": "false"}):
+            planned, report = m.build_account_batch(posts, aa, ledger, "200", "100", now=NOW)
+            writer.assert_not_called()
+        self.assertEqual(len(planned), 2)
+        self.assertEqual({t["post_id"] for t in planned}, {"102"})
+        self.assertIn("source_preflight_failed", {x["status"] for x in report})
+
+
+
 if __name__ == "__main__":
     unittest.main()
