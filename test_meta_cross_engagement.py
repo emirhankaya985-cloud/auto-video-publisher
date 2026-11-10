@@ -520,7 +520,7 @@ class EngagementTests(unittest.TestCase):
         with patch.dict(m.os.environ, {"META_CROSS_REPOST_ENABLED": "false"}):
             planned, report = m.build_plan(
                 [dict(platform="facebook", post_id="123", owner="11")],
-                actors(), "201", "100", now=NOW)
+                actors(), ledger, "201", "100", now=NOW)
         self.assertTrue(any(row["status"] == "provider_permission_hold" for row in report))
         self.assertIn("facebook/like/cross_post/123", ledger["provider_holds"])
         self.assertNotIn(m.key(t), ledger["actions"])
