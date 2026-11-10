@@ -41,12 +41,10 @@ permissions:
 
 jobs:
   meta:
-    # ToonZone S01E04+ relaunch is held while the owner deletes old posts.
-    # Keep every other route running. The independent Meta like workflow is untouched.
-    # A fresh, separately reviewed release is required after remote cleanup proof.
+    # Owner authorized ToonZone continuation without waiting for manual old-post cleanup.
+    # Preserve per-account release, dedupe, cover and platform safety gates.
     if: >-
-      (github.event_name == 'workflow_dispatch' || github.event_name == 'push' || vars.LINK_AUTOMATION_ENABLED == 'true') &&
-      (github.event_name != 'schedule' || github.event.schedule != '7,17,27,37 9 * * *')
+      (github.event_name == 'workflow_dispatch' || github.event_name == 'push' || vars.LINK_AUTOMATION_ENABLED == 'true')
     strategy:
       fail-fast: false
       matrix:
