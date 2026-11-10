@@ -720,6 +720,26 @@ class EngagementTests(unittest.TestCase):
                 save.assert_not_called()
                 post.assert_not_called()
 
+    def test_focused_readonly_health_gets_fail_closed_source_fallback(self):
+        with patch.dict(m.os.environ, {
+                "GITHUB_REPOSITORY": m.REPO, "GITHUB_RUN_ID": "200",
+                "SOURCE_RUN_ID": "latest", "ENGAGEMENT_MODE": "dry_run",
+                "GITHUB_EVENT_NAME": "workflow_dispatch", "ENGAGEMENT_SCOPE": "recent_window",
+                "META_CROSS_ENGAGEMENT_ENABLED": "false",
+                "META_AUDIT_FOCUS": "Film Mağarası"}), \
+             patch("sys.argv", ["meta_cross_engagement.py", "plan"]), \
+             patch.object(m, "load_meta_auth", return_value={}), \
+             patch.object(m, "accounts", return_value=actors()), \
+             patch.object(m, "latest_source_id", return_value="100") as choose, \
+             patch.object(m, "restore", return_value={"schema": 1, "actions": {}}), \
+             patch.object(m, "read_source", side_effect=ValueError("stopped before plan")), \
+             patch.object(m, "save") as save, patch.object(m, "perform") as post:
+            with self.assertRaisesRegex(ValueError, "stopped before plan"):
+                m.main()
+            self.assertTrue(choose.call_args.kwargs["allow_prestate_fallback"])
+            save.assert_not_called()
+            post.assert_not_called()
+
     def test_unavailable_provenance_stops_batch_before_claiming(self):
         state={"entries":{"a":dict(status="done",run_id="99",day="2026-10-30",
                route="tarladaki",platform="facebook",post_id="123")}}
