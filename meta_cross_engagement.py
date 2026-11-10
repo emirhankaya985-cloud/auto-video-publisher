@@ -808,7 +808,7 @@ def main():
                    and os.getenv("GITHUB_EVENT_NAME") in {"push", "schedule"}
                    and os.getenv("GITHUB_REF") == "refs/heads/main")
     account_batch = (mode == "account_batch"
-                     and os.getenv("GITHUB_EVENT_NAME") == "schedule"
+                     and os.getenv("GITHUB_EVENT_NAME") in {"schedule", "push"}
                      and os.getenv("GITHUB_REF") == "refs/heads/main")
     live = (os.getenv("META_CROSS_ENGAGEMENT_ENABLED") == "true"
             and (mode == "apply" or single_like or account_batch))
