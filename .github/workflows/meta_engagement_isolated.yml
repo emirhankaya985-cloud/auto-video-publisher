@@ -1,4 +1,4 @@
-name: Meta engagement independent workers
+name: Meta engagement independent account diagnostics
 on:
   schedule:
     - cron: '*/15 * * * *'
@@ -6,33 +6,31 @@ on:
 permissions:
   contents: read
 jobs:
-  engagement:
+  account-health:
     strategy:
       fail-fast: false
       matrix:
         account: [tarladaki, penguen, gonle, daily_laugh, film, toonzone]
     concurrency:
-      group: engagement-${{ matrix.account }}
+      group: engagement-health-${{ matrix.account }}
       cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 8
     env:
       ENGAGEMENT_ACCOUNT: ${{ matrix.account }}
       META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
-      META_ENGAGEMENT_ENABLED: ${{ vars.META_ENGAGEMENT_ENABLED }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Independent account preflight
+      - name: Verify each account independently (no engagement POST)
         run: |
           python - <<'PY'
-          import os, json
-          account=os.environ['ENGAGEMENT_ACCOUNT']
-          enabled=os.environ.get('META_ENGAGEMENT_ENABLED')=='true'
-          token=bool(os.environ.get('META_ACCESS_TOKEN'))
-          print(json.dumps({'account':account,'enabled':enabled,'token_present':token,'action':'preflight_only','likes_sent':0}))
-          if enabled and not token:
+          import json, os
+          account = os.environ['ENGAGEMENT_ACCOUNT']
+          token_present = bool(os.getenv('META_ACCESS_TOKEN'))
+          print(json.dumps({'account': account, 'token_present': token_present, 'action': 'health_check', 'likes_sent': 0}))
+          if not token_present:
               raise SystemExit('META_ACCESS_TOKEN missing')
           PY
