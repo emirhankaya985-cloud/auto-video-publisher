@@ -16,6 +16,9 @@ on:
       - 'publication_safety.py'
       - 'test_publication_safety.py'
       - 'test_public_link_runtime.py'
+      - 'film_part8_recovery.py'
+      - 'test_film_part8_recovery.py'
+      - 'publisher_one_shot_gate.py'
       - 'toonzone_cover_health_gate.py'
       - 'test_toonzone_cover_health_gate.py'
       - 'merge_account_states.py'
@@ -43,4 +46,4 @@ jobs:
           python -m pip install --require-hashes -r requirements.txt
           python -m pip install gdown==6.4.2
       - name: Check Page identity and unknown alert semantics (no Meta API calls)
-        run: python -m unittest -v test_meta_auth_loader.py test_meta_page_token_health.py test_tracked_meta_routes.py test_public_link_runtime.py test_meta_schedule_preflight.py test_meta_preflight_journal.py test_publication_safety.py test_isolated_accounts.py test_toonzone_season1_gate.py test_toonzone_cover_health_gate.py
+        run: python -m unittest -v test_meta_auth_loader.py test_meta_page_token_health.py test_tracked_meta_routes.py test_public_link_runtime.py test_film_part8_recovery.py test_meta_schedule_preflight.py test_meta_preflight_journal.py test_publication_safety.py test_isolated_accounts.py test_toonzone_season1_gate.py test_toonzone_cover_health_gate.py

@@ -32,6 +32,23 @@ NOV9_CATCHUP_MARKER = "docs/owner-authorized-catchup-2026-11-09.md"
 NOV9_CATCHUP_SUBJECT = "ops: owner-authorized-once-meta-catchup-2026-11-09"
 NOV9_CATCHUP_DATE = "2026-11-09"
 
+# Owner-requested urgent Film Mağarası original Bıçkın 8 recovery.
+# Only an ADDED unique marker commit on 10 November can launch real Meta
+# publishing; failed rechecks may not be rerun as another authorization.
+FILM_PART8_MARKER = "docs/owner-authorized-film-part8-2026-11-10.md"
+FILM_PART8_SUBJECT = "ops: authorized-once-film-bickin8-2026-11-10"
+FILM_PART8_DATE = "2026-11-10"
+
+def is_film_part8_once(event, ref, subject, added_paths, *, today=None, run_attempt=None):
+    if today is None:
+        today = datetime.now(timezone(timedelta(hours=3))).date().isoformat()
+    if run_attempt is None:
+        run_attempt = os.getenv("GITHUB_RUN_ATTEMPT", "1")
+    return (event == "push" and ref == "refs/heads/main"
+            and subject == FILM_PART8_SUBJECT
+            and FILM_PART8_MARKER in added_paths
+            and today == FILM_PART8_DATE and str(run_attempt) == "1")
+
 
 
 def is_owner_catchup_push(event, ref, subject, added_paths, *, today=None, run_attempt=None):
@@ -112,7 +129,8 @@ def determine_mode(event, ref, subject="", added_paths=(), requested_mode="audit
         catchup = (is_owner_catchup_push(event, ref, subject, added_paths)
                    or is_today_catchup_push(event, ref, subject, added_paths)
                    or is_nov7_catchup_push(event, ref, subject, added_paths)
-                   or is_nov9_catchup_push(event, ref, subject, added_paths))
+                   or is_nov9_catchup_push(event, ref, subject, added_paths)
+                   or is_film_part8_once(event, ref, subject, added_paths))
         return "publish" if normal or rescue or v4 or catchup else "audit"
     return "audit"
 
