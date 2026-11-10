@@ -65,6 +65,9 @@ jobs:
         timeout-minutes: 6
         run: |
           if ! command -v ffmpeg >/dev/null || ! command -v ffprobe >/dev/null; then
+            # The default Azure apt mirror previously stalled for five minutes.
+            echo 'https://archive.ubuntu.com/ubuntu' | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
+            echo 'https://security.ubuntu.com/ubuntu' | sudo tee /etc/apt/apt-mirrors-security.txt >/dev/null
             timeout --signal=TERM --kill-after=10s 100s sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=20 update -qq
             timeout --signal=TERM --kill-after=10s 120s sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=20 install -y --no-install-recommends ffmpeg
           fi

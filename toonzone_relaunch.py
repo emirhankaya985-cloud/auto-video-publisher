@@ -20,7 +20,9 @@ ROOT = Path("toonzone-relaunch-runtime")
 LEDGER = ROOT / "alert-history.json"
 PLAN = ROOT / "plan.json"
 CAMPAIGN = "toonzone-owner-relaunch-2026-11-10-s01e04"
-EPISODE = 4
+FIRST_EPISODE = 4
+LAST_EPISODE = 12
+EPISODES = range(FIRST_EPISODE, LAST_EPISODE + 1)
 PARTS = (1, 2, 3, 4)
 PLATFORMS = ("facebook", "instagram")
 EXPECTED_IG = "17841477404255851"
@@ -43,9 +45,9 @@ def require_approval():
 
 def caption(item):
     from toonzone_instagram_first_three import text_for
-    if item.get("episode") != EPISODE or item.get("part") not in PARTS:
+    if item.get("episode") not in EPISODES or item.get("part") not in PARTS:
         raise ValueError("wrong_relaunch_source")
-    return text_for(item) + f"\n\n📺 ToonZone yeniden başlangıç · S01E04 Part{item['part']} · 10.11.2026"
+    return text_for(item) + f"\n\n📺 ToonZone yeniden başlangıç · S01E{item['episode']:02d} Part{item['part']} · 10.11.2026"
 
 
 def record_key(item, platform):
@@ -53,10 +55,11 @@ def record_key(item, platform):
 
 
 def ordered_episode(catalog):
-    selected = [r for r in catalog if r["episode"] == EPISODE]
-    if [(r["part"], r["name"].endswith(f"Part{r['part']}.mp4")) for r in selected] != [(p, True) for p in PARTS]:
+    selected = [r for r in catalog if r["episode"] in EPISODES]
+    expected = [(episode, part, True) for episode in EPISODES for part in PARTS]
+    if [(r["episode"], r["part"], r["name"].endswith(f"Part{r['part']}.mp4")) for r in selected] != expected:
         raise RuntimeError("s01e04_exact_order_missing_or_ambiguous")
-    if len({r["id"] for r in selected}) != len(PARTS):
+    if len({r["id"] for r in selected}) != len(EPISODES) * len(PARTS):
         raise RuntimeError("duplicate_relaunch_source_ids")
     return selected
 
@@ -147,12 +150,12 @@ def create_plan(run_id):
                     source_sha256=source_sha, cover_sha256=cover_sha,
                     platforms=[p for p in PLATFORMS if statuses[p] == "new"])
         history.save(PLAN, data)
-        print("RELAUNCH_RESERVED " + json.dumps({"episode": 4, "part": item["part"],
+        print("RELAUNCH_RESERVED " + json.dumps({"episode": item["episode"], "part": item["part"],
               "platforms": data["platforms"], "external_posts": 0}), flush=True)
         return data
     history.save(LEDGER, history.validate(ledger))
     history.save(PLAN, {"run_id": run_id, "item": None, "platforms": []})
-    print("RELAUNCH_EPISODE4_ALREADY_VERIFIED", flush=True)
+    print("RELAUNCH_SEASON1_E04_E12_ALREADY_VERIFIED", flush=True)
     return None
 
 
@@ -186,7 +189,7 @@ def publish(run_id):
     item = data.get("item")
     if item is None:
         return
-    if item.get("episode") != 4 or item.get("part") not in PARTS:
+    if item.get("episode") not in EPISODES or item.get("part") not in PARTS:
         raise RuntimeError("relaunch_episode_mismatch")
     page = page_for_toonzone()
     if instagram_identity(page) != EXPECTED_IG:
@@ -218,7 +221,7 @@ def publish(run_id):
                 raise RuntimeError("relaunch_remote_post_detected_before_write")
             record.update(status="attempted", last_seen=history.now_utc().isoformat())
             history.save(LEDGER, ledger)
-            print(f"RELAUNCH_ATTEMPT platform={platform} episode=4 part={item['part']}", flush=True)
+            print(f"RELAUNCH_ATTEMPT platform={platform} episode={item['episode']} part={item['part']}", flush=True)
             try:
                 post_id = (upload_facebook_reel(page, str(covered), data["text"])
                            if platform == "facebook" else
@@ -233,9 +236,9 @@ def publish(run_id):
                 if verify_post(page, platform, post_id, data["text"]):
                     record.update(status="verified", last_seen=history.now_utc().isoformat())
                     history.save(LEDGER, ledger)
-                    print(f"RELAUNCH_VERIFIED platform={platform} part={item['part']} post_id={post_id}", flush=True)
+                    print(f"RELAUNCH_VERIFIED platform={platform} episode={item['episode']} part={item['part']} post_id={post_id}", flush=True)
                 else:
-                    print(f"RELAUNCH_ACCEPTED_NOT_YET_VISIBLE platform={platform} part={item['part']} post_id={post_id}", flush=True)
+                    print(f"RELAUNCH_ACCEPTED_NOT_YET_VISIBLE platform={platform} episode={item['episode']} part={item['part']} post_id={post_id}", flush=True)
             except Exception as exc:
                 record.update(error_type=type(exc).__name__, last_seen=history.now_utc().isoformat())
                 history.save(LEDGER, ledger)
