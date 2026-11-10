@@ -17,6 +17,7 @@ on:
       - 'docs/owner-authorized-film-part8-2026-11-10.md'
       - 'docs/owner-authorized-en-buyuk-saban-10parts-2026-11-10.md'
       - 'docs/owner-authorized-en-buyuk-saban-10parts-ci-repair-2026-11-10.md'
+      - 'docs/owner-authorized-en-buyuk-saban-part6to10-2026-11-10.md'
   schedule:
     # Run a worker only near that account's actual due slots, not seven
     # expensive GitHub runners every half-hour (owner: zero-cost operation).
@@ -57,6 +58,7 @@ jobs:
             github.event_name == 'push' && github.event.head_commit.message == 'ops: authorized-once-film-bickin8-2026-11-10' && '["film"]' ||
             github.event_name == 'push' && github.event.head_commit.message == 'ops: authorized-once-en-buyuk-saban-10parts-2026-11-10' && '["film"]' ||
             github.event_name == 'push' && github.event.head_commit.message == 'ops: authorized-once-en-buyuk-saban-10parts-ci-repair-2026-11-10' && '["film"]' ||
+            github.event_name == 'push' && github.event.head_commit.message == 'ops: authorized-once-en-buyuk-saban-part6to10-2026-11-10' && '["film"]' ||
             github.event_name != 'schedule' && '["tarladaki","penguen","gonle","daily_laugh","film","film_second"]' ||
             github.event.schedule == '7 6,9,12,15,18 * * *' && '["tarladaki"]' ||
             github.event.schedule == '37 6,9,12,15,18 * * *' && '["penguen","gonle"]' ||
@@ -185,6 +187,7 @@ jobs:
           META_PREFLIGHT_PARTIAL_OK: 'false'
           FILM_PART8_STRICT_RECHECK_ENABLED: 'false'
           FILM_TEN_PARTS_ONCE: 'false'
+          FILM_GAP_PART6TO10_ONCE: 'false'
           # The legacy offline fixtures intentionally contain only 1-2 Film
           # sources, not the 32 real Drive pairs. Scope source selection to
           # the LIVE planning step, never these no-write unit tests.
@@ -193,7 +196,7 @@ jobs:
           ADVANCED_DEDUPE_ENABLED: 'false'
           AUTO_SUBTITLES_ENABLED: 'false'
           ADAPTIVE_SCHEDULE_ENABLED: 'false'
-        run: python -m unittest -v test_public_link_runtime.py test_film_part8_recovery.py test_film_ten_parts_once.py
+        run: python -m unittest -v test_public_link_runtime.py test_film_part8_recovery.py test_film_ten_parts_once.py test_film_remaining_five_once.py
       - name: Restore next-day evidence for non-serial slots (fallback to current hours)
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -205,6 +208,7 @@ jobs:
           MODE: ${{ steps.release_gate.outputs.mode }}
           IG_AUDITED_RESCUE_ONLY: ${{ steps.release_gate.outputs.recovery_only }}
           FILM_TEN_PARTS_ONCE: ${{ steps.release_gate.outputs.film_ten_parts_once }}
+          FILM_GAP_PART6TO10_ONCE: ${{ steps.release_gate.outputs.film_gap_once }}
         run: |
           if [ "$MODE" = audit ]; then
             python public_link_runtime.py audit

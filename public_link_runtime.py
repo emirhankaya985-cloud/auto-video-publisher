@@ -1244,7 +1244,10 @@ def plan(audit=False):
     # route only. It cannot affect normal slots, other routes or later dates.
     film_ten_once = (os.getenv("FILM_TEN_PARTS_ONCE") == "true"
                      and day == "2026-11-10" and scope == "film")
-    batch_limit = 10 if film_ten_once else (8 if os.getenv("CATCHUP_BATCH_DATE") == day else 1)
+    film_gap_once = (os.getenv("FILM_GAP_PART6TO10_ONCE") == "true"
+                     and day == "2026-11-10" and scope == "film")
+    batch_limit = (5 if film_gap_once else 10 if film_ten_once
+                   else 8 if os.getenv("CATCHUP_BATCH_DATE") == day else 1)
     from operational_enhancements import bounded_catchup_limit
     history_cache = {}
     duplicate_fingerprints = {}
@@ -1362,13 +1365,19 @@ def plan(audit=False):
             # account quota. Exact caption reconciliation still runs above.
             counts = {p: 0 for p in platforms}
         due = target_count(route, now)
+        if film_gap_once and route == "film":
+            # The first release already published five parts on both platforms.
+            # Raise the OWNER-ONLY temporary planning ceiling by five; never
+            # change normal per-account targets or any provider rate limits.
+            due = max(counts.values(), default=0) + 5
+            report.append("OWNER ONCE: only En Buyuk Saban Parts 6-10, no new posts outside gap.")
         if film_ten_once and route == "film":
             # Ten *new, distinct* Part 1-10 sources, not ten quota slots
             # consumed by other Film posts earlier today. Per-source ledger
             # and provider dedupe still apply, so nothing is blindly reposted.
             due = max(counts.values(), default=0) + 10
             report.append("OWNER ONE-SHOT: up to ten En Buyuk Saban parts (1-10) on primary Film Meta routes.")
-        if os.getenv("CATCHUP_BATCH_DATE") != day and not (film_ten_once and route == "film"):
+        if os.getenv("CATCHUP_BATCH_DATE") != day and not ((film_ten_once or film_gap_once) and route == "film"):
             batch_limit = bounded_catchup_limit(
                 route, due, counts, clock,
                 enabled=os.getenv("AUTO_BACKFILL_ENABLED", "false").lower() == "true")
@@ -1430,6 +1439,12 @@ def plan(audit=False):
             if os.getenv("FILM_HANDOFF_TO_EN_BUYUK_SABAN", "false").lower() == "true":
                 from film_series_transition import switch_film_source
                 videos = switch_film_source(route, videos, files)
+                if film_gap_once and route == "film":
+                    # Part 1-5 have already posted; never plan duplicates.
+                    allowed = {f"En_Buyuk_Saban_Part_{i}.mp4" for i in range(6, 11)}
+                    videos = [video for video in videos if video["name"] in allowed]
+                    if len(videos) != 5:
+                        raise RuntimeError("film_gap_source_selection_incomplete")
                 if film_ten_once and route == "film":
                     # Exclude Part 11+ even if the daily accounting target is
                     # higher because of already-published unrelated videos.
@@ -1473,7 +1488,8 @@ def plan(audit=False):
                         )
                         break
             available = [p for p in platforms if p not in blocked_platforms]
-            if not available or all(counts[p] + planned_counts.get((route, p), 0) >= target_count(route, now) for p in available):
+            route_target = due if (route == "film" and (film_ten_once or film_gap_once)) else target_count(route, now)
+            if not available or all(counts[p] + planned_counts.get((route, p), 0) >= route_target for p in available):
                 break
             if all(seed_done(route, p, item["name"]) or state["entries"].get(f"{route}:{p}:{item['id']}", {}).get("status") == "done" for p in available):
                 continue
@@ -1729,7 +1745,7 @@ def plan(audit=False):
                     else:
                         held = True
                     continue
-                target = due if film_ten_once and route == "film" else target_count(route, now)
+                target = due if (film_ten_once or film_gap_once) and route == "film" else target_count(route, now)
                 today_count = sum(route_clock(route, timestamp(row)).date() == clock.date() for row in histories[p])
                 confirmed_in_ledger = ledger_daily_count(state, route, p, clock.date().isoformat())
                 today_count = 0 if rescue_only else max(today_count, confirmed_in_ledger)
