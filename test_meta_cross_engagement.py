@@ -110,6 +110,21 @@ class EngagementTests(unittest.TestCase):
         self.assertNotIn("private-token", json.dumps(health))
         self.assertNotIn('"999"', json.dumps(health))
 
+    def test_owner_like_counts_only_after_verifiable_api_ack(self):
+        aa = actors()
+        own = task("like", "instagram", "33", "33")
+        ledger = {"schema": 1, "actions": {m.key(own): {
+            **own, "run_id": "500", "at": NOW.isoformat(),
+            "status": "reserved", "api_ack": False,
+        }}}
+        health = m.verified_like_coverage(aa, ledger)["instagram"]
+        self.assertEqual(health["confirmed_self_like_count_in_retained_ledger"], 0)
+        ledger["actions"][m.key(own)].update(status="accepted", api_ack=True)
+        health = m.verified_like_coverage(aa, ledger)["instagram"]
+        self.assertEqual(health["confirmed_self_like_count_in_retained_ledger"], 1)
+        self.assertEqual(health["confirmed_cross_like_count_in_retained_ledger"], 0)
+        self.assertEqual(health["confirmed_like_count_in_retained_ledger"], 1)
+
     def test_like_coverage_does_not_count_unverified_history_as_success(self):
         aa = actors()
         bogus = task("like", "facebook", "22", "11")
@@ -771,12 +786,12 @@ class EngagementTests(unittest.TestCase):
         with patch.object(m, "verified_media", return_value=None) as check, \
              patch.dict(m.os.environ, {"META_CROSS_REPOST_ENABLED": "false"}):
             planned, _ = m.build_account_batch(posts, aa, ledger, "200", "100", now=NOW)
-        self.assertEqual(len(planned), 6)
+        self.assertEqual(len(planned), 9)
         self.assertEqual(check.call_count, 3)
         self.assertEqual({t["operation"] for t in planned}, {"like"})
         self.assertEqual({t["owner"] for t in planned}, {"55", "66"})
         self.assertEqual({t["platform"] for t in planned}, {"facebook", "instagram"})
-        self.assertTrue(all(t["actor"] != t["owner"] for t in planned))
+        self.assertEqual(sum(t["actor"] == t["owner"] for t in planned), 3)
         self.assertEqual(len(ledger["actions"]), len(planned))
         self.assertTrue(all(x["status"] == "reserved" for x in ledger["actions"].values()))
         # Intent/accepted receipts are never replayed; next tick selects another account.
@@ -785,8 +800,9 @@ class EngagementTests(unittest.TestCase):
         with patch.object(m, "verified_media", return_value=None):
             next_batch, _ = m.build_account_batch(posts, aa, ledger, "201", "100",
                                                    now=NOW + timedelta(minutes=15))
-        self.assertEqual(len(next_batch), 2)
+        self.assertEqual(len(next_batch), 3)
         self.assertEqual({x["owner"] for x in next_batch}, {"11"})
+        self.assertEqual(sum(x["actor"] == x["owner"] for x in next_batch), 1)
 
     def test_account_batch_skips_invalid_source_and_does_not_write_in_plan(self):
         aa = actors()
@@ -803,7 +819,7 @@ class EngagementTests(unittest.TestCase):
              patch.dict(m.os.environ, {"META_CROSS_REPOST_ENABLED": "false"}):
             planned, report = m.build_account_batch(posts, aa, ledger, "200", "100", now=NOW)
             writer.assert_not_called()
-        self.assertEqual(len(planned), 2)
+        self.assertEqual(len(planned), 3)
         self.assertEqual({t["post_id"] for t in planned}, {"102"})
         self.assertIn("source_preflight_failed", {x["status"] for x in report})
 

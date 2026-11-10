@@ -112,7 +112,7 @@ jobs:
           retention-days: 90
       - name: Send a verified Telegram batch receipt only for genuinely accepted likes
         if: >-
-          success() &&
+          always() &&
           steps.verified_ledger.outcome == 'success' &&
           (env.ENGAGEMENT_MODE == 'apply' || env.ENGAGEMENT_MODE == 'single_like' || env.ENGAGEMENT_MODE == 'account_batch')
         env:
