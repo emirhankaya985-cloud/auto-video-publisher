@@ -109,6 +109,9 @@ jobs:
       ENABLE_GONLE_INSTAGRAM_ROUTES: ${{ vars.ENABLE_GONLE_INSTAGRAM_ROUTES }}
       ENABLE_FILM_ROUTES: ${{ vars.ENABLE_FILM_ROUTES }}
       FILM_RIGHTS_APPROVED: ${{ vars.FILM_RIGHTS_APPROVED }}
+      # Owner 10 Nov transition: Bickin 8 source duplicates archived Part 3.
+      # Preserve all old intents/IDs; select only the complete next film.
+      FILM_HANDOFF_TO_EN_BUYUK_SABAN: 'true'
       ENABLE_TOONZONE_ROUTES: ${{ vars.ENABLE_TOONZONE_ROUTES }}
       # Historical env kept for compatibility; owner-approved original PNG
       # is mandatory regardless of this value. Synthetic fallback is disabled.
