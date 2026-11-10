@@ -1182,9 +1182,22 @@ def plan(audit=False):
         freeze_schedule(state, day, ROOT / "adaptive-schedule.json")
     apply_verified_migration(state)
     quarantine_weak_caption_aliases(state)
+    # This exact previous run crashed while journaling a LOCAL comparison
+    # failure, before any Meta API POST. Restore its held status narrowly;
+    # never clear a possibly external-posted intent.
+    from film_part8_recovery import reconcile_known_preupload_crash
+    repaired_preupload_intents = reconcile_known_preupload_crash(state)
     pages = {p["page_name"]: p for p in load_meta_auth()["pages"]}
     verified_pages = preflight_verified_pages()
     report = [f"# Public link publisher — {day}", "", "YouTube: disabled. Drive OAuth: not used.", ""]
+    if repaired_preupload_intents:
+        report.append(
+            f"FILM SOURCE HELD: reconciled {repaired_preupload_intents} "
+            "local-only Part 8 intents from run 42805359391. "
+            "Actual Bickin Part 8 file has the same complete decoded audio "
+            "and almost identical frames as published Part 3; correct "
+            "owner source is required. No Meta POST authorized."
+        )
     catalogs = {}
     unavailable_catalogs = set()
     for key, value in FOLDERS.items():
@@ -2140,7 +2153,8 @@ def publish():
                     try:
                         _checked_fp, proof = audit_part8_before_publish(
                             item, state, temp / "source.mp4",
-                            download_verified_publication_video, temp)
+                            download_verified_publication_video, temp,
+                            evidence_path=ROOT / "film-part8-source-audit.json")
                     except (OSError, RuntimeError, ValueError) as exc:
                         # The original three-frame hold is still authoritative
                         # unless the stronger source-vs-source proof passes.
@@ -2151,12 +2165,24 @@ def publish():
                                     failure={"reason": "film_part8_strict_recheck_held",
                                              "external_post_attempted": False,
                                              "safe_to_repost": False})
+                        if (isinstance(exc, RuntimeError) and
+                                str(exc) == "film_part8_source_is_prior_part_duplicate"):
+                            for p in item["platforms"]:
+                                row = state["entries"][f"{item['route']}:{p}:{item['id']}"]
+                                row.update(status="held",
+                                           failure={"reason": "confirmed_part3_source_duplicate",
+                                                    "external_post_attempted": False,
+                                                    "safe_to_repost": False})
                         # The state archive is the source of truth. Persist
                         # the local-only held verdict BEFORE journaling, so
                         # even an unexpected journal failure cannot strand
                         # two false "uncertain provider POST" intents.
                         save(STATE, state)
-                        record_error("source_video", "film_part8_strict_recheck_held",
+                        reason = ("film_part8_source_is_prior_part_duplicate"
+                                  if isinstance(exc, RuntimeError) and
+                                  str(exc) == "film_part8_source_is_prior_part_duplicate"
+                                  else "film_part8_strict_recheck_held")
+                        record_error("source_video", reason,
                                      route=item["route"], video=item["name"],
                                      error=exc, safe_to_retry=False)
                         continue
