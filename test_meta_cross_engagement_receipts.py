@@ -21,6 +21,18 @@ class VerifiedReceiptsTests(unittest.TestCase):
         self.assertFalse(m.verified_batch(ledger, [t], "55", names))
         self.assertIsNone(m.message({}, "55"))
 
+    def test_owner_likes_count_only_when_acknowledged(self):
+        t = self.task()
+        t["actor"] = t["owner"]
+        names = {("facebook", "111"): "ToonZone"}
+        ledger = {"actions": {key(t): {**t, "status": "accepted",
+                                      "api_ack": True, "run_id": "55"}}}
+        groups = m.verified_batch(ledger, [t], "55", names)
+        self.assertIn("ToonZone / facebook: 1 beğeni → ToonZone (kendi gönderisi: 1)",
+                      m.message(groups, "55"))
+        ledger["actions"][key(t)]["api_ack"] = False
+        self.assertFalse(m.verified_batch(ledger, [t], "55", names))
+
     def test_unsupported_save_cannot_be_announced(self):
         t = self.task()
         t["operation"] = "save"
