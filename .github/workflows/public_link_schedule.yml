@@ -275,6 +275,7 @@ jobs:
             link-runtime/report.md
             link-runtime/toonzone-cover-gaps.json
             link-runtime/toonzone-season1-live-receipts.json
+            link-runtime/film-part8-source-audit.json
           if-no-files-found: ignore
           retention-days: 30
       - name: Per-post Telegram and ntfy notification preparation (no sends)
