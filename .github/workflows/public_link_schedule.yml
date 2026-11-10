@@ -142,7 +142,10 @@ jobs:
         run: |
           python -c "from publisher_error_journal import record_error; record_error('workflow_verify', 'workflow_step_failed')"
       - name: Install media runtime only after Meta preflight passed
-        timeout-minutes: 5
+        # Provider mirror stalled for five minutes in Penguen run 42799236394.
+        # Bound each apt operation explicitly so failures are diagnosed instead
+        # of consuming the complete account slot; no publish on failure.
+        timeout-minutes: 8
         run: |
           # The ToonZone original-PNG and first-frame gates require Pillow.
           pip install gdown==6.4.2 pillow==13.0.0
@@ -152,8 +155,8 @@ jobs:
             # A slow Azure mirror must not consume every pre-publication slot.
             echo 'https://archive.ubuntu.com/ubuntu' | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
             echo 'https://security.ubuntu.com/ubuntu' | sudo tee /etc/apt/apt-mirrors-security.txt >/dev/null
-            sudo apt-get -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 -o Acquire::Retries=1 update -qq
-            sudo apt-get -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 -o Acquire::Retries=1 install -y --no-install-recommends ffmpeg
+            timeout --signal=TERM --kill-after=10s 150s sudo apt-get -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 -o Acquire::Retries=1 update -qq
+            timeout --signal=TERM --kill-after=10s 180s sudo apt-get -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 -o Acquire::Retries=1 install -y --no-install-recommends ffmpeg
           fi
           command -v ffmpeg && command -v ffprobe
       - name: Verify one-shot commit authorization without any Meta writes
