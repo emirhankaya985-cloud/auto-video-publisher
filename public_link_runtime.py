@@ -2151,10 +2151,14 @@ def publish():
                                     failure={"reason": "film_part8_strict_recheck_held",
                                              "external_post_attempted": False,
                                              "safe_to_repost": False})
+                        # The state archive is the source of truth. Persist
+                        # the local-only held verdict BEFORE journaling, so
+                        # even an unexpected journal failure cannot strand
+                        # two false "uncertain provider POST" intents.
+                        save(STATE, state)
                         record_error("source_video", "film_part8_strict_recheck_held",
                                      route=item["route"], video=item["name"],
                                      error=exc, safe_to_retry=False)
-                        save(STATE, state)
                         continue
                     for p in item["platforms"]:
                         row = state["entries"][f"{item['route']}:{p}:{item['id']}"]
