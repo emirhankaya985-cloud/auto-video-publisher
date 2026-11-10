@@ -322,6 +322,17 @@ def permission(platform, operation):
     return {"pages_manage_engagement"} if operation == "like" else {"pages_manage_posts"}
 
 
+def cross_page_like_hold_key(task):
+    """Stable provider-denied Page-to-Page target, never affect owner self-likes."""
+    if (task.get("platform") == "facebook" and task.get("operation") == "like"
+            and str(task.get("actor") or "") != str(task.get("owner") or "")
+            and str(task.get("post_id") or "").isdecimal()
+            and str(task.get("actor") or "").isdecimal()
+            and str(task.get("owner") or "").isdecimal()):
+        return "facebook/like/cross_post/" + str(task["post_id"])
+    return None
+
+
 def provider_holds(ledger):
     """Persist Meta policy restrictions; never rotate actors to continue a lane.
 
@@ -337,6 +348,18 @@ def provider_holds(ledger):
                 and record["graph_code"] == 368 and lane in SUPPORTED):
             holds.setdefault("/".join(lane), {"graph_code": 368, "reason": "meta_provider_restriction",
                                               "run_id": str(record.get("run_id", ""))})
+        # Live run 42901421078: six distinct Pages got definitive HTTP403 /
+        # Graph 200 trying to like the same Gönle Düşen FB video; its own
+        # Page succeeded. Never rotate other Pages to bypass this access
+        # denial. Preserve a target-only hold even after 7-day pruning.
+        held_post = cross_page_like_hold_key(record)
+        if (held_post and record.get("status") == "rejected"
+                and record.get("http_status") == 403
+                and record.get("graph_code") == 200):
+            holds.setdefault(held_post, {
+                "http_status": 403, "graph_code": 200,
+                "reason": "meta_cross_page_permission_denied",
+                "run_id": str(record.get("run_id", ""))})
     return holds
 
 
@@ -377,6 +400,8 @@ def build_plan(posts, actors, ledger, run_id, source_run_id, *, now):
                     report.append(dict(task, status="already_recorded"))
                 elif f"{task['platform']}/{operation}" in holds:
                     report.append(dict(task, status="provider_restriction_hold"))
+                elif cross_page_like_hold_key(task) in holds:
+                    report.append(dict(task, status="provider_permission_hold"))
                 else:
                     # Reserve the ENTIRE batch in a GitHub artifact before POST.
                     ledger["actions"][action_key] = dict(task, status="reserved",
@@ -465,6 +490,10 @@ def execute(tasks, actors, ledger, run_id, *, persist, sleep=time.sleep):
             record["status"] = "provider_restriction_hold"
             persist(ledger)
             continue
+        if cross_page_like_hold_key(task) in holds:
+            record["status"] = "provider_permission_hold"
+            persist(ledger)
+            continue
         actor = actors.get(actor_key)
         if not actor or actor_key in stopped or not account_enabled(actor["name"], task["platform"]):
             record["status"] = "blocked_actor"
@@ -510,6 +539,11 @@ def execute(tasks, actors, ledger, run_id, *, persist, sleep=time.sleep):
                 stopped.add(actor_key)
             if exc.code == 368:
                 holds[lane] = {"graph_code": 368, "reason": "meta_provider_restriction", "run_id": run_id}
+            denied_post = cross_page_like_hold_key(task)
+            if denied_post and exc.definite and exc.http == 403 and exc.code == 200:
+                holds[denied_post] = {"http_status": 403, "graph_code": 200,
+                                      "reason": "meta_cross_page_permission_denied",
+                                      "run_id": run_id}
         persist(ledger)
     return ledger
 
