@@ -457,6 +457,75 @@ class EngagementTests(unittest.TestCase):
             post.assert_not_called()
         self.assertEqual(ledger["actions"][m.key(t)]["status"],"blocked_actor")
 
+    def test_definite_cross_page_permission_denial_holds_original_post_only(self):
+        first = task("like", actor="22", owner="11")
+        next_page = dict(first, actor="55")
+        owner_self = dict(first, actor="11")
+        aa = actors()
+        aa[("facebook", "55")] = dict(aa[("facebook", "22")], id="55")
+        ledger = reserved(first)
+        ledger["actions"].update(reserved(next_page)["actions"])
+        ledger["actions"].update(reserved(owner_self)["actions"])
+        with patch.object(m, "verified_media", return_value=None), \
+             patch.object(m, "perform", side_effect=[
+                 m.GraphFailure(403, 200, definite=True), {"api_ack": True}
+             ]) as post:
+            m.execute([first, next_page, owner_self], aa, ledger, "200",
+                      persist=Mock(), sleep=Mock())
+            self.assertEqual(post.call_count, 2)
+        hold_key = "facebook/like/cross_post/123"
+        self.assertIn(hold_key, ledger["provider_holds"])
+        self.assertEqual(ledger["provider_holds"][hold_key]["http_status"], 403)
+        self.assertEqual(ledger["actions"][m.key(first)]["status"], "rejected")
+        self.assertEqual(ledger["actions"][m.key(next_page)]["status"], "provider_permission_hold")
+        self.assertEqual(ledger["actions"][m.key(owner_self)]["status"], "accepted")
+        self.assertNotIn("facebook/like", ledger["provider_holds"])
+
+        # The 7-day ledger cleanup must never reauthorize a denied target.
+        ledger["actions"][m.key(first)]["at"] = (NOW - timedelta(days=9)).isoformat()
+        ledger["actions"][m.key(next_page)]["at"] = (NOW - timedelta(days=9)).isoformat()
+        ledger["actions"][m.key(owner_self)]["at"] = (NOW - timedelta(days=9)).isoformat()
+        with patch.dict(m.os.environ, {"META_CROSS_REPOST_ENABLED": "false"}):
+            planned, report = m.build_plan(
+                [dict(platform="facebook", post_id="123", owner="11")],
+                aa, ledger, "201", "100", now=NOW)
+        likes = [row for row in planned if row["operation"] == "like"]
+        self.assertEqual([row["actor"] for row in likes], ["11"])
+        self.assertEqual(sum(r["status"] == "provider_permission_hold" for r in report), 2)
+        with patch.dict(m.os.environ, {"META_CROSS_REPOST_ENABLED": "false"}):
+            other, _ = m.build_plan(
+                [dict(platform="facebook", post_id="124", owner="11")],
+                aa, ledger, "202", "100", now=NOW)
+        self.assertEqual({a["actor"] for a in other if a["operation"] == "like"},
+                         {"11", "22", "55"})
+
+    def test_provider_denial_hold_never_assumed_for_self_like_or_other_code(self):
+        for actor, http, code in (("11", 403, 200), ("22", 400, 100),
+                                  ("22", 503, 200)):
+            t = task(actor=actor)
+            ledger = reserved(t)
+            with patch.object(m, "verified_media", return_value=None), \
+                 patch.object(m, "perform",
+                              side_effect=m.GraphFailure(http, code, definite=True)):
+                m.execute([t], actors(), ledger, "200", persist=Mock(), sleep=Mock())
+            self.assertNotIn("facebook/like/cross_post/123",
+                             ledger.get("provider_holds", {}))
+
+    def test_migrated_403_200_hold_survives_old_receipt_pruning(self):
+        t = task()
+        ledger = reserved(t)
+        ledger["actions"][m.key(t)].update(
+            status="rejected", graph_code=200, http_status=403,
+            at=(NOW - timedelta(days=8)).isoformat())
+        with patch.dict(m.os.environ, {"META_CROSS_REPOST_ENABLED": "false"}):
+            planned, report = m.build_plan(
+                [dict(platform="facebook", post_id="123", owner="11")],
+                actors(), "201", "100", now=NOW)
+        self.assertTrue(any(row["status"] == "provider_permission_hold" for row in report))
+        self.assertIn("facebook/like/cross_post/123", ledger["provider_holds"])
+        self.assertNotIn(m.key(t), ledger["actions"])
+        self.assertFalse(any(a["actor"] == "22" and a["operation"] == "like" for a in planned))
+
     def test_policy_block_stops_other_actors_without_more_posts(self):
         one=task("repost");two=dict(one,actor="11")
         ledger=reserved(one);ledger["actions"].update(reserved(two)["actions"])
