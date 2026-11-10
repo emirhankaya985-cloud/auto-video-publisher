@@ -52,6 +52,81 @@ def summarize(items):
     }
 
 
+CANONICAL_FILM = re.compile(r"^(?P<title>.+?)_Part_(?P<part>[0-9]+)\\.mp4$", re.IGNORECASE)
+
+
+def inventory_film_series(items, state):
+    """GET-only source candidate summary; never grants publication permission.
+
+    A missing part, missing TXT, historical post or source ambiguity disqualifies
+    the series as a *new* film candidate. A candidate still requires fresh Meta
+    history, actual content inspection and a separately authorized publish.
+    """
+    if not isinstance(state, dict) or not isinstance(state.get("entries"), dict):
+        raise ValueError("film_ledger_unavailable")
+    names = {}
+    by_series = {}
+    all_txt = set()
+    for item in items:
+        path = Path(str(item.path))
+        if len(path.parts) != 1:
+            continue
+        name = path.name
+        if name in names and names[name] != str(item.id):
+            raise ValueError("ambiguous_duplicate_filename")
+        names[name] = str(item.id)
+        if name.casefold().endswith(".txt"):
+            all_txt.add(name.casefold())
+            continue
+        match = CANONICAL_FILM.fullmatch(name)
+        if not match:
+            continue
+        title = match.group("title").replace("_", " ").strip()
+        key = title.casefold()
+        part = int(match.group("part"))
+        if part < 1 or part > 500:
+            raise ValueError("film_part_out_of_range")
+        row = by_series.setdefault(key, {"series": title, "parts": set(), "names": {}})
+        if part in row["parts"]:
+            raise ValueError("ambiguous_canonical_part")
+        row["parts"].add(part)
+        row["names"][part] = name
+
+    published = {}
+    for row in state["entries"].values():
+        if not isinstance(row, dict) or row.get("route") not in {"film", "film_second"}:
+            continue
+        filename = str(row.get("file") or "")
+        # Filename aliases may have been posted historically. Normalize the
+        # same film title without treating a caption alone as proof.
+        stem = Path(filename).stem
+        m = re.fullmatch(r"(.+?)_Part_?([0-9]+)(?: \\([0-9]+\\))?", stem, re.I)
+        if not m:
+            continue
+        title = m.group(1).replace("_", " ").strip().casefold()
+        if row.get("status") == "done" and str(row.get("post_id") or "").strip():
+            published.setdefault(title, set()).add(int(m.group(2)))
+    out = []
+    for key, data in sorted(by_series.items()):
+        parts = sorted(data["parts"])
+        missing = [n for n in range(1, max(parts) + 1) if n not in data["parts"]]
+        missing_txt = [n for n in parts if
+                       str(Path(data["names"][n]).with_suffix(".txt")).casefold() not in all_txt]
+        existing = sorted(published.get(key, set()))
+        # This is source discovery, never a "safe_to_publish" verdict.
+        candidate = (key != "bickin" and len(parts) >= 4 and
+                     parts[0] == 1 and not missing and not missing_txt and
+                     not existing)
+        out.append({
+            "series": data["series"], "source_part_count": len(parts),
+            "first_part": parts[0], "last_part": parts[-1],
+            "missing_parts": missing[:30], "missing_txt_parts": missing_txt[:30],
+            "confirmed_existing_ledger_parts": existing,
+            "candidate_new_film": candidate,
+        })
+    return out
+
+
 def main():
     # No provider access from untrusted branch or rerun context.
     if (os.getenv("GITHUB_REPOSITORY") !=
@@ -66,13 +141,22 @@ def main():
     if files is None:
         raise RuntimeError("film_drive_inventory_unavailable")
     result = summarize(files)
+    from publication_github_progress import restore_publication_state
+    ledger = restore_publication_state()
+    result["all_film_series"] = inventory_film_series(files, ledger)
+    result["new_film_candidates"] = [row["series"] for row in result["all_film_series"]
+                                     if row["candidate_new_film"]]
+    result["ledger_compared"] = True
     OUTPUT.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n",
                       encoding="utf-8")
     print(json.dumps({k: result[k] for k in
                       ("mode", "part8_candidate_count",
                        "part3_candidate_count", "media_downloads",
                        "meta_post_requests", "ledger_writes",
-                       "verified_correct_part8")}, ensure_ascii=False))
+                       "verified_correct_part8")}
+                     | {"film_series_count": len(result["all_film_series"]),
+                        "new_film_candidates": result["new_film_candidates"]},
+                     ensure_ascii=False))
 
 
 if __name__ == "__main__":
