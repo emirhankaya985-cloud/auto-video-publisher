@@ -27,6 +27,52 @@ class RelaunchSafetyTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             rel.ordered_episode(rows + [rows[0]])
 
+    def test_readonly_exact_facebook_receipt_never_reposts(self):
+        from datetime import datetime, timezone
+        page = {"page_id": "1298191963387372", "page_token": "unit-test-only"}
+        response = Mock()
+        response.status_code = 200
+        response.json.return_value = {
+            "id": "1234567", "description": "original caption",
+            "from": {"id": page["page_id"]}, "length": 175,
+            "created_time": datetime.now(timezone.utc).isoformat()}
+        with patch("publisher_recovery.read_with_retry", return_value=response) as read, \
+             patch("requests.post") as post:
+            self.assertTrue(rel.exact_original_facebook_video(
+                page, "1234567", "original caption"))
+            self.assertEqual(read.call_count, 1)
+            post.assert_not_called()
+        for changed in (
+            dict(response.json.return_value, id="7654321"),
+            dict(response.json.return_value, description="other caption"),
+            dict(response.json.return_value, **{"from": {"id": "different"}}),
+            dict(response.json.return_value, length=0),
+        ):
+            rejected = Mock()
+            rejected.status_code = 200
+            rejected.json.return_value = changed
+            with patch("publisher_recovery.read_with_retry", return_value=rejected):
+                self.assertFalse(rel.exact_original_facebook_video(
+                    page, "1234567", "original caption"))
+
+    def test_unlisted_facebook_is_held_until_exact_id_owner_proven(self):
+        row = {"status": "accepted_unverified", "post_id": "1234567"}
+        self.assertEqual(rel.state_for(row, []), "held_remote_id_unverified")
+        self.assertEqual(rel.state_for(row, [], exact_provider_verified=True), "verified")
+        self.assertEqual(rel.state_for({"status": "attempted"}, [],
+                       exact_provider_verified=True), "held_previous_attempt_or_reservation")
+        with patch("public_link_runtime.graph_rows", return_value=[]), \
+             patch.object(rel.time, "sleep"), \
+             patch.object(rel, "exact_original_facebook_video", return_value=True) as get:
+            self.assertTrue(rel.verify_post({"page_id": "1298191963387372"},
+                            "facebook", "1234567", "original caption"))
+            get.assert_called_once()
+        with patch("public_link_runtime.graph_rows", return_value=[]), \
+             patch.object(rel.time, "sleep"), \
+             patch.object(rel, "exact_original_facebook_video", return_value=False):
+            self.assertFalse(rel.verify_post({"page_id": "1298191963387372"},
+                             "facebook", "1234567", "original caption"))
+
     def test_pending_or_unrecognized_posts_never_auto_retry(self):
         for status in ("attempted", "reserved", "held"):
             self.assertTrue(rel.state_for({"status": status, "post_id": ""}, []).startswith("held"))
