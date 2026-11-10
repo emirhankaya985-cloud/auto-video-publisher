@@ -7,6 +7,18 @@ import toonzone_relaunch as rel
 
 
 class RelaunchSafetyTests(unittest.TestCase):
+    def test_catchup_schedule_does_not_block_overnight_or_bypass_safety(self):
+        from pathlib import Path
+        workflow = Path(".github/workflows/toonzone_relaunch.yml").read_text(encoding="utf-8")
+        self.assertIn("cron: '7,37 * * * *'", workflow)
+        self.assertNotIn("cron: '7,37 9-20 * * *'", workflow)
+        self.assertIn("group: toonzone-relaunch-s01e04", workflow)
+        self.assertIn("cancel-in-progress: false", workflow)
+        self.assertIn("github.run_attempt == 1", workflow)
+        self.assertIn("Verify exact owner relaunch marker and Meta identity; reserve only next part", workflow)
+        self.assertIn("Persist intent BEFORE any external Meta write", workflow)
+        self.assertIn("Publish only reserved next part on Facebook and Instagram", workflow)
+
     def test_approval_only_on_owner_main_first_attempt(self):
         env = {"GITHUB_REPOSITORY": rel.REPO, "GITHUB_REF": "refs/heads/main",
                "GITHUB_RUN_ATTEMPT": "1", "TOONZONE_RELAUNCH_APPROVED": "true"}
