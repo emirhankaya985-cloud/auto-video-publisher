@@ -147,8 +147,48 @@ def clearly_distinct_sources(part8, part3, *, runner=subprocess.run):
     }
 
 
-def audit_part8_before_publish(item, state, path, prior_download, temp):
-    """Call only after durable intents exist and fresh Meta history was read."""
+def pcm_audio_digest(path, *, runner=subprocess.run):
+    """Decode actual complete audio (not container bytes) for exact duplicate proof."""
+    out = runner(["ffmpeg", "-nostdin", "-v", "error", "-i", str(path),
+                  "-vn", "-map", "0:a:0", "-ac", "1", "-ar", "8000",
+                  "-f", "s16le", "-"], capture_output=True, timeout=75)
+    if out.returncode != 0 or len(out.stdout) < 8000 * 2:
+        raise RuntimeError("film_part8_audio_comparison_unavailable")
+    return hashlib.sha256(out.stdout).hexdigest()
+
+
+def reconcile_known_preupload_crash(state):
+    """Repair only the exact Nov 10 source/commit that failed before all POSTs.
+
+    Live run 42805359391 failed in audit_part8_before_publish, and then in the
+    unregistered-error journal; the API publisher was never entered. This
+    updates no remote state and does not grant upload permission.
+    """
+    entries = state.get("entries") if isinstance(state, dict) else None
+    if not isinstance(entries, dict):
+        return 0
+    repaired = 0
+    for platform in ("facebook", "instagram"):
+        row = entries.get(f"film:{platform}:{SOURCE_ID}")
+        if (isinstance(row, dict) and row.get("route") == "film"
+                and row.get("platform") == platform
+                and row.get("file") == SOURCE_NAME
+                and row.get("status") == "intent"
+                and str(row.get("run_id")) == "42805359391"
+                and row.get("source_sha256") == SOURCE_SHA
+                and not row.get("post_id")):
+            row.update(status="held",
+                       failure={"reason": "confirmed_part3_source_duplicate",
+                                "external_post_attempted": False,
+                                "safe_to_repost": False},
+                       local_failure_verified_run_id="42805359391")
+            repaired += 1
+    return repaired
+
+
+def audit_part8_before_publish(item, state, path, prior_download, temp, *,
+                               evidence_path=None):
+    """Fail closed before Meta POST, preserving sanitized source comparison."""
     if source_digest(path) != SOURCE_SHA:
         raise RuntimeError("film_part8_source_sha_mismatch")
     fp = visual_fingerprint(path)
@@ -158,6 +198,16 @@ def audit_part8_before_publish(item, state, path, prior_download, temp):
     if source_digest(part3) != OLDER_PART3_SHA:
         raise RuntimeError("film_part3_source_sha_mismatch")
     result = clearly_distinct_sources(path, part3)
+    same_audio = pcm_audio_digest(path) == pcm_audio_digest(part3)
+    result["complete_decoded_audio_identical"] = same_audio
+    result["distinct"] = bool(result["distinct"] and not same_audio)
+    result["published_by_this_audit"] = False
+    if evidence_path is not None:
+        report = Path(evidence_path)
+        report.parent.mkdir(parents=True, exist_ok=True)
+        report.write_text(json.dumps(result, indent=2), encoding="utf-8")
+    if same_audio:
+        raise RuntimeError("film_part8_source_is_prior_part_duplicate")
     if not result["distinct"]:
         raise RuntimeError("film_part8_extended_similarity_inconclusive")
     return fp, result
