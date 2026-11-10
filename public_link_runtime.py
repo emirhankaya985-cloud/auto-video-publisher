@@ -1414,6 +1414,15 @@ def plan(audit=False):
                     "original source stays subject to all publish safety gates."
                 )
             videos.sort(key=lambda v: (not v["name"].lower().startswith("yoksul_1986_"), parse_order(Path(v["name"]).stem, "film")))
+            # Explicit owner handoff after Bıçkın 8 proved visually duplicated
+            # Part 3. Reconcile historical ledger and remote history as usual,
+            # but plan ONLY the complete fresh series. No old intent is reset.
+            if os.getenv("FILM_HANDOFF_TO_EN_BUYUK_SABAN", "false").lower() == "true":
+                from film_series_transition import switch_film_source
+                videos = switch_film_source(route, videos, files)
+                report.append(
+                    "FILM HANDOFF: complete En_Buyuk_Saban Part 1-32 selected; "
+                    "historical Bickin/Yoksul receipts preserved and checked.")
         elif source == "toonzone":
             videos = [v for v in videos if parse_order(Path(v["name"]).stem, "cartoon")]
             videos.sort(key=lambda v: parse_order(Path(v["name"]).stem, "cartoon"))
