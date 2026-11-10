@@ -804,6 +804,47 @@ class EngagementTests(unittest.TestCase):
         self.assertEqual({x["owner"] for x in next_batch}, {"11"})
         self.assertEqual(sum(x["actor"] == x["owner"] for x in next_batch), 1)
 
+    def test_exact_rolling_24h_uses_meta_publication_time_for_both_platforms(self):
+        for platform, owner, actor in (("facebook", "11", "22"),
+                                       ("instagram", "33", "44")):
+            t = task("like", platform, actor, owner)
+            stamp_key = "created_time" if platform == "facebook" else "timestamp"
+            owner_key = "from" if platform == "facebook" else "owner"
+            base = {"id": "123", owner_key: {"id": owner}}
+            if platform == "instagram":
+                base["media_type"] = "VIDEO"
+            for age, accepted in ((timedelta(hours=23), True),
+                                  (timedelta(hours=24), True),
+                                  (timedelta(hours=24, seconds=1), False),
+                                  (-timedelta(seconds=1), False)):
+                payload = dict(base, **{stamp_key: (NOW - age).isoformat()})
+                with self.subTest(platform=platform, age=str(age)), \
+                     patch.object(m, "graph", return_value=payload) as graph:
+                    if accepted:
+                        m.verified_media(t, actors(), recent_now=NOW)
+                    else:
+                        with self.assertRaisesRegex(ValueError, "outside_recent_24h_window"):
+                            m.verified_media(t, actors(), recent_now=NOW)
+                    self.assertIn(stamp_key, graph.call_args.args[3]["fields"])
+            with patch.object(m, "graph", return_value=base):
+                with self.assertRaisesRegex(ValueError, "invalid timestamp"):
+                    m.verified_media(t, actors(), recent_now=NOW)
+
+    def test_account_batch_fails_closed_for_post_older_than_24h(self):
+        aa = actors()
+        post = {"platform": "instagram", "post_id": "123", "owner": "33"}
+        ledger = {"schema": 1, "actions": {}}
+        body = {"id": "123", "owner": {"id": "33"}, "media_type": "VIDEO",
+                "timestamp": (NOW - timedelta(hours=25)).isoformat()}
+        with patch.object(m, "graph", return_value=body), \
+             patch.object(m, "perform") as writer:
+            planned, report = m.build_account_batch([post], aa, ledger,
+                                                    "200", "100", now=NOW)
+        writer.assert_not_called()
+        self.assertEqual(planned, [])
+        self.assertEqual(ledger["actions"], {})
+        self.assertIn("source_preflight_failed", {r["status"] for r in report})
+
     def test_account_batch_skips_invalid_source_and_does_not_write_in_plan(self):
         aa = actors()
         aa[("instagram", "55")] = dict(platform="instagram", id="55",
@@ -811,7 +852,8 @@ class EngagementTests(unittest.TestCase):
         posts = [dict(platform="instagram", post_id="101", owner="55"),
                  dict(platform="instagram", post_id="102", owner="55")]
         ledger = {"schema": 1, "actions": {}}
-        def verify(t, _):
+        def verify(t, _, *, recent_now=None):
+            self.assertEqual(recent_now, NOW)
             if t["post_id"] == "101":
                 raise ValueError("source_owner_mismatch")
         with patch.object(m, "verified_media", side_effect=verify), \
