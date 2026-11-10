@@ -30,6 +30,137 @@ APPROVAL = Path("docs/toonzone-relaunch-approved-2026-11-10.md")
 MARKER = "ToonZone re-publication approved: existing old posts will be removed later by owner."
 
 
+# This precise prior intent is immutable: Meta accepted 14,427,127 upload
+# bytes, but the binary endpoint returned HTTP400 while the container was
+# still processing. No media_publish was attempted in run 42873941861.
+RECOVERY_RUN = "42873941861"
+RECOVERY_FILE = "S01E06_Meat_Your_Maker_Part2.mp4"
+RECOVERY_SOURCE = "1iSkWsT2kUzUGxM8g-GuvdxzY_0Bgezjq"
+RECOVERY_COVER = "1ZoabUuyA9NvlpjkFT3YZYf_G54r8rD9-"
+RECOVERY_SOURCE_SHA = "9958e4231115fe95235ec7f2d343144e39d9382ed54a96b921908652607dddc0"
+RECOVERY_COVER_SHA = "cdda18fbf9b94998d34c8e303b41d28b384cc97c816854eef5bca83da956e538"
+RECOVERY_CONTAINER = "17912149164580142"
+RECOVERY_FB_ID = "1483886187013259"
+
+
+def known_ig_incident(item, record):
+    """Only the archived S1E6P2 source, cover, and exact original attempt."""
+    return bool(record and item.get("episode") == 6 and item.get("part") == 2
+                and item.get("id") == RECOVERY_SOURCE and item.get("name") == RECOVERY_FILE
+                and record.get("platform") == "instagram"
+                and record.get("source_id") == RECOVERY_SOURCE
+                and record.get("file") == RECOVERY_FILE
+                and record.get("intent_run_id") == RECOVERY_RUN
+                and record.get("cover_id") == RECOVERY_COVER
+                and record.get("source_sha256") == RECOVERY_SOURCE_SHA
+                and record.get("cover_sha256") == RECOVERY_COVER_SHA)
+
+
+def verified_incident_media(rows, caption):
+    """Recover an exact unique IG media ID only from the original attempt window."""
+    from datetime import datetime, timezone
+    from public_link_runtime import timestamp
+    matched = matches(rows, caption)
+    if len(matched) > 1:
+        raise RuntimeError("relaunch_ambiguous_original_caption")
+    if matched:
+        posted = timestamp(matched[0]).astimezone(timezone.utc)
+        earliest = datetime.fromisoformat("2026-11-10T18:22:12+00:00")
+        if not (earliest <= posted <= history.now_utc()):
+            raise RuntimeError("relaunch_media_outside_original_attempt")
+        if not str(matched[0].get("id") or "").isdecimal():
+            raise RuntimeError("relaunch_remote_identity_invalid")
+    return matched
+
+
+def pinned_container_status(page):
+    """Read status only; never resend binary or create another container."""
+    from cloud_omnichannel_publisher import GRAPH_API_VERSION
+    from publisher_recovery import read_with_retry
+    import requests
+    response = read_with_retry(
+        requests.get, f"https://graph.facebook.com/{GRAPH_API_VERSION}/{RECOVERY_CONTAINER}",
+        headers={"Authorization": "Bearer " + page["page_token"]},
+        params={"fields": "status_code,status"}, timeout=30, graph_read=True)
+    try:
+        data = response.json()
+    except (ValueError, TypeError):
+        raise RuntimeError("relaunch_container_response_unverified") from None
+    if (response.status_code != 200 or not isinstance(data, dict)
+            or data.get("error") or str(data.get("id", RECOVERY_CONTAINER)) != RECOVERY_CONTAINER):
+        raise RuntimeError("relaunch_container_identity_or_read_failed")
+    status = data.get("status_code")
+    if status not in {"IN_PROGRESS", "FINISHED", "PUBLISHED", "ERROR", "EXPIRED"}:
+        raise RuntimeError("relaunch_container_status_unverified")
+    return status
+
+
+def finish_existing_container(page, item, data, ledger, run_id):
+    """At most one publish call to the original FINISHED container, never a new upload."""
+    from cloud_omnichannel_publisher import resume_instagram_container
+    from public_link_runtime import graph_rows
+    fb = ledger["records"].get(record_key(item, "facebook"))
+    ig = ledger["records"].get(record_key(item, "instagram"))
+    if (not known_ig_incident(item, ig) or not fb
+            or fb.get("status") != "verified" or str(fb.get("post_id")) != RECOVERY_FB_ID
+            or ig.get("status") != "resume_reserved"
+            or ig.get("resume_run_id") != run_id
+            or ig.get("resume_container_id") != RECOVERY_CONTAINER
+            or data.get("platforms") != ["instagram"]):
+        raise RuntimeError("relaunch_original_recovery_binding_unverified")
+    facebook_matches = matches(graph_rows(page, "facebook"), fb["caption"])
+    if len(facebook_matches) != 1 or str(facebook_matches[0].get("id")) != RECOVERY_FB_ID:
+        raise RuntimeError("relaunch_facebook_part2_unverified")
+    existing = verified_incident_media(graph_rows(page, "instagram"), ig["caption"])
+    if existing:
+        ig.update(status="verified", post_id=str(existing[0]["id"]),
+                  last_seen=history.now_utc().isoformat(),
+                  reconciled_without_new_post=True)
+        history.save(LEDGER, history.validate(ledger))
+        print("RELAUNCH_IG_RECOVERED_EXISTING_POST_NO_NEW_POST", flush=True)
+        return
+    if pinned_container_status(page) != "FINISHED":
+        # No media_publish occurred; leave exact old attempt awaiting a future tick.
+        ig.update(status="attempted", last_seen=history.now_utc().isoformat())
+        ig.pop("resume_run_id", None)
+        ig.pop("resume_container_id", None)
+        history.save(LEDGER, history.validate(ledger))
+        print("RELAUNCH_IG_EXISTING_CONTAINER_NOT_READY_NO_POST", flush=True)
+        return
+
+    started = False
+    def reserve_publish_once():
+        nonlocal started
+        ig.update(status="resume_publish_attempted",
+                  resume_publish_run_id=run_id,
+                  last_seen=history.now_utc().isoformat())
+        history.save(LEDGER, history.validate(ledger))
+        started = True
+    try:
+        post_id = resume_instagram_container(page, RECOVERY_CONTAINER, reserve_publish_once)
+        if post_id is None:
+            ig.update(status="attempted", last_seen=history.now_utc().isoformat())
+            ig.pop("resume_run_id", None)
+            ig.pop("resume_container_id", None)
+            history.save(LEDGER, history.validate(ledger))
+            return
+        if not str(post_id).isdecimal() or not started:
+            raise RuntimeError("relaunch_resume_ack_invalid")
+        ig.update(status="accepted_unverified", post_id=str(post_id),
+                  last_seen=history.now_utc().isoformat())
+        history.save(LEDGER, history.validate(ledger))
+        if verify_post(page, "instagram", str(post_id), ig["caption"]):
+            ig.update(status="verified", last_seen=history.now_utc().isoformat())
+            history.save(LEDGER, history.validate(ledger))
+            print(f"RELAUNCH_IG_RESUME_VERIFIED media_id={post_id}", flush=True)
+        else:
+            print(f"RELAUNCH_IG_RESUME_ACCEPTED_NOT_YET_VISIBLE media_id={post_id}", flush=True)
+    except Exception as exc:
+        ig.update(error_type=type(exc).__name__, last_seen=history.now_utc().isoformat())
+        history.save(LEDGER, history.validate(ledger))
+        raise RuntimeError("relaunch_ig_resume_ambiguous_no_retry") from None
+
+
 def allowed_context(env=None):
     env = os.environ if env is None else env
     return (env.get("GITHUB_REPOSITORY") == REPO
@@ -109,7 +240,16 @@ def create_plan(run_id):
         for platform in PLATFORMS:
             key = record_key(item, platform)
             previous = ledger["records"].get(key)
-            matched = validate_remote(remote[platform], text, previous)
+            if platform == "instagram" and known_ig_incident(item, previous):
+                # Existing exact caption and in-window media proves publication;
+                # a missing post never proves safe reupload.
+                matched = verified_incident_media(remote[platform], text)
+                if matched and previous.get("status") in {"attempted", "resume_publish_attempted", "resume_reserved"}:
+                    previous.update(post_id=str(matched[0]["id"]), status="verified",
+                                    last_seen=history.now_utc().isoformat(),
+                                    reconciled_without_new_post=True)
+            else:
+                matched = validate_remote(remote[platform], text, previous)
             if previous:
                 if (previous.get("source_id") != item["id"] or previous.get("file") != item["name"]
                         or previous.get("platform") != platform or previous.get("caption") != text):
@@ -122,6 +262,30 @@ def create_plan(run_id):
         if all(value == "verified" for value in statuses.values()):
             continue
         if any(value.startswith("held") for value in statuses.values()):
+            fb = ledger["records"].get(record_key(item, "facebook"))
+            ig = ledger["records"].get(record_key(item, "instagram"))
+            if (known_ig_incident(item, ig) and fb
+                    and statuses.get("facebook") == "verified"
+                    and fb.get("post_id") == RECOVERY_FB_ID
+                    and statuses.get("instagram") == "held_previous_attempt_or_reservation"
+                    and ig.get("status") == "attempted" and not ig.get("post_id")):
+                status = pinned_container_status(page)
+                if status == "FINISHED":
+                    ig.update(status="resume_reserved", resume_run_id=run_id,
+                              resume_container_id=RECOVERY_CONTAINER,
+                              last_seen=history.now_utc().isoformat())
+                    history.save(LEDGER, history.validate(ledger))
+                    data = dict(run_id=run_id, item=item, mode="resume_container",
+                                platforms=["instagram"])
+                    history.save(PLAN, data)
+                    print("RELAUNCH_IG_EXISTING_CONTAINER_RESUME_RESERVED", flush=True)
+                    return data
+                if status == "IN_PROGRESS":
+                    history.save(LEDGER, history.validate(ledger))
+                    history.save(PLAN, {"run_id": run_id, "item": None, "platforms": []})
+                    print("RELAUNCH_IG_EXISTING_CONTAINER_PROCESSING_NO_POST", flush=True)
+                    return None
+                print(f"RELAUNCH_IG_CONTAINER_TERMINAL_HOLD status={status}", flush=True)
             history.save(LEDGER, ledger)
             raise RuntimeError(f"relaunch_part{item['part']}_requires_previous_intent_reconciliation")
         # Reserve at most one ordered part, on both independently verified accounts.
@@ -197,6 +361,9 @@ def publish(run_id):
     platforms = data["platforms"]
     if not isinstance(platforms, list) or not platforms or not set(platforms).issubset(PLATFORMS):
         raise RuntimeError("relaunch_platforms_invalid")
+    if data.get("mode") == "resume_container":
+        finish_existing_container(page, item, data, ledger, run_id)
+        return
     with tempfile.TemporaryDirectory(prefix="toonzone-relaunch-") as directory:
         temp = Path(directory)
         source = download_verified_publication_video(item["id"], temp / "source.mp4")
