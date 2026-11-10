@@ -2144,7 +2144,13 @@ def publish():
                     except (OSError, RuntimeError, ValueError) as exc:
                         # The original three-frame hold is still authoritative
                         # unless the stronger source-vs-source proof passes.
-                        hold_visual_duplicate(item, state, source_fingerprint)
+                        if not hold_visual_duplicate(item, state, source_fingerprint):
+                            for p in item["platforms"]:
+                                state["entries"][f"{item['route']}:{p}:{item['id']}"].update(
+                                    status="held",
+                                    failure={"reason": "film_part8_strict_recheck_held",
+                                             "external_post_attempted": False,
+                                             "safe_to_repost": False})
                         record_error("source_video", "film_part8_strict_recheck_held",
                                      route=item["route"], video=item["name"],
                                      error=exc, safe_to_retry=False)
