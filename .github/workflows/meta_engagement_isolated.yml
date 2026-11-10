@@ -1,0 +1,38 @@
+name: Meta engagement independent workers
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  engagement:
+    strategy:
+      fail-fast: false
+      matrix:
+        account: [tarladaki, penguen, gonle, daily_laugh, film, toonzone]
+    concurrency:
+      group: engagement-${{ matrix.account }}
+      cancel-in-progress: false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      ENGAGEMENT_ACCOUNT: ${{ matrix.account }}
+      META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+      META_ENGAGEMENT_ENABLED: ${{ vars.META_ENGAGEMENT_ENABLED }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Independent account preflight
+        run: |
+          python - <<'PY'
+          import os, json
+          account=os.environ['ENGAGEMENT_ACCOUNT']
+          enabled=os.environ.get('META_ENGAGEMENT_ENABLED')=='true'
+          token=bool(os.environ.get('META_ACCESS_TOKEN'))
+          print(json.dumps({'account':account,'enabled':enabled,'token_present':token,'action':'preflight_only','likes_sent':0}))
+          if enabled and not token:
+              raise SystemExit('META_ACCESS_TOKEN missing')
+          PY
