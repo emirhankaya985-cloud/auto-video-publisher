@@ -338,13 +338,49 @@ def matches(rows, exact_caption):
     return [row for row in rows if (row.get("description") or row.get("caption")) == exact_caption]
 
 
-def state_for(record, matched):
+def exact_original_facebook_video(page, post_id, exact_caption, *, get=None):
+    """GET only: a delayed Page /videos feed is not a missing publication.
+
+    Match the accepted original Reel's own provider ID, owning Page,
+    entire archived caption, positive video length and UTC publication time.
+    Never infer identity from a matching caption on another post.
+    """
+    if (not str(post_id or "").isdecimal() or not isinstance(exact_caption, str)
+            or not exact_caption.strip() or not isinstance(page, dict)
+            or not str(page.get("page_id") or "").isdecimal()
+            or not page.get("page_token")):
+        return False
+    import requests
+    from cloud_omnichannel_publisher import GRAPH_API_VERSION
+    from publisher_recovery import read_with_retry
+    from publication_operations import exact_provider_video_verified
+    try:
+        fn = get or requests.get
+        response = read_with_retry(
+            fn, f"https://graph.facebook.com/{GRAPH_API_VERSION}/{post_id}",
+            headers={"Authorization": "Bearer " + page["page_token"]},
+            params={"fields": "id,description,from,length,created_time"},
+            timeout=20, allow_redirects=False, graph_read=True)
+        try:
+            payload = response.json()
+        finally:
+            response.close()
+        if response.status_code != 200 or not isinstance(payload, dict) or payload.get("error"):
+            return False
+        return exact_provider_video_verified(
+            payload, page=page, platform="facebook", post_id=str(post_id),
+            caption=exact_caption)
+    except (OSError, ValueError, TypeError, requests.RequestException):
+        return False
+
+
+def state_for(record, matched, *, exact_provider_verified=False):
     """Never mistake an absent remote ID for a deletion certificate."""
     status = record.get("status")
     post_id = str(record.get("post_id") or "")
     verified_id = post_id and len([m for m in matched if str(m.get("id")) == post_id]) == 1
     if status in {"verified", "accepted_unverified"}:
-        return "verified" if verified_id else "held_remote_id_unverified"
+        return "verified" if verified_id or exact_provider_verified else "held_remote_id_unverified"
     return "held_previous_attempt_or_reservation"
 
 
@@ -393,7 +429,19 @@ def create_plan(run_id):
                 if (previous.get("source_id") != item["id"] or previous.get("file") != item["name"]
                         or previous.get("platform") != platform or previous.get("caption") != text):
                     raise RuntimeError("relaunch_archived_identity_changed")
-                statuses[platform] = state_for(previous, matched)
+                # FB Reels can be accepted by Graph before they appear in
+                # bounded /videos results. An exact own-ID read proves the
+                # ORIGINAL post without creating a second upload.
+                direct_fb = (platform == "facebook" and not matched
+                             and previous.get("status") in {"verified", "accepted_unverified"}
+                             and exact_original_facebook_video(
+                                 page, previous.get("post_id"), previous["caption"]))
+                statuses[platform] = state_for(
+                    previous, matched, exact_provider_verified=direct_fb)
+                if direct_fb and previous.get("status") == "accepted_unverified":
+                    previous.update(status="verified", last_seen=history.now_utc().isoformat(),
+                                    reconciled_by_exact_provider_id=True)
+                    print("RELAUNCH_FB_ORIGINAL_PROVIDER_ID_VERIFIED_NO_POST", flush=True)
                 if statuses[platform] == "verified" and previous.get("status") == "accepted_unverified":
                     previous.update(status="verified", last_seen=history.now_utc().isoformat())
             else:
@@ -487,6 +535,8 @@ def verify_post(page, platform, post_id, exact_caption):
             return True
         if attempt < 2:
             time.sleep(5)
+    if platform == "facebook":
+        return exact_original_facebook_video(page, post_id, exact_caption)
     return False
 
 
