@@ -1,5 +1,11 @@
 name: Meta engagement independent account diagnostics
 on:
+  # Run a no-write acceptance check immediately after merging a diagnostic fix.
+  push:
+    branches: [main]
+    paths:
+      - 'meta_cross_engagement.py'
+      - '.github/workflows/meta_engagement_isolated.yml'
   schedule:
     - cron: '10,25,40,55 * * * *'
   workflow_dispatch:
