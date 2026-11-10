@@ -1,0 +1,101 @@
+name: ToonZone S01E04 owner-authorized relaunch
+
+on:
+  pull_request:
+    paths:
+      - toonzone_relaunch.py
+      - test_toonzone_relaunch.py
+      - .github/workflows/toonzone_relaunch.yml
+  push:
+    branches: [main]
+    paths:
+      # A separate owner-approved marker starts a first live run after merging.
+      - docs/toonzone-relaunch-approved-2026-11-10.md
+  schedule:
+    # One part per run, only after both account receipts reconcile.
+    # Istanbul UTC+3. Other account schedules and likes are untouched.
+    - cron: '7,37 9-20 * * *'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: toonzone-relaunch-s01e04
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: pip install --require-hashes -r requirements.txt
+      - run: python -m unittest -v test_toonzone_relaunch.py
+      - run: python -m py_compile toonzone_relaunch.py
+
+  relaunch:
+    needs: tests
+    if: >-
+      github.repository == 'emirhankaya985-cloud/auto-video-publisher' &&
+      github.ref == 'refs/heads/main' &&
+      github.run_attempt == 1 &&
+      (github.event_name == 'push' || github.event_name == 'schedule')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    env:
+      GH_TOKEN: ${{ github.token }}
+      META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+      TOONZONE_RELAUNCH_APPROVED: >-
+        ${{ vars.ENABLE_TOONZONE_ROUTES == 'true' && vars.ENABLE_NEW_META_ROUTES == 'true' && vars.META_NEW_ROUTES_RIGHTS_APPROVED == 'true' && 'true' || 'false' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install pinned publisher dependencies and original PNG decoder
+        run: |
+          pip install --require-hashes -r requirements.txt
+          pip install gdown==6.4.2 pillow==13.0.0
+      - name: Check FFmpeg prerequisites before accepting any release
+        timeout-minutes: 6
+        run: |
+          if ! command -v ffmpeg >/dev/null || ! command -v ffprobe >/dev/null; then
+            timeout --signal=TERM --kill-after=10s 100s sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=20 update -qq
+            timeout --signal=TERM --kill-after=10s 120s sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=20 install -y --no-install-recommends ffmpeg
+          fi
+          command -v ffmpeg && command -v ffprobe
+      - name: Verify exact owner relaunch marker and Meta identity; reserve only next part
+        run: python toonzone_relaunch.py plan
+      - name: Persist intent BEFORE any external Meta write
+        id: archive_intent
+        uses: actions/upload-artifact@v4
+        with:
+          name: toonzone-relaunch-intent
+          path: toonzone-relaunch-runtime/alert-history.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Publish only reserved next part on Facebook and Instagram
+        env:
+          RELAUNCH_INTENT_ARCHIVED: ${{ steps.archive_intent.outcome == 'success' && 'true' || 'false' }}
+        run: python toonzone_relaunch.py publish
+      - name: Preserve result including real IDs and ambiguous holds
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: toonzone-relaunch-result
+          path: toonzone-relaunch-runtime/alert-history.json
+          if-no-files-found: ignore
+          retention-days: 90
+      - name: Preserve exact release plan
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: toonzone-relaunch-plan
+          path: toonzone-relaunch-runtime/plan.json
+          if-no-files-found: ignore
+          retention-days: 30
