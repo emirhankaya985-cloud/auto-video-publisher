@@ -196,7 +196,7 @@ jobs:
           ADVANCED_DEDUPE_ENABLED: 'false'
           AUTO_SUBTITLES_ENABLED: 'false'
           ADAPTIVE_SCHEDULE_ENABLED: 'false'
-        run: python -m unittest -v test_public_link_runtime.py test_film_part8_recovery.py test_film_ten_parts_once.py test_film_remaining_five_once.py
+        run: python -m unittest -v test_public_link_runtime.py test_film_part8_recovery.py test_film_ten_parts_once.py test_film_remaining_five_once.py test_daily_laugh40_quarantine.py
       - name: Restore next-day evidence for non-serial slots (fallback to current hours)
         env:
           GITHUB_TOKEN: ${{ github.token }}
