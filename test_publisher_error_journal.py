@@ -45,6 +45,7 @@ class ErrorJournalTests(unittest.TestCase):
             ("instagram_publish", "existing_container_reconciliation_failed", "instagram"),
             ("youtube_prepare", "missing_secret", "youtube"),
             ("youtube_publish", "youtube_publication_unverified", "youtube"),
+            ("source_video", "film_part8_strict_recheck_held", "instagram"),
         ]
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"GITHUB_RUN_ID": "9321"}):
             path = Path(tmp) / "events.jsonl"

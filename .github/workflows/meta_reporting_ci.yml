@@ -15,6 +15,8 @@ on:
       - 'test_publication_github_progress.py'
       - 'stats_reporter.py'
       - 'public_link_runtime.py'
+      - 'publisher_error_journal.py'
+      - 'test_publisher_error_journal.py'
       - 'test_public_link_runtime.py'
       - 'instagram_media_compat.py'
       - 'test_instagram_media_compat.py'
