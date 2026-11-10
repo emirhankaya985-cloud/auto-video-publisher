@@ -23,3 +23,7 @@ Owner requested all remaining S01E04 parts right now. Queue the next run for Par
 ## 10 November guarded S01E06 Part2 container recovery
 
 Owner delegated the ToonZone recovery to the assistant. The original Instagram container 17912149164580142 was still IN_PROGRESS on the live read-only check 42879342430; no IG post was observed. Run the isolated existing relaunch workflow once under the existing owner approval to check the exact original container and, if it is FINISHED and no media exists, reserve and publish this same container once. Do not create a new container or replay the video; if still processing, make no POST and await next scheduled tick. Preserve all receipts and cover/source identity.
+
+## 10 November 22:14 TRT — owner follow-up
+
+Owner said the ToonZone relaunch remains delegated to the assistant. Request one immediate *guarded* live check of the original S01E06 Part2 Instagram container; never reupload, and never publish when the container is IN_PROGRESS/ERROR/EXPIRED. A genuinely FINISHED old container can be resumed only once with an archived before-publish intent. This trigger does not authorize modifying other accounts or removing posts.
