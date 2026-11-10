@@ -737,6 +737,62 @@ def build_one_like(posts, actors, ledger, run_id, source_run_id, *, now):
             return tasks, report
     return [], [{"status": "no_eligible_verified_single_like"}]
 
+
+def build_account_batch(posts, actors, ledger, run_id, source_run_id, *, now):
+    """One account per tick, all its eligible recent posts, same-platform likes only.
+
+    Each actor/post intent is persisted to an artifact before the first POST.
+    Other account lanes stay independent; never self-like, save or repost.
+    """
+    if ledger.get("schema") != 1 or not isinstance(ledger.get("actions"), dict):
+        raise ValueError("invalid engagement ledger; reset forbidden")
+    holds = provider_holds(ledger)
+    never = datetime(1970, 1, 1, tzinfo=timezone.utc)
+    names = {(a["platform"], a["id"]): a["name"] for a in actors.values()}
+    last_target = {}
+    for record in ledger["actions"].values():
+        if record.get("operation") == "like":
+            name = names.get((record.get("platform"), str(record.get("owner", ""))))
+            if name:
+                last_target[name] = max(last_target.get(name, never), stamp(record["at"]))
+
+    priority = ("ToonZone", "Film Mağarası", "Filmmagrasi",
+                "Beyinsiz Penguen", "Tarladaki Fasulye",
+                "Gönle Düşen", "Daily Laugh Lab")
+    rank = {name: i for i, name in enumerate(priority)}
+    by_name = {}
+    for post in posts:
+        owner = actors.get((post["platform"], post["owner"]))
+        if owner and f'{post["platform"]}/like' not in holds:
+            by_name.setdefault(owner["name"], []).append(post)
+
+    for name in sorted(by_name, key=lambda n: (last_target.get(n, never),
+                                               rank.get(n, len(rank)), n)):
+        planned, report = [], []
+        for post in sorted(by_name[name], key=lambda p: (p["platform"], p["post_id"])):
+            platform = post["platform"]
+            reviewers = {
+                (a["platform"], a["id"]): a for a in actors.values()
+                if a["platform"] == platform and a["id"] != post["owner"]
+                and permission(platform, "like") <= a["grants"]
+                and key(dict(post, actor=a["id"], operation="like")) not in ledger["actions"]
+            }
+            if not reviewers:
+                continue
+            probe = dict(post, actor=next(iter(reviewers.values()))["id"], operation="like")
+            try:
+                verified_media(probe, actors)
+            except (GraphFailure, ValueError, KeyError):
+                report.append({"status": "source_preflight_failed"})
+                continue
+            reservations, reasons = build_plan([post], reviewers, ledger, run_id,
+                                               source_run_id, now=now)
+            planned.extend(t for t in reservations if t["operation"] == "like")
+            report.extend(reasons)
+        if planned:
+            return planned, report
+    return [], [{"status": "no_eligible_verified_account_batch"}]
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("action", choices=("plan", "execute"))
@@ -751,8 +807,11 @@ def main():
     single_like = (mode == "single_like"
                    and os.getenv("GITHUB_EVENT_NAME") in {"push", "schedule"}
                    and os.getenv("GITHUB_REF") == "refs/heads/main")
+    account_batch = (mode == "account_batch"
+                     and os.getenv("GITHUB_EVENT_NAME") in {"schedule", "push"}
+                     and os.getenv("GITHUB_REF") == "refs/heads/main")
     live = (os.getenv("META_CROSS_ENGAGEMENT_ENABLED") == "true"
-            and (mode == "apply" or single_like))
+            and (mode == "apply" or single_like or account_batch))
     focus = os.getenv("META_AUDIT_FOCUS", "").strip()
     if focus and live:
         # A focus is exclusively for read-only coverage; never escalate to
@@ -776,14 +835,22 @@ def main():
                  if os.getenv("ENGAGEMENT_SCOPE") == "recent_window"
                  else source_posts(state, source_id, actors))
         posts, focus_info = scope_audit_posts(posts, actors, focus)
-        tasks, report = (build_one_like(posts, actors, ledger, run_id, source_id, now=now)
-                         if single_like else build_plan(posts, actors, ledger, run_id,
-                                                        source_id, now=now))
+        if account_batch:
+            tasks, report = build_account_batch(posts, actors, ledger, run_id, source_id, now=now)
+        elif single_like:
+            tasks, report = build_one_like(posts, actors, ledger, run_id, source_id, now=now)
+        else:
+            tasks, report = build_plan(posts, actors, ledger, run_id, source_id, now=now)
         if single_like and live and (
                 len(tasks) > 1
                 or any(t["operation"] != "like" or t["actor"] == t["owner"]
                        for t in tasks)):
             raise ValueError("single-like plan not safe")
+        if account_batch and live and (any(t["operation"] != "like"
+                or t["actor"] == t["owner"] for t in tasks)
+                or len({a["name"] for t in tasks for a in actors.values()
+                        if a["platform"] == t["platform"] and a["id"] == t["owner"]}) > 1):
+            raise ValueError("account batch scope invalid")
         # A zero-eligible scheduled tick is a legitimate no-op. Its
         # diagnostic has a status but no platform/operation, unlike task rows.
         blocked_counts = dict(Counter(
@@ -816,6 +883,11 @@ def main():
                 or any(t.get("operation") != "like" or t.get("actor") == t.get("owner")
                        for t in tasks)):
             raise ValueError("single-like execution scope invalid")
+        if account_batch and (any(t.get("operation") != "like"
+                or t.get("actor") == t.get("owner") for t in tasks)
+                or len({a["name"] for t in tasks for a in actors.values()
+                        if a["platform"] == t.get("platform") and a["id"] == t.get("owner")}) > 1):
+            raise ValueError("account batch execution scope invalid")
         execute(tasks, actors, ledger, run_id, persist=lambda x: save(STATE, x))
         counts = {}
         for value in ledger["actions"].values():
@@ -826,7 +898,7 @@ def main():
                                     for v in ledger["actions"].values() if v.get("run_id") == run_id))
         print(json.dumps({"results": counts, "by_operation": by_operation,
                           "provider_holds": ledger.get("provider_holds", {}), "publication_state_modified": False}))
-        if (ledger.get("provider_holds") and not single_like) or any(counts.get(s) for s in ("source_or_permission_unverified", "uncertain", "rejected", "blocked_actor", "provider_restriction_hold")):
+        if (ledger.get("provider_holds") and mode == "apply") or any(counts.get(s) for s in ("source_or_permission_unverified", "uncertain", "rejected", "blocked_actor", "provider_restriction_hold")):
             raise SystemExit(1)
     else:
         print('{"mode":"dry_run","writes":0}')
