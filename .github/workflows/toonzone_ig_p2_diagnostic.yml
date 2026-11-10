@@ -1,0 +1,54 @@
+name: ToonZone S01E06 Part2 Instagram ambiguous attempt READ ONLY
+on:
+  pull_request:
+    paths:
+      - 'toonzone_ig_p2_diagnostic.py'
+      - 'test_toonzone_ig_p2_diagnostic.py'
+      - '.github/workflows/toonzone_ig_p2_diagnostic.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'docs/toonzone-ig-p2-readonly-trigger-2026-11-10.md'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: toonzone-ig-s01e06p2-readonly
+  cancel-in-progress: false
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: pip install --require-hashes -r requirements.txt
+      - run: python -m unittest -v test_toonzone_ig_p2_diagnostic.py
+  diagnose:
+    needs: tests
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: pip install --require-hashes -r requirements.txt
+      - name: Read latest archived intent, exact IG account history, and exact container; never POST
+        run: python toonzone_ig_p2_diagnostic.py
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: toonzone-s01e06p2-readonly-report
+          path: toonzone-ig-p2-diagnostic/report.json
+          if-no-files-found: ignore
+          retention-days: 30
