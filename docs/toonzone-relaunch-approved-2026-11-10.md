@@ -37,3 +37,7 @@ The owner asked the assistant to fix the blocked publishing workflow. Exact orig
 ## 10 November — continue to the next guarded Part after verified recovery
 
 The original S01E06 Part2 Instagram replacement was published and verified in GitHub Actions run 42890933685 as media ID 18063165224536509 (Facebook original 1483886187013259). Owner already authorized S01E04–E12 Part1→4 ordered publication. Start exactly one more existing guarded relaunch workflow run now to verify those platform receipts and, if both match remotely and the source/cover pass, publish only S01E06 Part3. Never retry S01E06 Part2 or skip an unverified predecessor.
+
+## 10 November 23:15 TRT — owner-requested verification and ordered next part
+
+Owner requested a repeat live ToonZone check. Run the pre-existing guarded release workflow exactly once under the previously authorized sequential S01E04–E12 campaign. First reconcile S01E06 Part3 Facebook receipt 1720866789636872 against the provider's original caption and Instagram receipt 18213663004367454; if and only if both match, reserve the next S01E06 Part4, validate its original source PNG and cover, and publish in order. Any ambiguous or missing provider ID is a hard hold. No old-post deletion, unrelated-account changes or duplicate posts.
