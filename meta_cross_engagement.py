@@ -785,6 +785,7 @@ def build_account_batch(posts, actors, ledger, run_id, source_run_id, *, now):
         if owner and f'{post["platform"]}/like' not in holds:
             by_name.setdefault(owner["name"], []).append(post)
 
+    blocked_across_accounts = []
     for name in sorted(by_name, key=lambda n: (last_target.get(n, never),
                                                rank.get(n, len(rank)), n)):
         planned, report = [], []
@@ -810,7 +811,8 @@ def build_account_batch(posts, actors, ledger, run_id, source_run_id, *, now):
             report.extend(reasons)
         if planned:
             return planned, report
-    return [], [{"status": "no_eligible_verified_account_batch"}]
+        blocked_across_accounts.extend(report)
+    return [], blocked_across_accounts or [{"status": "no_eligible_verified_account_batch"}]
 
 def main():
     parser = argparse.ArgumentParser()
