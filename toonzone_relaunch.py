@@ -59,12 +59,11 @@ def known_ig_incident(item, record):
 def verified_incident_media(rows, caption):
     """Recover an exact unique IG media ID only from the original attempt window."""
     from datetime import datetime, timezone
-    from public_link_runtime import timestamp
     matched = matches(rows, caption)
     if len(matched) > 1:
         raise RuntimeError("relaunch_ambiguous_original_caption")
     if matched:
-        posted = timestamp(matched[0]).astimezone(timezone.utc)
+        posted = history.stamp(matched[0].get("created_time") or matched[0].get("timestamp"))
         earliest = datetime.fromisoformat("2026-11-10T18:22:12+00:00")
         if not (earliest <= posted <= history.now_utc()):
             raise RuntimeError("relaunch_media_outside_original_attempt")
