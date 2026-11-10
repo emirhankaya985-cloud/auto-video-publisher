@@ -613,6 +613,43 @@ class EngagementTests(unittest.TestCase):
         self.assertEqual(skipped, [])
         self.assertEqual(len(visited), 1)
 
+    def test_modern_matrix_no_post_verify_failure_can_be_skipped_readonly(self):
+        data = self.fallback_fixture()
+        stages = data["actions/runs/101/jobs?per_page=100"]["jobs"][0]["steps"]
+        for row in stages:
+            if row["name"] == "Install media runtime only after Meta preflight passed":
+                row["conclusion"] = "success"
+            if row["name"] == "Verify state, account and caption safety without API writes":
+                row["conclusion"] = "failure"
+        data["actions/runs/101/jobs?per_page=100"]["jobs"][0]["name"] = "meta (film)"
+        data["actions/runs/101/jobs?per_page=100"]["jobs"].append({
+            "name": "merge-account-receipts", "status": "completed",
+            "conclusion": "failure", "run_id": 101, "steps": []})
+        data["actions/runs/101/jobs?per_page=100"]["total_count"] = 2
+        rid, skipped, visited = self.choose_fallback(data)
+        self.assertEqual(rid, "100")
+        self.assertEqual(skipped, ["101"])
+
+        for change in ("plan_ran", "intent_started", "publish_started", "merge_success",
+                       "wrong_job", "wrong_archive_count"):
+            case = copy.deepcopy(data)
+            job = case["actions/runs/101/jobs?per_page=100"]["jobs"][0]
+            byname = {x["name"]: x for x in job["steps"]}
+            if change == "plan_ran":
+                byname["Check public folders, captions, histories and prepare intent"]["conclusion"] = "success"
+            if change == "intent_started":
+                byname["Persist intent before any Meta upload"]["conclusion"] = "success"
+            if change == "publish_started":
+                byname["Publish explicitly planned Meta videos"]["conclusion"] = "success"
+            if change == "merge_success":
+                case["actions/runs/101/jobs?per_page=100"]["jobs"][1]["conclusion"] = "success"
+            if change == "wrong_job":
+                job["name"] = "meta (foreign)"
+            if change == "wrong_archive_count":
+                case["actions/runs/101/jobs?per_page=100"]["total_count"] = 1
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                self.choose_fallback(case)
+
     def test_fallback_never_skips_expired_duplicate_or_intent_artifact(self):
         for artifacts in (
             [{"name": "link-state-result", "expired": True}],
