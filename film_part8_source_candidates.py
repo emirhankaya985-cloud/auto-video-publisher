@@ -52,7 +52,7 @@ def summarize(items):
     }
 
 
-CANONICAL_FILM = re.compile(r"^(?P<title>.+?)_Part_(?P<part>[0-9]+)\\.mp4$", re.IGNORECASE)
+CANONICAL_FILM = re.compile(r"^(?P<title>.+?)_Part_(?P<part>[0-9]+)\.mp4$", re.IGNORECASE)
 
 
 def inventory_film_series(items, state):
@@ -100,7 +100,7 @@ def inventory_film_series(items, state):
         # Filename aliases may have been posted historically. Normalize the
         # same film title without treating a caption alone as proof.
         stem = Path(filename).stem
-        m = re.fullmatch(r"(.+?)_Part_?([0-9]+)(?: \\([0-9]+\\))?", stem, re.I)
+        m = re.fullmatch(r"(.+?)_Part_?([0-9]+)(?: \([0-9]+\))?", stem, re.I)
         if not m:
             continue
         title = m.group(1).replace("_", " ").strip().casefold()
