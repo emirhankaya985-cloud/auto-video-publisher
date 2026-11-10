@@ -74,7 +74,7 @@ jobs:
       META_PREFLIGHT_PARTIAL_OK: 'true'
       MEDIA_QUALITY_ENABLED: ${{ vars.MEDIA_QUALITY_ENABLED != 'false' && 'true' || 'false' }}
       # Owner-requested rollout after offline and real FFmpeg acceptance.
-      ADVANCED_DEDUPE_ENABLED: ${{ (github.event_name == 'push' && github.event.head_commit.message == 'ops: authorized-once-film-bickin8-2026-11-10') || vars.ADVANCED_DEDUPE_ENABLED != 'false' && 'true' || 'false' }}
+      ADVANCED_DEDUPE_ENABLED: ${{ ((github.event_name == 'push' && github.event.head_commit.message == 'ops: authorized-once-film-bickin8-2026-11-10') || vars.ADVANCED_DEDUPE_ENABLED != 'false') && 'true' || 'false' }}
       # Only the owner-requested exact new marker runs the strict source
       # disambiguation. Normal scheduled jobs never rearm old held intents.
       FILM_PART8_STRICT_RECHECK_ENABLED: ${{ github.event_name == 'push' && github.event.head_commit.message == 'ops: authorized-once-film-bickin8-2026-11-10' && 'true' || 'false' }}
@@ -168,11 +168,12 @@ jobs:
           # Production's one-page preflight receipt must not change the legacy
           # all-route offline test fixtures or trigger mock identity holds.
           META_PREFLIGHT_PARTIAL_OK: 'false'
+          FILM_PART8_STRICT_RECHECK_ENABLED: 'false'
           MEDIA_QUALITY_ENABLED: 'false'
           ADVANCED_DEDUPE_ENABLED: 'false'
           AUTO_SUBTITLES_ENABLED: 'false'
           ADAPTIVE_SCHEDULE_ENABLED: 'false'
-        run: python -m unittest -v test_public_link_runtime.py
+        run: python -m unittest -v test_public_link_runtime.py test_film_part8_recovery.py
       - name: Restore next-day evidence for non-serial slots (fallback to current hours)
         env:
           GITHUB_TOKEN: ${{ github.token }}
