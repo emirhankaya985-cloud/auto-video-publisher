@@ -54,6 +54,9 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install --require-hashes -r requirements.txt
+      # The GET-only state reader imports the shared uploader module; its
+      # dependencies (gdown and Pillow) must exist despite no media writes.
+      - run: pip install gdown==6.4.2 pillow==13.0.0
       - name: Check exact archived provider ID, owner and captions — GET only
         run: python meta_receipt_readonly.py
       - name: Preserve confirmed or held status without resetting any ledger
