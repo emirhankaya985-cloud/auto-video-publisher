@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "route": "toonzone",
+  "scope": "instagram_and_facebook_publication",
+  "record_type": "owner_confirmed_relaunch_baseline",
+  "recorded_date": "2026-11-10",
+  "season": 1,
+  "completed_episodes": [
+    1,
+    2,
+    3
+  ],
+  "completed_parts_per_episode": [
+    1,
+    2,
+    3,
+    4
+  ],
+  "completed_status": "owner_reported_published_not_reverified_by_api",
+  "next_to_publish": {
+    "season": 1,
+    "episode": 4,
+    "part": 1
+  },
+  "subsequent_order": "S01E04 Part1 → Part2 → Part3 → Part4, then each next episode in ascending order",
+  "post_episode3_cleanup": {
+    "responsible": "owner",
+    "state": "awaiting_owner_deletion_of_remaining_existing_posts",
+    "remote_absence_verified": false,
+    "all_legacy_intents_reconciled": false
+  },
+  "publish_hold": true,
+  "meta_cross_engagement_unchanged": true,
+  "unrelated_accounts_unchanged": true,
+  "notes": "Only this new active starting-point declaration is current for ToonZone planning. Historical provider receipts and GitHub workflow artifacts are intentionally retained as safety evidence until remote deletions and intent reconciliation are confirmed. No existing Instagram/Facebook posts are deleted by this record; do not treat owner's declaration as provider proof. Never blindly repost."
+}
