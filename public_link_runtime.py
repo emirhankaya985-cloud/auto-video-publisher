@@ -1239,12 +1239,16 @@ def plan(audit=False):
     # Reserve the exact final caption per route/platform within this batch.
     # Different Drive IDs with identical text are not two safe posts.
     planned_caption_hashes = set()
-    batch_limit = 8 if os.getenv("CATCHUP_BATCH_DATE") == day else 1
+    scope = account_scope()
+    # A signed, exact-date workflow gate sets this flag for the PRIMARY Film
+    # route only. It cannot affect normal slots, other routes or later dates.
+    film_ten_once = (os.getenv("FILM_TEN_PARTS_ONCE") == "true"
+                     and day == "2026-11-10" and scope == "film")
+    batch_limit = 10 if film_ten_once else (8 if os.getenv("CATCHUP_BATCH_DATE") == day else 1)
     from operational_enhancements import bounded_catchup_limit
     history_cache = {}
     duplicate_fingerprints = {}
     rescue_only = os.getenv("IG_AUDITED_RESCUE_ONLY") == "true"
-    scope = account_scope()
     for route, (source, page_name) in prioritized_route_items(day):
         if scope and route != scope:
             continue
@@ -1358,7 +1362,13 @@ def plan(audit=False):
             # account quota. Exact caption reconciliation still runs above.
             counts = {p: 0 for p in platforms}
         due = target_count(route, now)
-        if os.getenv("CATCHUP_BATCH_DATE") != day:
+        if film_ten_once and route == "film":
+            # Ten *new, distinct* Part 1-10 sources, not ten quota slots
+            # consumed by other Film posts earlier today. Per-source ledger
+            # and provider dedupe still apply, so nothing is blindly reposted.
+            due = max(counts.values(), default=0) + 10
+            report.append("OWNER ONE-SHOT: up to ten En Buyuk Saban parts (1-10) on primary Film Meta routes.")
+        if os.getenv("CATCHUP_BATCH_DATE") != day and not (film_ten_once and route == "film"):
             batch_limit = bounded_catchup_limit(
                 route, due, counts, clock,
                 enabled=os.getenv("AUTO_BACKFILL_ENABLED", "false").lower() == "true")
@@ -1420,6 +1430,13 @@ def plan(audit=False):
             if os.getenv("FILM_HANDOFF_TO_EN_BUYUK_SABAN", "false").lower() == "true":
                 from film_series_transition import switch_film_source
                 videos = switch_film_source(route, videos, files)
+                if film_ten_once and route == "film":
+                    # Exclude Part 11+ even if the daily accounting target is
+                    # higher because of already-published unrelated videos.
+                    allowed = {f"En_Buyuk_Saban_Part_{i}.mp4" for i in range(1, 11)}
+                    videos = [video for video in videos if video["name"] in allowed]
+                    if len(videos) != 10:
+                        raise RuntimeError("film_ten_source_selection_incomplete")
                 report.append(
                     "FILM HANDOFF: complete En_Buyuk_Saban Part 1-32 selected; "
                     "historical Bickin/Yoksul receipts preserved and checked.")
@@ -1712,7 +1729,7 @@ def plan(audit=False):
                     else:
                         held = True
                     continue
-                target = target_count(route, now)
+                target = due if film_ten_once and route == "film" else target_count(route, now)
                 today_count = sum(route_clock(route, timestamp(row)).date() == clock.date() for row in histories[p])
                 confirmed_in_ledger = ledger_daily_count(state, route, p, clock.date().isoformat())
                 today_count = 0 if rescue_only else max(today_count, confirmed_in_ledger)
