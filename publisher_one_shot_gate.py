@@ -39,6 +39,22 @@ FILM_PART8_MARKER = "docs/owner-authorized-film-part8-2026-11-10.md"
 FILM_PART8_SUBJECT = "ops: authorized-once-film-bickin8-2026-11-10"
 FILM_PART8_DATE = "2026-11-10"
 
+# Exact owner authorization for ten distinct En Buyuk Saban parts on Film's
+# primary Facebook and Instagram routes. No automatic reruns or other accounts.
+FILM_TEN_MARKER = "docs/owner-authorized-en-buyuk-saban-10parts-2026-11-10.md"
+FILM_TEN_SUBJECT = "ops: authorized-once-en-buyuk-saban-10parts-2026-11-10"
+FILM_TEN_DATE = "2026-11-10"
+
+
+def is_film_ten_once(event, ref, subject, added_paths, *, today=None, run_attempt=None):
+    if today is None:
+        today = datetime.now(timezone(timedelta(hours=3))).date().isoformat()
+    if run_attempt is None:
+        run_attempt = os.getenv("GITHUB_RUN_ATTEMPT", "1")
+    return (event == "push" and ref == "refs/heads/main"
+            and subject == FILM_TEN_SUBJECT and FILM_TEN_MARKER in added_paths
+            and today == FILM_TEN_DATE and str(run_attempt) == "1")
+
 def is_film_part8_once(event, ref, subject, added_paths, *, today=None, run_attempt=None):
     if today is None:
         today = datetime.now(timezone(timedelta(hours=3))).date().isoformat()
@@ -130,7 +146,8 @@ def determine_mode(event, ref, subject="", added_paths=(), requested_mode="audit
                    or is_today_catchup_push(event, ref, subject, added_paths)
                    or is_nov7_catchup_push(event, ref, subject, added_paths)
                    or is_nov9_catchup_push(event, ref, subject, added_paths)
-                   or is_film_part8_once(event, ref, subject, added_paths))
+                   or is_film_part8_once(event, ref, subject, added_paths)
+                   or is_film_ten_once(event, ref, subject, added_paths))
         return "publish" if normal or rescue or v4 or catchup else "audit"
     return "audit"
 
@@ -165,6 +182,9 @@ def main():
     with Path(output).open("a", encoding="utf-8") as stream:
         stream.write(f"mode={mode}\npublish_allowed={'true' if mode == 'publish' else 'false'}\n")
         stream.write(f"recovery_only={'true' if rescue else 'false'}\n")
+        stream.write("film_ten_parts_once="
+                     + ("true" if is_film_ten_once(event, os.getenv("GITHUB_REF", ""),
+                                                  subject, added) else "false") + "\n")
     print(f"Publisher decision: {mode}; event={event}; reason=checked_commit_and_existing_gates")
     return 0
 
