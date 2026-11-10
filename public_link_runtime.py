@@ -1099,6 +1099,15 @@ _CONFIRMED_UNREADABLE_SHARED_SOURCES = {
     ("daily_laugh", "1TBHD0d-rtgt8ECx_6oYHeRBW8Ae2ysyH", "195.mp4"): {
         "run_id": "42378874507",
     },
+    # 10 Nov run 42888833591 fetched exact bytes SHA, but FFmpeg could not
+    # decode the frame required for safe visual fingerprinting BEFORE any POST.
+    # Facebook and IG both retained local-only "ready" failures. Do not keep
+    # retrying this same unmodified Drive object across future days; a
+    # separately uploaded corrected video receives a distinct Drive ID.
+    ("daily_laugh", "1i0pA26ewaAOlqxTbIxva_nsxZ_K_OrUW", "40.mp4"): {
+        "run_id": "42888833591",
+        "sha256": "579051bc54e3466977fec7656b1eb15b03bd1e2c339c9dfa3acd889086e2f45c",
+    },
     ("penguen", "1lBoXFmmxvlfL6lUhxk4Qc_eZ6WHANb2I", "250.mp4"): {
         "run_id": "42175366213",
         "sha256": "513d67961759f96a7e64196bf2adbe4d8ce01f0acb3b0257a5acce71a27ea1b0",
