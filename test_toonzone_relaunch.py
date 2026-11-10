@@ -14,9 +14,11 @@ class RelaunchSafetyTests(unittest.TestCase):
             self.assertFalse(rel.allowed_context(wrong))
 
     def test_order_only_part1_to_4(self):
-        rows = [{"episode": 4, "part": i, "id": str(i),
-                 "name": f"S01E04_Name_Part{i}.mp4"} for i in range(1, 5)]
-        self.assertEqual([r["part"] for r in rel.ordered_episode(rows)], [1, 2, 3, 4])
+        rows = [{"episode": episode, "part": part, "id": f"{episode}-{part}",
+                 "name": f"S01E{episode:02d}_Name_Part{part}.mp4"}
+                for episode in range(4, 13) for part in range(1, 5)]
+        self.assertEqual([r["part"] for r in rel.ordered_episode(rows)[:4]], [1, 2, 3, 4])
+        self.assertEqual(len(rel.ordered_episode(rows)), 36)
         with self.assertRaises(RuntimeError):
             rel.ordered_episode(rows[:-1])
         with self.assertRaises(RuntimeError):
