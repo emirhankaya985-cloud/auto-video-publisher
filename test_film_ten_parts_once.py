@@ -29,6 +29,25 @@ class FilmTenPartsReleaseTests(unittest.TestCase):
         self.assertFalse(gate.is_film_ten_once("push","refs/heads/main",
                          "release anything",expected[3],today="2026-11-10",run_attempt="1"))
 
+    def test_ci_only_repair_marker_does_not_rearm_first_failed_commit(self):
+        original=("push", "refs/heads/main", gate.FILM_TEN_SUBJECT,
+                  [gate.FILM_TEN_MARKER])
+        repair=("push", "refs/heads/main", gate.FILM_TEN_REPAIR_SUBJECT,
+                [gate.FILM_TEN_REPAIR_MARKER])
+        self.assertTrue(gate.is_any_film_ten_once(*repair,
+                        today="2026-11-10", run_attempt="1"))
+        self.assertFalse(gate.is_any_film_ten_once(*repair,
+                         today="2026-11-11", run_attempt="1"))
+        self.assertFalse(gate.is_any_film_ten_once(*repair,
+                         today="2026-11-10", run_attempt="2"))
+        self.assertFalse(gate.is_any_film_ten_once(*repair[:3], (),
+                         today="2026-11-10", run_attempt="1"))
+        self.assertFalse(gate.is_any_film_ten_once("push", "refs/heads/main",
+                         gate.FILM_TEN_SUBJECT, [gate.FILM_TEN_REPAIR_MARKER],
+                         today="2026-11-10", run_attempt="1"))
+        self.assertTrue(gate.is_any_film_ten_once(*original,
+                        today="2026-11-10", run_attempt="1"))
+
     def test_source_release_stays_exactly_first_ten_canonical_parts(self):
         videos=[{"id":f"source-{n}","name":f"{SERIES_PREFIX}_Part_{n}.mp4"}
                 for n in range(1,EXPECTED_PARTS+1)]

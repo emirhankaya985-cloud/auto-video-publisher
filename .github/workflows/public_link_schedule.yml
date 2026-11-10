@@ -16,6 +16,7 @@ on:
       - 'docs/owner-authorized-catchup-2026-11-09.md'
       - 'docs/owner-authorized-film-part8-2026-11-10.md'
       - 'docs/owner-authorized-en-buyuk-saban-10parts-2026-11-10.md'
+      - 'docs/owner-authorized-en-buyuk-saban-10parts-ci-repair-2026-11-10.md'
   schedule:
     # Run a worker only near that account's actual due slots, not seven
     # expensive GitHub runners every half-hour (owner: zero-cost operation).
@@ -55,6 +56,7 @@ jobs:
           ${{ fromJSON(
             github.event_name == 'push' && github.event.head_commit.message == 'ops: authorized-once-film-bickin8-2026-11-10' && '["film"]' ||
             github.event_name == 'push' && github.event.head_commit.message == 'ops: authorized-once-en-buyuk-saban-10parts-2026-11-10' && '["film"]' ||
+            github.event_name == 'push' && github.event.head_commit.message == 'ops: authorized-once-en-buyuk-saban-10parts-ci-repair-2026-11-10' && '["film"]' ||
             github.event_name != 'schedule' && '["tarladaki","penguen","gonle","daily_laugh","film","film_second"]' ||
             github.event.schedule == '7 6,9,12,15,18 * * *' && '["tarladaki"]' ||
             github.event.schedule == '37 6,9,12,15,18 * * *' && '["penguen","gonle"]' ||
@@ -183,6 +185,10 @@ jobs:
           META_PREFLIGHT_PARTIAL_OK: 'false'
           FILM_PART8_STRICT_RECHECK_ENABLED: 'false'
           FILM_TEN_PARTS_ONCE: 'false'
+          # The legacy offline fixtures intentionally contain only 1-2 Film
+          # sources, not the 32 real Drive pairs. Scope source selection to
+          # the LIVE planning step, never these no-write unit tests.
+          FILM_HANDOFF_TO_EN_BUYUK_SABAN: 'false'
           MEDIA_QUALITY_ENABLED: 'false'
           ADVANCED_DEDUPE_ENABLED: 'false'
           AUTO_SUBTITLES_ENABLED: 'false'
