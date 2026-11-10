@@ -172,6 +172,7 @@ def verified_like_coverage(actors, ledger):
         accepted_by = set()
         accepted_targets = set()
         count = 0
+        self_count = 0
         for record in ledger["actions"].values():
             if not isinstance(record, dict):
                 continue
@@ -180,12 +181,13 @@ def verified_like_coverage(actors, ledger):
                 continue
             actor = members.get(str(record.get("actor", "")))
             target = members.get(str(record.get("owner", "")))
-            if (not actor or not target or actor["id"] == target["id"]
-                    or actor["name"] not in eligible):
+            if (not actor or not target or actor["name"] not in eligible):
                 continue
             accepted_by.add(actor["name"])
             accepted_targets.add(target["name"])
             count += 1
+            if actor["id"] == target["id"]:
+                self_count += 1
         output[platform] = {
             "permission_eligible_actor_routes": sorted(eligible),
             "permission_missing_actor_routes": sorted(missing_grant),
@@ -193,6 +195,8 @@ def verified_like_coverage(actors, ledger):
             "eligible_routes_without_confirmed_like": sorted(eligible - accepted_by),
             "confirmed_target_routes": sorted(accepted_targets),
             "confirmed_like_count_in_retained_ledger": count,
+            "confirmed_self_like_count_in_retained_ledger": self_count,
+            "confirmed_cross_like_count_in_retained_ledger": count - self_count,
         }
     return output
 
@@ -742,7 +746,7 @@ def build_account_batch(posts, actors, ledger, run_id, source_run_id, *, now):
     """One account per tick, all its eligible recent posts, same-platform likes only.
 
     Each actor/post intent is persisted to an artifact before the first POST.
-    Other account lanes stay independent; never self-like, save or repost.
+    Other account lanes stay independent; permit verified owner likes, never save or repost.
     """
     if ledger.get("schema") != 1 or not isinstance(ledger.get("actions"), dict):
         raise ValueError("invalid engagement ledger; reset forbidden")
@@ -773,7 +777,7 @@ def build_account_batch(posts, actors, ledger, run_id, source_run_id, *, now):
             platform = post["platform"]
             reviewers = {
                 (a["platform"], a["id"]): a for a in actors.values()
-                if a["platform"] == platform and a["id"] != post["owner"]
+                if a["platform"] == platform
                 and permission(platform, "like") <= a["grants"]
                 and key(dict(post, actor=a["id"], operation="like")) not in ledger["actions"]
             }
@@ -847,7 +851,7 @@ def main():
                        for t in tasks)):
             raise ValueError("single-like plan not safe")
         if account_batch and live and (any(t["operation"] != "like"
-                or t["actor"] == t["owner"] for t in tasks)
+                for t in tasks)
                 or len({a["name"] for t in tasks for a in actors.values()
                         if a["platform"] == t["platform"] and a["id"] == t["owner"]}) > 1):
             raise ValueError("account batch scope invalid")
@@ -884,7 +888,7 @@ def main():
                        for t in tasks)):
             raise ValueError("single-like execution scope invalid")
         if account_batch and (any(t.get("operation") != "like"
-                or t.get("actor") == t.get("owner") for t in tasks)
+                for t in tasks)
                 or len({a["name"] for t in tasks for a in actors.values()
                         if a["platform"] == t.get("platform") and a["id"] == t.get("owner")}) > 1):
             raise ValueError("account batch execution scope invalid")
