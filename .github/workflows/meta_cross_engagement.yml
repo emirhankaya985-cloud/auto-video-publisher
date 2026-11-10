@@ -7,7 +7,7 @@ on:
     - cron: '7,22,37,52 * * * *'
   push:
     branches: [main]
-    # An owner approval marker may still start an individually verified one-like smoke.
+    # An owner approval marker starts one guarded account batch on merge.
     # Unrelated pushes never trigger engagement.
     paths:
       - 'docs/meta-cross-engagement-live-2026-11-08.md'
@@ -80,7 +80,7 @@ jobs:
       # A marker push on main authorizes an immediate first bounded tick.
       GITHUB_EVENT_NAME: ${{ github.event_name }}
       GITHUB_REF: ${{ github.ref }}
-      ENGAGEMENT_MODE: ${{ github.event_name == 'schedule' && 'account_batch' || github.event_name == 'push' && 'single_like' || 'dry_run' }}
+      ENGAGEMENT_MODE: ${{ github.event_name == 'schedule' && 'account_batch' || github.event_name == 'push' && 'account_batch' || 'dry_run' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
