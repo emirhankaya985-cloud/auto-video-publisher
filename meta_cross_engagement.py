@@ -385,11 +385,15 @@ def build_plan(posts, actors, ledger, run_id, source_run_id, *, now):
     return tasks, report
 
 
-def verified_media(task, actors):
+def verified_media(task, actors, *, recent_now=None):
     source = actors[(task["platform"], task["owner"])]
     # The publisher records a Video ID, not a PagePost ID. permalink_url is
     # not a common Video field; do not fail the owner check by requesting it.
     fields = "id,from" if task["platform"] == "facebook" else "id,owner,permalink,media_type"
+    if recent_now is not None:
+        # Use the provider's publication timestamp, not the publisher run's
+        # time or the local calendar day. Fail closed if Meta omits the field.
+        fields += ",created_time" if task["platform"] == "facebook" else ",timestamp"
     body = graph("GET", task["post_id"], source["token"], {"fields": fields})
     owner = body.get("from" if task["platform"] == "facebook" else "owner")
     if str(body.get("id")) != task["post_id"]:
@@ -400,6 +404,14 @@ def verified_media(task, actors):
         raise ValueError("source_owner_mismatch")
     if task["platform"] == "instagram" and body.get("media_type") not in {"IMAGE", "VIDEO", "CAROUSEL_ALBUM"}:
         raise ValueError("unsupported Instagram media")
+    if recent_now is not None:
+        if recent_now.tzinfo is None:
+            raise ValueError("invalid recent window")
+        published = stamp(body.get("created_time") if task["platform"] == "facebook"
+                          else body.get("timestamp"))
+        latest = recent_now.astimezone(timezone.utc)
+        if not latest - timedelta(hours=24) <= published <= latest:
+            raise ValueError("outside_recent_24h_window")
     if task["platform"] == "facebook" and task["operation"] == "repost":
         if task["post_id"].isdigit():
             # Canonical Facebook Watch URL of the verified owned Video ID.
@@ -466,7 +478,10 @@ def execute(tasks, actors, ledger, run_id, *, persist, sleep=time.sleep):
             source_key = (task["platform"], task["post_id"], task["owner"], task["operation"])
             if source_key not in source_checks:
                 try:
-                    source_checks[source_key] = verified_media(task, actors)
+                    source_checks[source_key] = verified_media(
+                        task, actors,
+                        **({"recent_now": datetime.now(timezone.utc)}
+                           if os.getenv("ENGAGEMENT_MODE") == "account_batch" else {}))
                 except (GraphFailure, ValueError, KeyError) as exc:
                     source_checks[source_key] = exc
             link = source_checks[source_key]
@@ -770,6 +785,7 @@ def build_account_batch(posts, actors, ledger, run_id, source_run_id, *, now):
         if owner and f'{post["platform"]}/like' not in holds:
             by_name.setdefault(owner["name"], []).append(post)
 
+    blocked_across_accounts = []
     for name in sorted(by_name, key=lambda n: (last_target.get(n, never),
                                                rank.get(n, len(rank)), n)):
         planned, report = [], []
@@ -785,7 +801,7 @@ def build_account_batch(posts, actors, ledger, run_id, source_run_id, *, now):
                 continue
             probe = dict(post, actor=next(iter(reviewers.values()))["id"], operation="like")
             try:
-                verified_media(probe, actors)
+                verified_media(probe, actors, recent_now=now)
             except (GraphFailure, ValueError, KeyError):
                 report.append({"status": "source_preflight_failed"})
                 continue
@@ -795,7 +811,8 @@ def build_account_batch(posts, actors, ledger, run_id, source_run_id, *, now):
             report.extend(reasons)
         if planned:
             return planned, report
-    return [], [{"status": "no_eligible_verified_account_batch"}]
+        blocked_across_accounts.extend(report)
+    return [], blocked_across_accounts or [{"status": "no_eligible_verified_account_batch"}]
 
 def main():
     parser = argparse.ArgumentParser()
