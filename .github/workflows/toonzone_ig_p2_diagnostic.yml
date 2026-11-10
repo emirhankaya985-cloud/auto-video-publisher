@@ -43,6 +43,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install --require-hashes -r requirements.txt
+      - run: pip install gdown==6.4.2 pillow==13.0.0
       - name: Read latest archived intent, exact IG account history, and exact container; never POST
         run: python toonzone_ig_p2_diagnostic.py
       - if: always()
