@@ -1,4 +1,4 @@
-"""One concise Telegram receipt for confirmed cross-account Meta actions only.
+"""One concise Telegram receipt for confirmed cross-account and owner Meta likes only.
 
 Never sends notifications for dry-run, reservations, unsupported saves, or
 unverified provider acknowledgements. No Meta writes are performed here.
@@ -21,12 +21,12 @@ def verified_batch(ledger, plan, run_id, names):
     if not isinstance(plan, list) or not run_id.isdecimal():
         raise RuntimeError("engagement_plan_unavailable")
     from meta_cross_engagement import key
-    groups = defaultdict(lambda: {"recipients": set(), "posts": set(), "count": 0})
+    groups = defaultdict(lambda: {"recipients": set(), "posts": set(), "count": 0, "self_count": 0})
     for task in plan:
         if not isinstance(task, dict) or task.get("operation") != "like":
             continue
         platform, actor, owner = task.get("platform"), str(task.get("actor")), str(task.get("owner"))
-        if platform not in ("facebook", "instagram") or not actor.isdecimal() or not owner.isdecimal() or actor == owner:
+        if platform not in ("facebook", "instagram") or not actor.isdecimal() or not owner.isdecimal():
             raise RuntimeError("invalid_accepted_action_identity")
         row = ledger["actions"].get(key(task))
         if not isinstance(row, dict):
@@ -44,6 +44,8 @@ def verified_batch(ledger, plan, run_id, names):
         group["recipients"].add(owner_name)
         group["posts"].add(str(task["post_id"]))
         group["count"] += 1
+        if actor == owner:
+            group["self_count"] += 1
     return groups
 
 
@@ -53,7 +55,8 @@ def message(groups, run_id):
     lines = ["Doğrulanmış Meta beğenileri (Graph API başarı alındısı):"]
     for (actor, platform), result in sorted(groups.items()):
         owners = ", ".join(sorted(result["recipients"]))
-        lines.append(f"• {actor} / {platform}: {result['count']} beğeni → {owners}")
+        lines.append(f"• {actor} / {platform}: {result['count']} beğeni → {owners}"
+                     f" (kendi gönderisi: {result['self_count']})")
     lines.extend(["Kaydetme / yeniden paylaşım: API alındısı yoksa başarı sayılmaz.",
                   "Bu özet 'tüm hesapları beğendi' anlamına gelmez.",
                   f"https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/{run_id}"])
