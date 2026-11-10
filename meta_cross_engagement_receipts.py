@@ -62,7 +62,7 @@ def message(groups, run_id):
 
 def main():
     run_id = os.getenv("GITHUB_RUN_ID", "")
-    if os.getenv("ENGAGEMENT_MODE") not in ("apply", "single_like") or os.getenv("ENGAGEMENT_RESULT_ARCHIVED") != "true":
+    if os.getenv("ENGAGEMENT_MODE") not in ("apply", "single_like", "account_batch") or os.getenv("ENGAGEMENT_RESULT_ARCHIVED") != "true":
         print('{"status":"no_verified_actions_no_message"}')
         return 0
     report = json.loads(REPORT.read_text(encoding="utf-8"))
