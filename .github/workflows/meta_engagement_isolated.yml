@@ -1,7 +1,7 @@
 name: Meta engagement independent account diagnostics
 on:
   schedule:
-    - cron: '*/15 * * * *'
+    - cron: '10,25,40,55 * * * *'
   workflow_dispatch:
 permissions:
   contents: read
@@ -50,6 +50,16 @@ jobs:
       ENABLE_NEW_META_ROUTES: ${{ vars.ENABLE_NEW_META_ROUTES }}
       META_NEW_ROUTES_RIGHTS_APPROVED: ${{ vars.META_NEW_ROUTES_RIGHTS_APPROVED }}
     steps:
+      - name: Enforce start at 16:40 Türkiye time on 2026-11-10
+        id: start_gate
+        run: |
+          python - <<'PY'
+          from datetime import datetime, timezone
+          from zoneinfo import ZoneInfo
+          now = datetime.now(timezone.utc).astimezone(ZoneInfo('Europe/Istanbul'))
+          if now.date().isoformat() == '2026-11-10' and (now.hour, now.minute) < (16, 40):
+              raise SystemExit('Not started yet: 16:40 TRT')
+          PY
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
