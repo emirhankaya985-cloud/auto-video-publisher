@@ -187,28 +187,34 @@ def finish_stalled_replacement(page, item, data, ledger, run_id, *,
                                uploader=None, verifier=None,
                                source_fn=None, cover_fn=None,
                                cover_video_fn=None, prepare_fn=None,
-                               cover_check_fn=None, digest_fn=None):
+                               cover_check_fn=None, digest_fn=None, png_check_fn=None):
     """One replacement upload if the old stalled container NEVER reached publish.
 
     One archived replacement intent is required before any external Meta write.
     Regardless of the result, no second new container can ever be generated
     without an explicit new owner decision and a distinct protocol.
     """
-    from public_link_runtime import graph_rows, download, download_verified_publication_video
-    from toonzone_instagram_first_three import digest
-    from cloud_omnichannel_publisher import upload_instagram_reel, create_instagram_cover_video
-    from instagram_media_compat import prepare_instagram_upload
-    from toonzone_cover_acceptance import png_identity, verify_prepared_instagram_first_frame
-    rows_fn = rows_fn or graph_rows
+    if rows_fn is None or source_fn is None or cover_fn is None:
+        from public_link_runtime import graph_rows, download, download_verified_publication_video
+        rows_fn = rows_fn or graph_rows
+        source_fn = source_fn or download_verified_publication_video
+        cover_fn = cover_fn or download
+    if uploader is None or cover_video_fn is None:
+        from cloud_omnichannel_publisher import upload_instagram_reel, create_instagram_cover_video
+        uploader = uploader or upload_instagram_reel
+        cover_video_fn = cover_video_fn or create_instagram_cover_video
+    if prepare_fn is None:
+        from instagram_media_compat import prepare_instagram_upload
+        prepare_fn = prepare_instagram_upload
+    if cover_check_fn is None or png_check_fn is None:
+        from toonzone_cover_acceptance import png_identity, verify_prepared_instagram_first_frame
+        cover_check_fn = cover_check_fn or verify_prepared_instagram_first_frame
+        png_check_fn = png_check_fn or png_identity
+    if digest_fn is None:
+        from toonzone_instagram_first_three import digest
+        digest_fn = digest
     status_fn = status_fn or pinned_container_status
-    uploader = uploader or upload_instagram_reel
     verifier = verifier or verify_post
-    source_fn = source_fn or download_verified_publication_video
-    cover_fn = cover_fn or download
-    cover_video_fn = cover_video_fn or create_instagram_cover_video
-    prepare_fn = prepare_fn or prepare_instagram_upload
-    cover_check_fn = cover_check_fn or verify_prepared_instagram_first_frame
-    digest_fn = digest_fn or digest
 
     ig = ledger["records"].get(record_key(item, "instagram"))
     fb = ledger["records"].get(record_key(item, "facebook"))
@@ -251,8 +257,7 @@ def finish_stalled_replacement(page, item, data, ledger, run_id, *,
         temp = Path(folder)
         source = source_fn(RECOVERY_SOURCE, temp / "source.mp4")
         cover = cover_fn(RECOVERY_COVER, temp / "original.png")
-        from toonzone_cover_acceptance import png_identity
-        png_identity(cover)
+        png_check_fn(cover)
         if digest_fn(source) != RECOVERY_SOURCE_SHA or digest_fn(cover) != RECOVERY_COVER_SHA:
             raise RuntimeError("relaunch_replacement_source_or_cover_hash_changed")
         covered = cover_video_fn(source, cover, temp / "covered.mp4", preserve_full_cover=True)
@@ -378,7 +383,7 @@ def create_plan(run_id):
                 # Existing exact caption and in-window media proves publication;
                 # a missing post never proves safe reupload.
                 matched = verified_incident_media(remote[platform], text)
-                if matched and previous.get("status") in {"attempted", "resume_publish_attempted", "resume_reserved"}:
+                if matched and previous.get("status") in {"attempted", "resume_publish_attempted", "resume_reserved", "replacement_upload_attempted", "replacement_failed_held", "replacement_reserved"}:
                     previous.update(post_id=str(matched[0]["id"]), status="verified",
                                     last_seen=history.now_utc().isoformat(),
                                     reconciled_without_new_post=True)
