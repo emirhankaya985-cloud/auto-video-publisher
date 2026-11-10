@@ -555,35 +555,63 @@ def source_run_valid(run, now):
 
 
 def failed_before_source_state(run_id):
-    """Positive job evidence for one specific setup failure, never an upload."""
+    """Skip only proven failed runs that could NOT have issued any Meta POST.
+
+    The modern publisher uses one account-scoped `meta (film)` job and a
+    downstream merge job; its first stage can fail in no-write verification.
+    A run with a planning, intent or publish attempt is NEVER a fallback.
+    """
     body = github(f"actions/runs/{run_id}/jobs?per_page=100").json()
     jobs = body.get("jobs") if isinstance(body, dict) else None
-    if (not isinstance(jobs, list) or len(jobs) != 1
+    if (not isinstance(jobs, list) or not 1 <= len(jobs) <= 2
             or type(body.get("total_count")) is not int
-            or body.get("total_count") != 1 or not isinstance(jobs[0], dict)):
+            or body["total_count"] != len(jobs)
+            or any(not isinstance(j, dict) for j in jobs)):
         return False
-    job = jobs[0]
+    candidates = [j for j in jobs
+                  if j.get("name") == "meta" or
+                  (isinstance(j.get("name"), str) and
+                   re.fullmatch(r"meta \\((?:film|film_second|toonzone|tarladaki|penguen|gonle|daily_laugh)\\)",
+                                j["name"]))]
+    if len(candidates) != 1:
+        return False
+    job = candidates[0]
+    others = [j for j in jobs if j is not job]
+    if others and (len(others) != 1
+                   or others[0].get("name") != "merge-account-receipts"
+                   or others[0].get("status") != "completed"
+                   or others[0].get("conclusion") not in {"failure", "skipped"}):
+        return False
     if (str(job.get("run_id")) != str(run_id)
-            or job.get("name") != "meta" or job.get("status") != "completed"
-            or job.get("conclusion") != "failure" or not isinstance(job.get("steps"), list)):
+            or job.get("status") != "completed"
+            or job.get("conclusion") != "failure"
+            or not isinstance(job.get("steps"), list)):
         return False
     steps = job["steps"]
-    expected = {
+    required = {
         "Fail early on invalid Meta credentials before any video work": "success",
-        "Install media runtime only after Meta preflight passed": "failure",
-        "Verify state, account and caption safety without API writes": "skipped",
         "Check public folders, captions, histories and prepare intent": "skipped",
         "Prepare verified YouTube channel intents for current plans": "skipped",
         "Persist intent before any Meta upload": "skipped",
         "Publish explicitly planned Meta videos": "skipped",
         "Publish planned YouTube videos with archived intent": "skipped",
     }
-    for name, conclusion in expected.items():
-        rows = [step for step in steps if isinstance(step, dict) and step.get("name") == name]
+    for name, conclusion in required.items():
+        rows = [s for s in steps if isinstance(s, dict) and s.get("name") == name]
         if (len(rows) != 1 or rows[0].get("status") != "completed"
                 or rows[0].get("conclusion") != conclusion):
             return False
-    return True
+    stages = {}
+    for name in ("Install media runtime only after Meta preflight passed",
+                 "Verify state, account and caption safety without API writes"):
+        rows = [s for s in steps if isinstance(s, dict) and s.get("name") == name]
+        if len(rows) != 1 or rows[0].get("status") != "completed":
+            return False
+        stages[name] = rows[0].get("conclusion")
+    return stages["Install media runtime only after Meta preflight passed"] == "failure" and stages[
+        "Verify state, account and caption safety without API writes"] == "skipped" or (
+        stages["Install media runtime only after Meta preflight passed"] == "success"
+        and stages["Verify state, account and caption safety without API writes"] == "failure")
 
 
 def latest_source_id(*, now, allow_prestate_fallback=False, skipped_runs=None):
@@ -847,7 +875,7 @@ def main():
         if source_id == "latest":
             source_id = latest_source_id(now=now,
                 allow_prestate_fallback=(mode == "dry_run" and not live
-                    and os.getenv("GITHUB_EVENT_NAME") == "schedule"
+                    and (os.getenv("GITHUB_EVENT_NAME") == "schedule" or bool(focus))
                     and os.getenv("ENGAGEMENT_SCOPE") == "recent_window"),
                 skipped_runs=skipped_sources)
         ledger = restore()
