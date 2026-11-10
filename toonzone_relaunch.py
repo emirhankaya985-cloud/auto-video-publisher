@@ -41,6 +41,8 @@ RECOVERY_SOURCE_SHA = "9958e4231115fe95235ec7f2d343144e39d9382ed54a96b9219086526
 RECOVERY_COVER_SHA = "cdda18fbf9b94998d34c8e303b41d28b384cc97c816854eef5bca83da956e538"
 RECOVERY_CONTAINER = "17912149164580142"
 RECOVERY_FB_ID = "1483886187013259"
+RECOVERY_REPLACEMENT_MARKER = "ToonZone S01E06 Part2: one replacement of stalled original IG container authorized."
+RECOVERY_REPLACEMENT_AFTER = history.stamp("2026-11-10T19:22:35+00:00")  # 60m after failure
 
 
 def known_ig_incident(item, record):
@@ -167,6 +169,132 @@ def finish_existing_container(page, item, data, ledger, run_id, *,
         raise RuntimeError("relaunch_ig_resume_ambiguous_no_retry") from None
 
 
+
+def replacement_allowed(item, instagram_record, container_state, *, now, marker_text):
+    """Fail closed, once only, for an original attempt that never reached /media_publish."""
+    return bool(known_ig_incident(item, instagram_record)
+                and instagram_record.get("status") == "attempted"
+                and not instagram_record.get("post_id")
+                and not instagram_record.get("replacement_run_id")
+                and not instagram_record.get("replacement_post_id")
+                and container_state == "IN_PROGRESS"
+                and now >= RECOVERY_REPLACEMENT_AFTER
+                and RECOVERY_REPLACEMENT_MARKER in marker_text)
+
+
+def finish_stalled_replacement(page, item, data, ledger, run_id, *,
+                               rows_fn=None, status_fn=None,
+                               uploader=None, verifier=None,
+                               source_fn=None, cover_fn=None,
+                               cover_video_fn=None, prepare_fn=None,
+                               cover_check_fn=None, digest_fn=None):
+    """One replacement upload if the old stalled container NEVER reached publish.
+
+    One archived replacement intent is required before any external Meta write.
+    Regardless of the result, no second new container can ever be generated
+    without an explicit new owner decision and a distinct protocol.
+    """
+    from public_link_runtime import graph_rows, download, download_verified_publication_video
+    from toonzone_instagram_first_three import digest
+    from cloud_omnichannel_publisher import upload_instagram_reel, create_instagram_cover_video
+    from instagram_media_compat import prepare_instagram_upload
+    from toonzone_cover_acceptance import png_identity, verify_prepared_instagram_first_frame
+    rows_fn = rows_fn or graph_rows
+    status_fn = status_fn or pinned_container_status
+    uploader = uploader or upload_instagram_reel
+    verifier = verifier or verify_post
+    source_fn = source_fn or download_verified_publication_video
+    cover_fn = cover_fn or download
+    cover_video_fn = cover_video_fn or create_instagram_cover_video
+    prepare_fn = prepare_fn or prepare_instagram_upload
+    cover_check_fn = cover_check_fn or verify_prepared_instagram_first_frame
+    digest_fn = digest_fn or digest
+
+    ig = ledger["records"].get(record_key(item, "instagram"))
+    fb = ledger["records"].get(record_key(item, "facebook"))
+    if (not known_ig_incident(item, ig) or not fb or
+            fb.get("status") != "verified" or str(fb.get("post_id")) != RECOVERY_FB_ID or
+            ig.get("status") != "replacement_reserved" or
+            ig.get("replacement_run_id") != run_id or
+            ig.get("replacement_original_container_id") != RECOVERY_CONTAINER or
+            data.get("mode") != "replace_stalled_container" or
+            data.get("platforms") != ["instagram"] or
+            data.get("text") != ig.get("caption") or
+            data.get("cover_id") != RECOVERY_COVER or
+            data.get("source_sha256") != RECOVERY_SOURCE_SHA or
+            data.get("cover_sha256") != RECOVERY_COVER_SHA or
+            RECOVERY_REPLACEMENT_MARKER not in APPROVAL.read_text(encoding="utf-8")):
+        raise RuntimeError("relaunch_replacement_identity_or_owner_approval_missing")
+
+    fbs = matches(rows_fn(page, "facebook"), fb["caption"])
+    if len(fbs) != 1 or str(fbs[0].get("id")) != RECOVERY_FB_ID:
+        raise RuntimeError("relaunch_replacement_facebook_not_verified")
+    original = verified_incident_media(rows_fn(page, "instagram"), ig["caption"])
+    if original:
+        ig.update(status="verified", post_id=str(original[0]["id"]),
+                  reconciled_without_new_post=True, last_seen=history.now_utc().isoformat())
+        history.save(LEDGER, history.validate(ledger))
+        print("RELAUNCH_REPLACEMENT_CANCELLED_IG_ALREADY_PRESENT", flush=True)
+        return
+
+    old_status = status_fn(page)
+    if old_status != "IN_PROGRESS":
+        # Original FINISHED can be safely resumed on a later tick. No new upload.
+        ig.update(status="attempted", last_seen=history.now_utc().isoformat())
+        ig.pop("replacement_run_id", None)
+        ig.pop("replacement_original_container_id", None)
+        history.save(LEDGER, history.validate(ledger))
+        print(f"RELAUNCH_REPLACEMENT_CANCELLED_OLD_CONTAINER_CHANGED status={old_status}", flush=True)
+        return
+
+    with tempfile.TemporaryDirectory(prefix="toonzone-relaunch-single-replacement-") as folder:
+        temp = Path(folder)
+        source = source_fn(RECOVERY_SOURCE, temp / "source.mp4")
+        cover = cover_fn(RECOVERY_COVER, temp / "original.png")
+        from toonzone_cover_acceptance import png_identity
+        png_identity(cover)
+        if digest_fn(source) != RECOVERY_SOURCE_SHA or digest_fn(cover) != RECOVERY_COVER_SHA:
+            raise RuntimeError("relaunch_replacement_source_or_cover_hash_changed")
+        covered = cover_video_fn(source, cover, temp / "covered.mp4", preserve_full_cover=True)
+        prepared = prepare_fn(covered, temp / "instagram.mp4", toonzone_compact=True)
+        cover_check_fn(cover, prepared)
+
+        # Last remote read immediately before POST; no duplicate if visible.
+        if verified_incident_media(rows_fn(page, "instagram"), ig["caption"]):
+            raise RuntimeError("relaunch_replacement_remote_post_now_exists")
+        if status_fn(page) != "IN_PROGRESS":
+            raise RuntimeError("relaunch_replacement_old_container_changed_before_post")
+        ig.update(status="replacement_upload_attempted",
+                  replacement_post_started_in_run_id=run_id,
+                  last_seen=history.now_utc().isoformat())
+        history.save(LEDGER, history.validate(ledger))
+        print("RELAUNCH_IG_SINGLE_REPLACEMENT_POST_INTENT_PERSISTED", flush=True)
+        try:
+            media_id = uploader(page, str(prepared), ig["caption"],
+                                append_store_link=False, thumb_offset=0,
+                                forbidden_container_ids={RECOVERY_CONTAINER})
+            if not str(media_id).isdecimal():
+                raise RuntimeError("relaunch_replacement_invalid_post_id")
+            ig.update(status="accepted_unverified", post_id=str(media_id),
+                      replacement_post_id=str(media_id),
+                      last_seen=history.now_utc().isoformat())
+            history.save(LEDGER, history.validate(ledger))
+            if verifier(page, "instagram", str(media_id), ig["caption"]):
+                ig.update(status="verified", last_seen=history.now_utc().isoformat())
+                history.save(LEDGER, history.validate(ledger))
+                print(f"RELAUNCH_IG_SINGLE_REPLACEMENT_VERIFIED media_id={media_id}", flush=True)
+            else:
+                print(f"RELAUNCH_IG_SINGLE_REPLACEMENT_ACCEPTED_NOT_YET_VISIBLE media_id={media_id}", flush=True)
+        except Exception as exc:
+            # A binary or media_publish failure is ambiguous. Never replay.
+            ig.update(status="replacement_failed_held",
+                      replacement_error_type=type(exc).__name__,
+                      replacement_container_id=str(getattr(exc, "container_id", "")),
+                      last_seen=history.now_utc().isoformat())
+            history.save(LEDGER, history.validate(ledger))
+            raise RuntimeError("relaunch_replacement_failed_no_automatic_retry") from None
+
+
 def allowed_context(env=None):
     env = os.environ if env is None else env
     return (env.get("GITHUB_REPOSITORY") == REPO
@@ -287,6 +415,21 @@ def create_plan(run_id):
                     print("RELAUNCH_IG_EXISTING_CONTAINER_RESUME_RESERVED", flush=True)
                     return data
                 if status == "IN_PROGRESS":
+                    if replacement_allowed(item, ig, status, now=history.now_utc(),
+                                           marker_text=APPROVAL.read_text(encoding="utf-8")):
+                        ig.update(status="replacement_reserved",
+                                  replacement_run_id=run_id,
+                                  replacement_original_container_id=RECOVERY_CONTAINER,
+                                  last_seen=history.now_utc().isoformat())
+                        history.save(LEDGER, history.validate(ledger))
+                        data = dict(run_id=run_id, item=item, mode="replace_stalled_container",
+                                    platforms=["instagram"], text=text,
+                                    cover_id=RECOVERY_COVER,
+                                    source_sha256=RECOVERY_SOURCE_SHA,
+                                    cover_sha256=RECOVERY_COVER_SHA)
+                        history.save(PLAN, data)
+                        print("RELAUNCH_IG_SINGLE_REPLACEMENT_RESERVED", flush=True)
+                        return data
                     history.save(LEDGER, history.validate(ledger))
                     history.save(PLAN, {"run_id": run_id, "item": None, "platforms": []})
                     print("RELAUNCH_IG_EXISTING_CONTAINER_PROCESSING_NO_POST", flush=True)
@@ -369,6 +512,9 @@ def publish(run_id):
         raise RuntimeError("relaunch_platforms_invalid")
     if data.get("mode") == "resume_container":
         finish_existing_container(page, item, data, ledger, run_id)
+        return
+    if data.get("mode") == "replace_stalled_container":
+        finish_stalled_replacement(page, item, data, ledger, run_id)
         return
     with tempfile.TemporaryDirectory(prefix="toonzone-relaunch-") as directory:
         temp = Path(directory)
