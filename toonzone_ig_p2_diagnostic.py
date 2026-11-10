@@ -54,8 +54,7 @@ def inspect(ledger, page, rows_for, container_get, *, now=None):
         if len(exact) > 1:
             raise RuntimeError("ambiguous_duplicate_exact_caption")
         if exact:
-            from public_link_runtime import timestamp
-            published = timestamp(exact[0]).astimezone(timezone.utc)
+            published = stamp(exact[0].get("created_time") or exact[0].get("timestamp"))
             if not ATTEMPT_BEGIN - timedelta(minutes=3) <= published <= now + timedelta(minutes=3):
                 raise RuntimeError("matching_media_outside_original_attempt_window")
         provider_id = str(exact[0].get("id")) if exact else None
