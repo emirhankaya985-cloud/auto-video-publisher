@@ -33,6 +33,7 @@ _ALLOWED_REASON = {
     "intent_validation_failed", "existing_container_reconciliation_failed",
     "missing_secret", "youtube_publication_unverified",
     "visual_duplicate_review", "source_content_changed",
+    "film_part8_strict_recheck_held", "film_part8_source_is_prior_part_duplicate",
 }
 
 
