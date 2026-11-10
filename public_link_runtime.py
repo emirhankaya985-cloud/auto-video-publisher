@@ -2142,16 +2142,21 @@ def publish():
                             item, state, temp / "source.mp4",
                             download_verified_publication_video, temp)
                     except (OSError, RuntimeError, ValueError) as exc:
+                        film_hold_reason = (
+                            "film_part8_source_visually_duplicate"
+                            if str(exc) == "film_part8_source_visually_duplicates_part3"
+                            else "film_part8_strict_recheck_held"
+                        )
                         # The original three-frame hold is still authoritative
                         # unless the stronger source-vs-source proof passes.
                         if not hold_visual_duplicate(item, state, source_fingerprint):
                             for p in item["platforms"]:
                                 state["entries"][f"{item['route']}:{p}:{item['id']}"].update(
                                     status="held",
-                                    failure={"reason": "film_part8_strict_recheck_held",
+                                    failure={"reason": film_hold_reason,
                                              "external_post_attempted": False,
                                              "safe_to_repost": False})
-                        record_error("source_video", "film_part8_strict_recheck_held",
+                        record_error("source_video", film_hold_reason,
                                      route=item["route"], video=item["name"],
                                      error=exc, safe_to_retry=False)
                         save(STATE, state)

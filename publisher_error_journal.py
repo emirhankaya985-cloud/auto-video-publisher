@@ -34,6 +34,7 @@ _ALLOWED_REASON = {
     "missing_secret", "youtube_publication_unverified",
     "visual_duplicate_review", "source_content_changed",
     "film_part8_strict_recheck_held",
+    "film_part8_source_visually_duplicate",
 }
 
 

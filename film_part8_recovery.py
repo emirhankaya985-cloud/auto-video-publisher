@@ -140,6 +140,10 @@ def clearly_distinct_sources(part8, part3, *, runner=subprocess.run):
         "schema": 1, "additional_sample_count": len(FRACTIONS),
         "substantially_different_samples": sum(d >= 24 for d in differences),
         "largest_sample_distance": round(max(differences), 2),
+        "mean_sample_distance": round(sum(differences) / len(differences), 2),
+        # Eight almost identical sampled frames across the whole clip are
+        # positive evidence of a mislabeled/re-encoded source, not a retry cue.
+        "visually_same_as_part3": max(differences) <= 1.0,
         "distinct": sum(d >= 24 for d in differences) >= 5 and max(differences) >= 40,
         "source8_sha_verified": True,
         "source3_sha_verified": True,
@@ -158,6 +162,8 @@ def audit_part8_before_publish(item, state, path, prior_download, temp):
     if source_digest(part3) != OLDER_PART3_SHA:
         raise RuntimeError("film_part3_source_sha_mismatch")
     result = clearly_distinct_sources(path, part3)
+    if result["visually_same_as_part3"]:
+        raise RuntimeError("film_part8_source_visually_duplicates_part3")
     if not result["distinct"]:
         raise RuntimeError("film_part8_extended_similarity_inconclusive")
     return fp, result

@@ -1,6 +1,7 @@
 """Offline non-publishing Film Bickin 8 source and one-shot security tests."""
 import subprocess
 import unittest
+from unittest.mock import patch
 
 import film_part8_recovery as fix
 import publisher_one_shot_gate as gate
@@ -79,10 +80,26 @@ class FilmPart8RecoveryTests(unittest.TestCase):
                     return subprocess.CompletedProcess(argv, 0, data)
                 raise AssertionError("Unexpected offline command")
             return runner
-        self.assertTrue(fix.clearly_distinct_sources(
-            "part8.mp4", "part3.mp4", runner=make_runner(False))["distinct"])
-        self.assertFalse(fix.clearly_distinct_sources(
-            "part8.mp4", "part3.mp4", runner=make_runner(True))["distinct"])
+        distinct = fix.clearly_distinct_sources(
+            "part8.mp4", "part3.mp4", runner=make_runner(False))
+        same = fix.clearly_distinct_sources(
+            "part8.mp4", "part3.mp4", runner=make_runner(True))
+        self.assertTrue(distinct["distinct"])
+        self.assertFalse(distinct["visually_same_as_part3"])
+        self.assertFalse(same["distinct"])
+        self.assertTrue(same["visually_same_as_part3"])
+
+    def test_very_similar_part8_is_held_with_explicit_source_diagnosis(self):
+        with (patch.object(fix, "source_digest", side_effect=lambda path:
+                           fix.SOURCE_SHA if "part8" in str(path) else fix.OLDER_PART3_SHA),
+              patch.object(fix, "visual_fingerprint", return_value={"version": 1}),
+              patch.object(fix, "allowed_visual_collisions", return_value=True),
+              patch.object(fix, "clearly_distinct_sources", return_value={
+                  "distinct": False, "visually_same_as_part3": True})):
+            with self.assertRaisesRegex(RuntimeError, "film_part8_source_visually_duplicates_part3"):
+                fix.audit_part8_before_publish(
+                    {"id": fix.SOURCE_ID}, {"entries": {}}, "part8.mp4",
+                    lambda *_args: "part3.mp4", "/tmp")
 
     def test_one_shot_requires_exact_added_marker_and_day(self):
         args=("push","refs/heads/main",gate.FILM_PART8_SUBJECT,
