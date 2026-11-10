@@ -175,7 +175,7 @@ class RelaunchSafetyTests(unittest.TestCase):
             return "18012345678998765"
         dependencies["uploader"] = Mock(side_effect=uploader)
         with patch.object(rel.history, "save",
-                          side_effect=lambda p, data: snapshots.append(copy.deepcopy(data))), \\
+                          side_effect=lambda p, data: snapshots.append(copy.deepcopy(data))), \
              patch.object(rel.history, "now_utc",
                           return_value=datetime(2026, 11, 10, 20, tzinfo=timezone.utc)):
             rel.finish_stalled_replacement({"page_id": "1298191963387372"}, item,
