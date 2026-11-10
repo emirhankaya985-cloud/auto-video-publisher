@@ -19,3 +19,7 @@ Run 42815751138 published S01E04 Part2: Instagram verified new media ID 18132810
 ## Part 4 automatic queued follow-up after Part 3
 
 Owner requested all remaining S01E04 parts right now. Queue the next run for Part 4, but its planning step must first reconcile Part 3 Facebook and Instagram provider receipts from the current live run. Never run two POSTs for one part. If any prior part has unresolved or accepted-but-not-verified status, hold Part 4 before any upload. Do not delete old posts.
+
+## 10 November guarded S01E06 Part2 container recovery
+
+Owner delegated the ToonZone recovery to the assistant. The original Instagram container 17912149164580142 was still IN_PROGRESS on the live read-only check 42879342430; no IG post was observed. Run the isolated existing relaunch workflow once under the existing owner approval to check the exact original container and, if it is FINISHED and no media exists, reserve and publish this same container once. Do not create a new container or replay the video; if still processing, make no POST and await next scheduled tick. Preserve all receipts and cover/source identity.
