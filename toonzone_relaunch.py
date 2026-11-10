@@ -94,10 +94,17 @@ def pinned_container_status(page):
     return status
 
 
-def finish_existing_container(page, item, data, ledger, run_id):
+def finish_existing_container(page, item, data, ledger, run_id, *,
+                              resume_fn=None, rows_fn=None, verify_fn=None):
     """At most one publish call to the original FINISHED container, never a new upload."""
-    from cloud_omnichannel_publisher import resume_instagram_container
-    from public_link_runtime import graph_rows
+    if resume_fn is None:
+        from cloud_omnichannel_publisher import resume_instagram_container
+        resume_fn = resume_instagram_container
+    if rows_fn is None:
+        from public_link_runtime import graph_rows
+        rows_fn = graph_rows
+    if verify_fn is None:
+        verify_fn = verify_post
     fb = ledger["records"].get(record_key(item, "facebook"))
     ig = ledger["records"].get(record_key(item, "instagram"))
     if (not known_ig_incident(item, ig) or not fb
@@ -107,10 +114,10 @@ def finish_existing_container(page, item, data, ledger, run_id):
             or ig.get("resume_container_id") != RECOVERY_CONTAINER
             or data.get("platforms") != ["instagram"]):
         raise RuntimeError("relaunch_original_recovery_binding_unverified")
-    facebook_matches = matches(graph_rows(page, "facebook"), fb["caption"])
+    facebook_matches = matches(rows_fn(page, "facebook"), fb["caption"])
     if len(facebook_matches) != 1 or str(facebook_matches[0].get("id")) != RECOVERY_FB_ID:
         raise RuntimeError("relaunch_facebook_part2_unverified")
-    existing = verified_incident_media(graph_rows(page, "instagram"), ig["caption"])
+    existing = verified_incident_media(rows_fn(page, "instagram"), ig["caption"])
     if existing:
         ig.update(status="verified", post_id=str(existing[0]["id"]),
                   last_seen=history.now_utc().isoformat(),
@@ -136,7 +143,7 @@ def finish_existing_container(page, item, data, ledger, run_id):
         history.save(LEDGER, history.validate(ledger))
         started = True
     try:
-        post_id = resume_instagram_container(page, RECOVERY_CONTAINER, reserve_publish_once)
+        post_id = resume_fn(page, RECOVERY_CONTAINER, reserve_publish_once)
         if post_id is None:
             ig.update(status="attempted", last_seen=history.now_utc().isoformat())
             ig.pop("resume_run_id", None)
@@ -148,7 +155,7 @@ def finish_existing_container(page, item, data, ledger, run_id):
         ig.update(status="accepted_unverified", post_id=str(post_id),
                   last_seen=history.now_utc().isoformat())
         history.save(LEDGER, history.validate(ledger))
-        if verify_post(page, "instagram", str(post_id), ig["caption"]):
+        if verify_fn(page, "instagram", str(post_id), ig["caption"]):
             ig.update(status="verified", last_seen=history.now_utc().isoformat())
             history.save(LEDGER, history.validate(ledger))
             print(f"RELAUNCH_IG_RESUME_VERIFIED media_id={post_id}", flush=True)
