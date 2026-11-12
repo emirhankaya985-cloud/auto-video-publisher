@@ -45,3 +45,9 @@ Owner requested a repeat live ToonZone check. Run the pre-existing guarded relea
 ## 10 November late evening — full first-season completion continuation
 
 Owner reconfirmed: take responsibility for finishing Season 1 of ToonZone. The approved campaign must publish the remaining S01E07–S01E12 in ascending episode and Part1→Part4 order, with exact original PNG on each Part, verified video hash, fully archived before-POST intent, and independently verified Facebook and Instagram provider receipts. First reconcile run 42894736740 S01E07 Part1 Instagram media 18421595614083058 and Facebook video 1436239925385653; only if both verify, reserve one next due Part in this run. Keep the scheduled runs enabled to complete subsequent parts in order, never skip or duplicate, and do not modify unrelated accounts or old posts.
+
+## 12 November — one-shot Instagram rescue of expired S01E09 Part1
+
+ToonZone S01E09 Part1: one evidence-gated replacement of expired never-published original IG container authorized.
+
+Owner's latest request on 12 November: repair missing videos and missing report data. The exact original attempt (run 42928631311) published Facebook ID 1148031927877647, but Instagram binary rupload HTTP400 did not invoke media_publish. Live exact-container GET in run 43224633733 and again in 43224809921 confirmed original container 17912187078580142 is EXPIRED. Allow at most ONE Instagram-only new container/upload, with pinned source and original PNG checksums, unique Facebook original verification, live original container expiry, an empty exact-caption Instagram feed, and a persisted before-POST intent. Any uncertain outcome requires reconciliation and blocks retries. Never duplicate Facebook or delete old posts.

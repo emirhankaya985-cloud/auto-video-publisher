@@ -44,6 +44,20 @@ RECOVERY_FB_ID = "1483886187013259"
 RECOVERY_REPLACEMENT_MARKER = "ToonZone S01E06 Part2: one replacement of stalled original IG container authorized."
 RECOVERY_REPLACEMENT_AFTER = history.stamp("2026-11-10T19:22:35+00:00")  # 60m after failure
 
+# 11 November: exact S01E09 Part1 original IG container expired before any
+# media_publish call. Its Facebook publication was verified in original run.
+# One replacement may be attempted only after live expiry and no remote IG post.
+E09_RUN = "42928631311"
+E09_FILE = "S01E09_Prank_Callers_Part1.mp4"
+E09_SOURCE = "1Jms1SHbOt7kP1gIcyU26_p5ct5Z1gY2N"
+E09_COVER = "1yQ5Q1Bt68OJIzsBBQvm-2E3Y9Ct6cDEN"
+E09_SOURCE_SHA = "2440fe569087af44854fb7aa47779a8928058517f2db5ee4537cd3de4331a2ab"
+E09_COVER_SHA = "052d24a5ec92fbb8f0528f45ce1a122ebae61218e77fb97098299d2888a88de4"
+E09_CONTAINER = "17912187078580142"
+E09_FB_ID = "1148031927877647"
+E09_MARKER = "ToonZone S01E09 Part1: one evidence-gated replacement of expired never-published original IG container authorized."
+
+
 
 def known_ig_incident(item, record):
     """Only the archived S1E6P2 source, cover, and exact original attempt."""
@@ -300,6 +314,135 @@ def finish_stalled_replacement(page, item, data, ledger, run_id, *,
             raise RuntimeError("relaunch_replacement_failed_no_automatic_retry") from None
 
 
+def known_e09_ig_incident(item, record):
+    return bool(record and item.get("episode") == 9 and item.get("part") == 1
+                and item.get("id") == E09_SOURCE and item.get("name") == E09_FILE
+                and record.get("platform") == "instagram"
+                and record.get("source_id") == E09_SOURCE and record.get("file") == E09_FILE
+                and record.get("cover_id") == E09_COVER
+                and record.get("source_sha256") == E09_SOURCE_SHA
+                and record.get("cover_sha256") == E09_COVER_SHA
+                and record.get("intent_run_id") == E09_RUN
+                and record.get("error_type") == "MetaAPIError")
+
+
+def e09_replacement_allowed(item, record, marker_text):
+    return bool(known_e09_ig_incident(item, record)
+                and record.get("status") == "attempted" and not record.get("post_id")
+                and not record.get("replacement_run_id")
+                and not record.get("replacement_post_id")
+                and E09_MARKER in marker_text)
+
+
+def e09_original_container_status(page):
+    # Live GET is identity-bound and never contains a Meta POST.
+    from ig_container_status_diagnostic import inspect
+    result = inspect([page], "toonzone_s01e09_part1_nov11")
+    if result.get("container_id") != E09_CONTAINER:
+        raise RuntimeError("e09_original_container_id_changed")
+    if result.get("status") not in {"EXPIRED", "IN_PROGRESS", "FINISHED", "PUBLISHED", "ERROR"}:
+        raise RuntimeError("e09_original_container_status_unverified")
+    return result["status"]
+
+
+def finish_expired_e09_replacement(page, item, data, ledger, run_id, *,
+                                   rows_fn=None, status_fn=None, uploader=None,
+                                   verifier=None, source_fn=None, cover_fn=None,
+                                   cover_video_fn=None, prepare_fn=None,
+                                   png_check_fn=None, cover_check_fn=None, digest_fn=None):
+    """One and only one new IG upload, after exact expired-container evidence.
+
+    This excludes the original failed container, verifies unique Facebook
+    ownership, exact original source/cover bytes, and persists pre-POST intent.
+    Any ambiguous result blocks all automatic retries.
+    """
+    from public_link_runtime import graph_rows, download, download_verified_publication_video
+    from cloud_omnichannel_publisher import (
+        upload_instagram_reel, create_instagram_cover_video)
+    from instagram_media_compat import prepare_instagram_upload
+    from toonzone_cover_acceptance import (
+        png_identity, verify_prepared_instagram_first_frame)
+    from toonzone_instagram_first_three import digest
+    rows_fn = rows_fn or graph_rows
+    status_fn = status_fn or e09_original_container_status
+    uploader = uploader or upload_instagram_reel
+    verifier = verifier or verify_post
+    source_fn = source_fn or download_verified_publication_video
+    cover_fn = cover_fn or download
+    cover_video_fn = cover_video_fn or create_instagram_cover_video
+    prepare_fn = prepare_fn or prepare_instagram_upload
+    png_check_fn = png_check_fn or png_identity
+    cover_check_fn = cover_check_fn or verify_prepared_instagram_first_frame
+    digest_fn = digest_fn or digest
+    ig = ledger["records"].get(record_key(item, "instagram"))
+    fb = ledger["records"].get(record_key(item, "facebook"))
+    if (not known_e09_ig_incident(item, ig) or not fb
+            or fb.get("status") != "verified" or str(fb.get("post_id")) != E09_FB_ID
+            or ig.get("status") != "replacement_reserved"
+            or ig.get("replacement_run_id") != run_id
+            or ig.get("replacement_original_container_id") != E09_CONTAINER
+            or data.get("mode") != "replace_expired_e09"
+            or data.get("platforms") != ["instagram"]
+            or data.get("text") != ig.get("caption")
+            or data.get("cover_id") != E09_COVER
+            or data.get("source_sha256") != E09_SOURCE_SHA
+            or data.get("cover_sha256") != E09_COVER_SHA
+            or E09_MARKER not in APPROVAL.read_text(encoding="utf-8")):
+        raise RuntimeError("e09_replacement_binding_or_owner_authorization_invalid")
+    fbs = matches(rows_fn(page, "facebook"), fb["caption"])
+    if (len(fbs) != 1 or str(fbs[0].get("id")) != E09_FB_ID):
+        if not exact_original_facebook_video(page, E09_FB_ID, fb["caption"]):
+            raise RuntimeError("e09_original_facebook_id_unverified")
+    if matches(rows_fn(page, "instagram"), ig["caption"]):
+        raise RuntimeError("e09_instagram_remote_post_present_no_upload")
+    if status_fn(page) != "EXPIRED":
+        raise RuntimeError("e09_original_not_expired_no_upload")
+    with tempfile.TemporaryDirectory(prefix="toonzone-e09-one-shot-") as directory:
+        temp = Path(directory)
+        source = source_fn(E09_SOURCE, temp / "source.mp4")
+        cover = cover_fn(E09_COVER, temp / "original.png")
+        png_check_fn(cover)
+        if digest_fn(source) != E09_SOURCE_SHA or digest_fn(cover) != E09_COVER_SHA:
+            raise RuntimeError("e09_original_source_or_cover_hash_changed")
+        covered = cover_video_fn(source, cover, temp / "covered.mp4",
+                                 preserve_full_cover=True)
+        prepared = prepare_fn(covered, temp / "instagram.mp4", toonzone_compact=True)
+        cover_check_fn(cover, prepared)
+        if matches(rows_fn(page, "instagram"), ig["caption"]):
+            raise RuntimeError("e09_remote_post_appeared_before_write")
+        if status_fn(page) != "EXPIRED":
+            raise RuntimeError("e09_original_container_changed_before_write")
+        # After this immutable durable write, no uncertain POST is ever repeated.
+        ig.update(status="replacement_upload_attempted",
+                  replacement_post_started_in_run_id=run_id,
+                  last_seen=history.now_utc().isoformat())
+        history.save(LEDGER, history.validate(ledger))
+        print("E09_REPLACEMENT_POST_INTENT_PERSISTED", flush=True)
+        try:
+            media_id = uploader(page, str(prepared), ig["caption"],
+                                append_store_link=False, thumb_offset=0,
+                                forbidden_container_ids={E09_CONTAINER})
+            if not str(media_id).isdecimal():
+                raise RuntimeError("e09_new_post_id_invalid")
+            ig.update(status="accepted_unverified", post_id=str(media_id),
+                      replacement_post_id=str(media_id),
+                      last_seen=history.now_utc().isoformat())
+            history.save(LEDGER, history.validate(ledger))
+            if verifier(page, "instagram", str(media_id), ig["caption"]):
+                ig.update(status="verified", last_seen=history.now_utc().isoformat())
+                history.save(LEDGER, history.validate(ledger))
+                print(f"E09_REPLACEMENT_VERIFIED media_id={media_id}", flush=True)
+            else:
+                print("E09_REPLACEMENT_ACCEPTED_NOT_YET_VISIBLE", flush=True)
+        except Exception as exc:
+            ig.update(status="replacement_failed_held",
+                      replacement_error_type=type(exc).__name__,
+                      replacement_container_id=str(getattr(exc, "container_id", "")),
+                      last_seen=history.now_utc().isoformat())
+            history.save(LEDGER, history.validate(ledger))
+            raise RuntimeError("e09_replacement_failed_no_automatic_retry") from None
+
+
 def allowed_context(env=None):
     env = os.environ if env is None else env
     return (env.get("GITHUB_REPOSITORY") == REPO
@@ -488,6 +631,27 @@ def create_plan(run_id):
                     print("RELAUNCH_IG_EXISTING_CONTAINER_PROCESSING_NO_POST", flush=True)
                     return None
                 print(f"RELAUNCH_IG_CONTAINER_TERMINAL_HOLD status={status}", flush=True)
+            # Exact expired E09 original was never media_published: reserve one
+            # evidence-gated IG-only replacement; never replay the verified FB.
+            if (fb and statuses.get("facebook") == "verified"
+                    and str(fb.get("post_id")) == E09_FB_ID
+                    and statuses.get("instagram") == "held_previous_attempt_or_reservation"
+                    and e09_replacement_allowed(
+                        item, ig, APPROVAL.read_text(encoding="utf-8"))):
+                state = e09_original_container_status(page)
+                if state == "EXPIRED":
+                    ig.update(status="replacement_reserved",
+                              replacement_run_id=run_id,
+                              replacement_original_container_id=E09_CONTAINER,
+                              last_seen=history.now_utc().isoformat())
+                    history.save(LEDGER, history.validate(ledger))
+                    data = dict(run_id=run_id, item=item, mode="replace_expired_e09",
+                                platforms=["instagram"], text=text,
+                                cover_id=E09_COVER, source_sha256=E09_SOURCE_SHA,
+                                cover_sha256=E09_COVER_SHA)
+                    history.save(PLAN, data)
+                    print("E09_EXPIRED_ONE_SHOT_REPLACEMENT_RESERVED", flush=True)
+                    return data
             history.save(LEDGER, ledger)
             raise RuntimeError(f"relaunch_part{item['part']}_requires_previous_intent_reconciliation")
         # Reserve at most one ordered part, on both independently verified accounts.
@@ -570,6 +734,9 @@ def publish(run_id):
         return
     if data.get("mode") == "replace_stalled_container":
         finish_stalled_replacement(page, item, data, ledger, run_id)
+        return
+    if data.get("mode") == "replace_expired_e09":
+        finish_expired_e09_replacement(page, item, data, ledger, run_id)
         return
     with tempfile.TemporaryDirectory(prefix="toonzone-relaunch-") as directory:
         temp = Path(directory)

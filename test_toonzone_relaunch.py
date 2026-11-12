@@ -269,6 +269,86 @@ class RelaunchSafetyTests(unittest.TestCase):
             marker_text=rel.RECOVERY_REPLACEMENT_MARKER))
         dependencies["uploader"].assert_called_once()
 
+    def e09_case(self):
+        item = {"episode": 9, "part": 1, "id": rel.E09_SOURCE, "name": rel.E09_FILE}
+        facebook = {"status": "verified", "platform": "facebook",
+                    "post_id": rel.E09_FB_ID, "caption": "e09 caption",
+                    "last_seen": "2026-11-11T00:09:13+00:00"}
+        ig = {"status": "attempted", "platform": "instagram",
+              "source_id": rel.E09_SOURCE, "file": rel.E09_FILE,
+              "cover_id": rel.E09_COVER, "source_sha256": rel.E09_SOURCE_SHA,
+              "cover_sha256": rel.E09_COVER_SHA, "intent_run_id": rel.E09_RUN,
+              "error_type": "MetaAPIError", "caption": "e09 caption",
+              "last_seen": "2026-11-11T00:12:24+00:00"}
+        ledger = {"schema": 1, "records": {
+            rel.record_key(item, "facebook"): facebook,
+            rel.record_key(item, "instagram"): ig
+        }}
+        return item, ledger, ig
+
+    def test_e09_replacement_requires_exact_original_and_no_prior_new_write(self):
+        item, ledger, ig = self.e09_case()
+        self.assertTrue(rel.e09_replacement_allowed(item, ig, rel.E09_MARKER))
+        self.assertFalse(rel.e09_replacement_allowed(item, ig, ""))
+        self.assertFalse(rel.e09_replacement_allowed(item, dict(ig, post_id="123"), rel.E09_MARKER))
+        self.assertFalse(rel.e09_replacement_allowed(item, dict(ig, source_sha256="bad"), rel.E09_MARKER))
+        self.assertFalse(rel.e09_replacement_allowed(item, dict(ig, status="replacement_failed_held"), rel.E09_MARKER))
+        self.assertFalse(rel.e09_replacement_allowed(item, dict(ig, replacement_run_id="old"), rel.E09_MARKER))
+
+    def test_e09_one_shot_persists_pre_post_intent_and_never_touches_facebook(self):
+        item, ledger, ig = self.e09_case()
+        ig.update(status="replacement_reserved", replacement_run_id="777",
+                  replacement_original_container_id=rel.E09_CONTAINER)
+        plan = {"mode": "replace_expired_e09", "platforms": ["instagram"],
+                "text": "e09 caption", "cover_id": rel.E09_COVER,
+                "source_sha256": rel.E09_SOURCE_SHA,
+                "cover_sha256": rel.E09_COVER_SHA}
+        snapshots = []
+        def rows(page, platform):
+            return ([{"id": rel.E09_FB_ID, "description": "e09 caption"}]
+                    if platform == "facebook" else [])
+        def digest(path):
+            return rel.E09_SOURCE_SHA if path.name == "source.mp4" else rel.E09_COVER_SHA
+        def uploader(page, video_path, caption, **kwargs):
+            self.assertEqual(ig["status"], "replacement_upload_attempted")
+            self.assertEqual(snapshots[-1]["records"][rel.record_key(item, "instagram")]["status"],
+                             "replacement_upload_attempted")
+            self.assertEqual(kwargs["forbidden_container_ids"], {rel.E09_CONTAINER})
+            self.assertEqual(kwargs["thumb_offset"], 0)
+            return "18055555555555555"
+        with patch.object(rel.history, "save", side_effect=lambda p, d: snapshots.append(copy.deepcopy(d))), \
+             patch.object(rel.history, "now_utc",
+                          return_value=datetime(2026, 11, 12, 15, tzinfo=timezone.utc)):
+            rel.finish_expired_e09_replacement(
+                {"page_id": "1298191963387372"}, item, plan, ledger, "777",
+                rows_fn=rows, status_fn=Mock(return_value="EXPIRED"),
+                uploader=Mock(side_effect=uploader), verifier=Mock(return_value=True),
+                source_fn=lambda _id, p: p, cover_fn=lambda _id, p: p,
+                cover_video_fn=lambda src, cover, p, **kw: p,
+                prepare_fn=lambda src, p, **kw: p,
+                png_check_fn=Mock(), cover_check_fn=Mock(), digest_fn=digest)
+        self.assertEqual(ig["status"], "verified")
+        self.assertEqual(ig["post_id"], "18055555555555555")
+        self.assertEqual(ledger["records"][rel.record_key(item, "facebook")]["post_id"], rel.E09_FB_ID)
+
+    def test_e09_original_not_expired_never_uploads(self):
+        item, ledger, ig = self.e09_case()
+        ig.update(status="replacement_reserved", replacement_run_id="777",
+                  replacement_original_container_id=rel.E09_CONTAINER)
+        plan = {"mode": "replace_expired_e09", "platforms": ["instagram"],
+                "text": "e09 caption", "cover_id": rel.E09_COVER,
+                "source_sha256": rel.E09_SOURCE_SHA,
+                "cover_sha256": rel.E09_COVER_SHA}
+        upload = Mock()
+        with self.assertRaisesRegex(RuntimeError, "original_not_expired"):
+            rel.finish_expired_e09_replacement(
+                {"page_id": "1298191963387372"}, item, plan, ledger, "777",
+                rows_fn=lambda page, platform: [
+                    {"id": rel.E09_FB_ID, "description": "e09 caption"}
+                ] if platform == "facebook" else [],
+                status_fn=Mock(return_value="IN_PROGRESS"), uploader=upload)
+        upload.assert_not_called()
+
     def test_duplicate_caption_holds_even_if_previous_id_absent(self):
         with self.assertRaises(RuntimeError):
             rel.validate_remote([{"id": "101", "caption": "x"}], "x", None)
