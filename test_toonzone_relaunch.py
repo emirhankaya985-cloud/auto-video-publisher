@@ -272,12 +272,14 @@ class RelaunchSafetyTests(unittest.TestCase):
     def e09_case(self):
         item = {"episode": 9, "part": 1, "id": rel.E09_SOURCE, "name": rel.E09_FILE}
         facebook = {"status": "verified", "platform": "facebook",
-                    "post_id": rel.E09_FB_ID, "caption": "e09 caption"}
+                    "post_id": rel.E09_FB_ID, "caption": "e09 caption",
+                    "last_seen": "2026-11-11T00:09:13+00:00"}
         ig = {"status": "attempted", "platform": "instagram",
               "source_id": rel.E09_SOURCE, "file": rel.E09_FILE,
               "cover_id": rel.E09_COVER, "source_sha256": rel.E09_SOURCE_SHA,
               "cover_sha256": rel.E09_COVER_SHA, "intent_run_id": rel.E09_RUN,
-              "error_type": "MetaAPIError", "caption": "e09 caption"}
+              "error_type": "MetaAPIError", "caption": "e09 caption",
+              "last_seen": "2026-11-11T00:12:24+00:00"}
         ledger = {"schema": 1, "records": {
             rel.record_key(item, "facebook"): facebook,
             rel.record_key(item, "instagram"): ig
