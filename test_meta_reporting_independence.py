@@ -98,6 +98,26 @@ class ReportingIndependenceTests(unittest.TestCase):
         self.assertEqual(records, [])
         self.assertEqual(errors, [])
 
+    def test_meta_only_with_threads_never_uses_expired_youtube_oauth(self):
+        now = datetime(2026, 11, 12, 23, 59, tzinfo=ZoneInfo("Europe/Istanbul"))
+        with patch.dict(os.environ, {
+            "META_ONLY_REPORTING": "true", "MULTIPLATFORM_STATS_ENABLED": "true"
+        }), patch.object(stats_reporter, "META_TARGETS", []), patch.object(
+            stats_reporter, "YOUTUBE_TARGETS",
+            [("Example", "TOKEN_YOUTUBE", "missing", None, "YouTube")]
+        ), patch.object(stats_reporter, "ACCOUNT_TARGETS", {
+            "Example": (None, "example", None, [])
+        }), patch("stats_reporter.get_youtube_client",
+                 side_effect=AssertionError("expired YouTube OAuth must not be used")), patch(
+            "stats_reporter.threads_video_snapshot",
+            return_value={"post-1": {"views": 12, "published_at": now.isoformat()}}
+        ) as threads:
+            snapshot, records, errors = stats_reporter._collect_snapshot(now)
+        self.assertEqual(snapshot[("Example", "Threads")]["post-1"]["views"], 12)
+        self.assertNotIn(("Example", "YouTube"), snapshot)
+        self.assertEqual(errors, [])
+        threads.assert_called_once()
+
     def test_meta_http_200_missing_data_does_not_become_zero_views(self):
         response = Mock(ok=True, status_code=200)
         response.json.return_value = {}
