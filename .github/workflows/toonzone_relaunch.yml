@@ -6,26 +6,9 @@ on:
       - toonzone_relaunch.py
       - test_toonzone_relaunch.py
       - .github/workflows/toonzone_relaunch.yml
-  push:
-    branches: [main]
-    paths:
-      # A separate owner-approved marker starts a first live run after merging.
-      - docs/toonzone-relaunch-approved-2026-11-10.md
-      # Fixing original-ID visibility also triggers one guarded run on main.
-      - toonzone_relaunch.py
-  schedule:
-    # One part per run, only after BOTH original provider receipts reconcile.
-    # Run around the clock at 30-minute intervals to complete the previously
-    # owner-approved Season 1 catch-up without an 11-hour overnight blackout.
-    # A failed, ambiguous or rejected Meta POST still blocks the next part.
-    # Other account schedules, cover gates and likes remain untouched.
-    - cron: '7,37 * * * *'
-    # TEMPORARY owner-requested overnight Season 1 finishing window:
-    # Nov 11, 2026 00:02–07:47 Türkiye (UTC+3). 15-minute opportunities,
-    # never overlapping one-part-at-a-time guarded Meta POSTs.
-    # Fixed November dates prevent year-round overnight minute consumption.
-    - cron: '2,17,32,47 21-23 10 11 *'
-    - cron: '2,17,32,47 0-4 11 11 *'
+  # Automatic relaunch is paused while the owner-provided sequence conflicts
+  # with live Meta history. Resume only by an explicit manual dispatch.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -56,7 +39,7 @@ jobs:
       github.repository == 'emirhankaya985-cloud/auto-video-publisher' &&
       github.ref == 'refs/heads/main' &&
       github.run_attempt == 1 &&
-      (github.event_name == 'push' || github.event_name == 'schedule')
+      github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 55
     env:
