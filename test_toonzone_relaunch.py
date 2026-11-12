@@ -10,9 +10,10 @@ class RelaunchSafetyTests(unittest.TestCase):
     def test_manual_dispatch_required_while_sequence_conflicts_with_verified_history(self):
         from pathlib import Path
         workflow = Path(".github/workflows/toonzone_relaunch.yml").read_text(encoding="utf-8")
-        self.assertIn("Automatic relaunch is paused while the owner-provided sequence conflicts with live Meta history.", workflow)
+        self.assertIn("Automatic relaunch is paused while the owner-provided sequence conflicts", workflow)
+        self.assertIn("with live Meta history. Resume only by an explicit manual dispatch.", workflow)
         self.assertIn("workflow_dispatch:", workflow)
-        self.assertNotRegex(workflow, r"(?m)^\\s+schedule:")
+        self.assertNotRegex(workflow, r"(?m)^\s+schedule:")
         self.assertIn("group: toonzone-relaunch-s01e04", workflow)
         self.assertIn("cancel-in-progress: false", workflow)
         self.assertIn("github.run_attempt == 1", workflow)
