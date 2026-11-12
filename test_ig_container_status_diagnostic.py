@@ -14,6 +14,22 @@ class ReadOnlyIGTests(unittest.TestCase):
         self.assertEqual(result["posts_sent"], 0)
         self.assertNotIn("SENSITIVE", str(result))
         self.assertFalse(get.call_args.kwargs["allow_redirects"])
+    def test_s01e09_part1_recovery_is_exact_provider_get_only(self):
+        pid, ig, cid = diag.PINNED["toonzone_s01e09_part1_nov11"]
+        self.assertEqual((pid, ig, cid),
+                         ("1298191963387372", "17841477404255851",
+                          "17912187078580142"))
+        response = Mock(status_code=200)
+        response.json.return_value = {"id": cid, "status_code": "IN_PROGRESS"}
+        get = Mock(return_value=response)
+        result = diag.inspect([{"page_id": pid, "instagram_id": ig,
+                               "page_token": "PRIVATE"}],
+                              "toonzone_s01e09_part1_nov11", get=get)
+        self.assertEqual(result["status"], "IN_PROGRESS")
+        self.assertEqual(result["posts_sent"], 0)
+        self.assertTrue(get.call_args.args[0].endswith("/" + cid))
+        self.assertNotIn("PRIVATE", str(result))
+
     def test_wrong_ig_identity_has_no_network(self):
         pid, ig, cid = diag.PINNED["toonzone_part3"]
         get = Mock()
