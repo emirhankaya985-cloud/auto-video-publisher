@@ -14,6 +14,32 @@ class ReadOnlyIGTests(unittest.TestCase):
         self.assertEqual(result["posts_sent"], 0)
         self.assertNotIn("SENSITIVE", str(result))
         self.assertFalse(get.call_args.kwargs["allow_redirects"])
+    def test_film_part17_nov12_container_is_exact_read_only_check(self):
+        key = "film_part17_nov12"
+        name, cid = diag.NAMED_PINNED[key]
+        self.assertEqual((name, cid), ("Film Mağarası", "17906869221599675"))
+        page = {"page_name": name, "page_id": "12345", "instagram_id": "67890",
+                "page_token": "SECRET"}
+        identity = Mock(ok=True, status_code=200)
+        identity.json.return_value = {
+            "id": "12345", "name": name,
+            "instagram_business_account": {"id": "67890"},
+        }
+        status = Mock(status_code=200)
+        status.json.return_value = {
+            "id": cid, "status_code": "IN_PROGRESS",
+            "status": "ProcessingFailed",
+        }
+        get = Mock(side_effect=[identity, status])
+        result = diag.inspect_named([page], key, get=get)
+        self.assertEqual(result["status"], "IN_PROGRESS")
+        self.assertEqual(result["posts_sent"], 0)
+        self.assertEqual(result["detail_categories"], ["processing"])
+        self.assertEqual(get.call_count, 2)
+        self.assertTrue(get.call_args_list[1].args[0].endswith("/" + cid))
+        self.assertNotIn("SECRET", str(result))
+        self.assertNotIn("ProcessingFailed", str(result))
+
     def test_s01e09_part1_recovery_is_exact_provider_get_only(self):
         pid, ig, cid = diag.PINNED["toonzone_s01e09_part1_nov11"]
         self.assertEqual((pid, ig, cid),
