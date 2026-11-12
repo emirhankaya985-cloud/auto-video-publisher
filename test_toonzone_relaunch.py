@@ -7,14 +7,16 @@ import toonzone_relaunch as rel
 
 
 class RelaunchSafetyTests(unittest.TestCase):
-    def test_catchup_schedule_does_not_block_overnight_or_bypass_safety(self):
+    def test_manual_dispatch_required_while_sequence_conflicts_with_verified_history(self):
         from pathlib import Path
         workflow = Path(".github/workflows/toonzone_relaunch.yml").read_text(encoding="utf-8")
-        self.assertIn("cron: '7,37 * * * *'", workflow)
-        self.assertNotIn("cron: '7,37 9-20 * * *'", workflow)
+        self.assertIn("Automatic relaunch is paused while the owner-provided sequence conflicts with live Meta history.", workflow)
+        self.assertIn("workflow_dispatch:", workflow)
+        self.assertNotRegex(workflow, r"(?m)^\\s+schedule:")
         self.assertIn("group: toonzone-relaunch-s01e04", workflow)
         self.assertIn("cancel-in-progress: false", workflow)
         self.assertIn("github.run_attempt == 1", workflow)
+        self.assertIn("github.event_name == 'workflow_dispatch'", workflow)
         self.assertIn("Verify exact owner relaunch marker and Meta identity; reserve only next part", workflow)
         self.assertIn("Persist intent BEFORE any external Meta write", workflow)
         self.assertIn("Publish only reserved next part on Facebook and Instagram", workflow)
