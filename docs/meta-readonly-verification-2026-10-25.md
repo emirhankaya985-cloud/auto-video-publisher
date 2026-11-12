@@ -24,3 +24,7 @@ The owner requested immediate real Telegram and ntfy table verification after PR
 ## Owner-requested one-shot Telegram statistics test — 8 November 2026
 
 Owner explicitly requested one immediate live statistics report delivered to configured Telegram. This marker triggers the existing read-only `Hesap Bazli Izlenme Raporu` push workflow once. Verify server acknowledgements and report artifacts; a manual early-day measurement is not a full-day delta. Missing credentials, incomplete API counters and unavailable prior-day baselines must remain visible as unavailable, never fabricated. No video publishing, cross-account interaction, state reset, token rotation, or changes to scheduled jobs are authorized by this marker.
+
+## 12 November 2026 — live statistics acceptance after Meta-only fix
+
+Owner requested repair of missing video and data reports. PR #260 corrected the Meta-only reporting scope so that expired YouTube OAuth is never queried despite Threads being enabled. Trigger ONE existing read-only statistics workflow now and verify actual Telegram server ACKs and comparison/publication-progress artifacts. Report incomplete Threads/Meta counters as unavailable; do not convert missing values to zero or pretend this is a 23:59 snapshot. No publication, state reset, credential changes, account engagement or retries are authorized by this check.
