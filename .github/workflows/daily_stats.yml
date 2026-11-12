@@ -25,7 +25,7 @@ jobs:
     # Default enabled after explicit owner approval; variable=false is a kill switch.
     if: vars.META_REPORTING_ENABLED != 'false'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 35
     steps:
       - name: Kodlari Cek
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -36,6 +36,7 @@ jobs:
       - name: Bagimliliklari Yukle
         run: pip install --require-hashes -r requirements.txt
       - name: Istatistikleri Telefona Gonder
+        timeout-minutes: 28
         env:
 
           META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
@@ -73,7 +74,7 @@ jobs:
           NVIDIA_AI_ENABLED: ${{ vars.NVIDIA_AI_ENABLED }}
           NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
           NVIDIA_MODEL: ${{ vars.NVIDIA_MODEL || 'nvidia/nemotron-3.5-super-vl-120b-a12b' }}
-        run: python stats_reporter.py
+        run: python -u stats_reporter.py
       - name: Recommend posting hours from verified historical IDs (no schedule changes)
         if: success()
         continue-on-error: true
