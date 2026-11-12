@@ -470,7 +470,7 @@ def _collect_snapshot(now, *, report_day=None):
             save_platform(account, platform, None, api, exc)
 
     for account, env_name, fallback, expected_id, platform in YOUTUBE_TARGETS:
-        if not multiplatform and os.getenv("META_ONLY_REPORTING", "").lower() == "true":
+        if os.getenv("META_ONLY_REPORTING", "").lower() == "true":
             continue
         api = "youtube.data.v3.videos.statistics.viewCount"
         if not os.environ.get(env_name, "").strip() and not Path(fallback).exists():
@@ -755,8 +755,10 @@ def build_report(now=None):
 
         rows = [f"🌙 GÜNLÜK SOSYAL MEDYA RAPORU — {report_day:%d.%m.%Y}",
                 f"🕒 Ölçüm: {now:%d.%m.%Y %H:%M} TRT",
-                "📊 Kapsam: Meta video sayaçları (Facebook/Instagram); YouTube ölçülmedi."
-                if meta_only and os.getenv("MULTIPLATFORM_STATS_ENABLED") != "true" else "📊 Kapsam: Erişilebilir platform video ve Threads video gönderisi sayaçları.",
+                ("📊 Kapsam: Meta + Threads video sayaçları; YouTube ölçülmedi."
+                 if os.getenv("MULTIPLATFORM_STATS_ENABLED") == "true" else
+                 "📊 Kapsam: Meta video sayaçları (Facebook/Instagram); YouTube ölçülmedi.")
+                if meta_only else "📊 Kapsam: Erişilebilir platform video ve Threads video gönderisi sayaçları.",
                 "⚠️ Genel toplamlar erişilebilen videoların toplamıdır; tüm içerik türleri veya tüm geçmiş garanti edilmez.", ""]
         if delayed:
             rows.extend([
