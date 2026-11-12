@@ -1,0 +1,50 @@
+name: ToonZone S01E09 Part 1 container evidence
+on:
+  pull_request:
+    paths: ['.github/workflows/toonzone_s01e09_container_evidence.yml']
+  push:
+    branches: [main]
+    paths: ['.github/workflows/toonzone_s01e09_container_evidence.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  evidence:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: pip install --require-hashes -r requirements.txt
+      - run: python -m unittest -v test_ig_container_status_diagnostic.py
+      - name: Inspect the exact original container with GET
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from ig_container_status_diagnostic import inspect
+          from meta_auth_loader import load_meta_auth
+
+          result = inspect(
+              load_meta_auth()["pages"],
+              "toonzone_s01e09_part1",
+              binding=("1298191963387372", "17841477404255851", "17912187078580142"),
+          )
+          result["original_run_id"] = "42928631311"
+          result["safe_to_retry"] = False
+          serialized = json.dumps(result, indent=2)
+          print(serialized)
+          Path("toonzone-s01e09-container.json").write_text(serialized, encoding="utf-8")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        with:
+          name: toonzone-s01e09-container-evidence
+          path: toonzone-s01e09-container.json
+          if-no-files-found: error
+          retention-days: 30
