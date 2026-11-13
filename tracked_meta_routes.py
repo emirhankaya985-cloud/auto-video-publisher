@@ -140,10 +140,11 @@ def main():
         except Exception:
             print('{"correlation":"unavailable","new_target_alert_preserved":true}',flush=True)
 
-    # The owner requested no repeated deficit/error push notifications.
-    # Keep a nonzero job result, the exact read-only verdict artifact, and
-    # the step summary: quiet mode must not disguise a missing post as healthy.
-    if os.getenv("QUIET_FAILURE_NOTIFICATIONS") == "true":
+    # A newly observed, verified target deficit must alert the owner. Duplicate
+    # publisher incidents are suppressed above; suppress only unknown read errors
+    # when quiet mode is enabled, since those do not prove a missing video.
+    if (os.getenv("QUIET_FAILURE_NOTIFICATIONS") == "true"
+            and verdict["status"] != "behind"):
         print(json.dumps({"notification": "quiet_by_owner",
                           "status": verdict["status"],
                           "target": route,
