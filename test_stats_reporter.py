@@ -175,20 +175,30 @@ def test_history_download_failure_never_overwrites_existing_drive_archive():
     assert "🗄️ Geçmiş: ⚠️ Drive arşivi kaydedilemedi" in report
 
 
-def test_notify_compacts_large_report_before_delivery():
+def test_notify_sends_only_aggregated_collection_errors():
     import stats_reporter
-    from test_ntfy_phone_report import ACCOUNTS, PhoneReportTests
-    report = PhoneReportTests().make_long_report()
-    assert len(report.encode("utf-8")) > 4096
+    from views_comparison import ViewReport
+    comparison = {
+        "accounts": [
+            {"account": "Penguen", "platforms": [
+                {"platform": "Facebook", "total": 10},
+                {"platform": "YouTube", "total": None},
+            ]},
+        ],
+        "collection_errors": ["Penguen / YouTube: HTTP 403"],
+    }
+    report = ViewReport("normal stats", comparison)
     with patch("stats_reporter.send_ntfy", return_value={
         "http_status": 200, "server_ack": True,
     }) as send:
         stats_reporter.notify(report)
+    assert send.call_count == 1
     body = send.call_args.args[1]
     assert send.call_args.kwargs["require_ack"] is True
-    assert len(body.encode("utf-8")) <= 3800
-    for name in ACCOUNTS:
-        assert name.upper() in body
+    assert "Penguen — YouTube" in body
+    assert "HTTP 403" in body
+    assert "Facebook" not in body
+
 
 
 
