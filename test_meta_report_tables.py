@@ -17,18 +17,17 @@ class MetaTableTests(unittest.TestCase):
         self.assertIn('2',html)
         self.assertNotIn('YouTube',text)
 
-    def test_ntfy_format_failure_does_not_block_telegram_tables(self):
+    def test_error_notification_is_one_plain_digest_per_channel(self):
         from unittest.mock import patch
         import stats_reporter
         from views_comparison import ViewReport
-        data = {'publication': {}}
+        data = {'accounts': [], 'collection_errors': ['Beyinsiz Penguen / YouTube: HTTP 403']}
         message = ViewReport('report', data)
-        with patch.object(stats_reporter, 'ntfy_table', side_effect=ValueError('too large')), \
-             patch.object(stats_reporter, 'telegram_configured', return_value=True), \
-             patch.object(stats_reporter, 'telegram_tables', return_value=[('table', '<pre>ok</pre>')]), \
-             patch.object(stats_reporter, 'publication_telegram', return_value=('pub','<pre>ok</pre>')), \
-             patch.object(stats_reporter, 'send_ntfy') as ntfy, \
+        with patch.object(stats_reporter, 'telegram_configured', return_value=True), \
+             patch.object(stats_reporter, 'send_ntfy', return_value={'http_status': 200}) as ntfy, \
              patch.object(stats_reporter, 'send_telegram', return_value={'server_ack': True}) as telegram:
             stats_reporter.notify(message)
-        ntfy.assert_not_called()
-        self.assertEqual(telegram.call_count, 2)
+        self.assertEqual(ntfy.call_count, 1)
+        self.assertEqual(telegram.call_count, 1)
+        self.assertIn('Beyinsiz Penguen / YouTube', ntfy.call_args.args[1])
+        self.assertNotIn('reply_markup', telegram.call_args.kwargs)
