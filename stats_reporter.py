@@ -895,74 +895,47 @@ def build_report(now=None):
 
 
 def notify(message):
-    title = "🌙 Günlük Sosyal Medya Raporu"
+    """Send one concise digest only when collection data is missing."""
     comparison = getattr(message, "comparison", None)
-    body = None
+    if not isinstance(comparison, dict):
+        return
+
+    issues = []
+    for account in comparison.get("accounts", []):
+        for platform in account.get("platforms", []):
+            if platform.get("total") is None:
+                issues.append(f"{account.get('account', 'Hesap')} — {platform.get('platform', 'Platform')}: veri alınamadı")
+    issues.extend(str(error) for error in comparison.get("collection_errors", []) if error)
+    issues = list(dict.fromkeys(issues))
+    if not issues:
+        return
+
+    title = "⚠️ Sosyal medya raporunda hata"
+    body = "İzlenme verisi eksik:\n" + "\n".join(f"• {item}" for item in issues)
+    if len(body.encode("utf-8")) > 3500:
+        body = body.encode("utf-8")[:3400].decode("utf-8", errors="ignore") + "\n… ayrıntılar GitHub Actions logunda."
+
     ntfy_error = None
     try:
-        body = (ntfy_table(comparison) if comparison and "publication" in comparison
-                else compact_phone_report(message, ACCOUNT_TARGETS))
-        receipt = send_ntfy(title, body, timeout=20, require_ack=True)
-        print(f"ntfy sunucu alındısı doğrulandı: HTTP {receipt['http_status']}; "
-              "telefon teslimatı doğrulanmadı.", flush=True)
+        send_ntfy(title, body, timeout=20, require_ack=True)
     except Exception as exc:
         ntfy_error = exc
-    telegram_ok = False
-    detailed_error = None
+
+    telegram_error = None
     if telegram_configured():
         try:
-            comparison = getattr(message, "comparison", None)
-            parts = telegram_tables(comparison) if comparison else [(title, body or str(message))]
-            if comparison and "publication" in comparison:
-                parts.append(publication_telegram(comparison))
-            if comparison and comparison.get('followers'):
-                from html import escape
-                lines = []
-                for row in comparison['followers']:
-                    count = 'N/A' if row['followers'] is None else str(row['followers'])
-                    delta = 'N/A' if row['daily_change'] is None else f"{row['daily_change']:+d}"
-                    lines.append(escape(f"{row['account']} / {row['platform']}: {count} ({delta})"))
-                parts.append(('📈 Takipçi geçmişi', '\n'.join(lines)))
-            if comparison and comparison.get("threads_engagement"):
-                from html import escape
-                engagement_rows = comparison["threads_engagement"]
-                lines = []
-                for account in dict.fromkeys(row["account"] for row in engagement_rows):
-                    metrics = {row["metric"]: row.get("value") for row in engagement_rows
-                               if row.get("account") == account and row.get("platform") == "Threads"
-                               and row.get("status") == "ok"}
-                    lines.append(escape(account + ": " + " · ".join(
-                        f"{label} {number(metrics.get(metric))}" for metric, label in (
-                            ("likes", "beğeni"), ("replies", "yanıt"), ("reposts", "yeniden paylaşım"),
-                            ("quotes", "alıntı"), ("shares", "dış paylaşım")))))
-                lines.append("Kapsam: erişilebilir video gönderileri; eksik metrik N/A.")
-                parts.append(("🧵 Threads video etkileşimleri", "\n".join(lines)))
-            acknowledged = 0
-            for part_title, part_body in parts:
-                options = {"parse_mode": "HTML"} if comparison else {}
-                if acknowledged == 0 and os.getenv("TELEGRAM_STATUS_INBOX_ENABLED") == "true":
-                    options["reply_markup"] = STATISTICS_KEYBOARD
-                receipt = send_telegram(part_title, part_body, **options)
-                if receipt["server_ack"] is not True:
-                    raise RuntimeError("Telegram report receipt missing")
-                acknowledged += 1
-                print(json.dumps({"telegram_part": acknowledged, "server_ack": True}), flush=True)
-            telegram_ok = acknowledged == len(parts)
-            print(json.dumps({"telegram_report_parts": len(parts), "server_acks": acknowledged,
-                              "phone_delivery_verified": False}), flush=True)
+            receipt = send_telegram(title, body)
+            if receipt.get("server_ack") is not True:
+                raise RuntimeError("Telegram report receipt missing")
         except Exception as exc:
-            print(f"telegram raporu gönderilemedi: {type(exc).__name__}", flush=True)
-            if getattr(message, "comparison", None):
-                detailed_error = exc
-    if detailed_error:
-        raise RuntimeError("Detailed Telegram report incomplete; accepted parts must not be blindly resent") from None
-    if ntfy_error:
-        if telegram_ok:
-            print(f"ntfy raporu gönderilemedi: {type(ntfy_error).__name__}", flush=True)
-        else:
-            # Preserve existing ntfy failure semantics and sanitized errors.
-            raise ntfy_error
+            telegram_error = exc
 
+    if ntfy_error and telegram_error:
+        raise RuntimeError("Error digest delivery failed") from None
+    if ntfy_error:
+        print(f"ntfy hata bildirimi gönderilemedi: {type(ntfy_error).__name__}", flush=True)
+    if telegram_error:
+        print(f"Telegram hata bildirimi gönderilemedi: {type(telegram_error).__name__}", flush=True)
 
 def write_step_summary(report):
     """Display the same report on GitHub Actions without additional API calls.
