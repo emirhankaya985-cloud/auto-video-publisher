@@ -11,6 +11,13 @@ from stats_reporter import (
     notify, publication_progress, safe_error, youtube_video_snapshot,
 )
 
+def report_with_collection_error():
+    from views_comparison import ViewReport
+    return ViewReport("report", {
+        "accounts": [],
+        "collection_errors": ["Test / Instagram: HTTP 403"],
+    })
+
 
 def test_youtube_scope_error_is_short_and_actionable():
     response = Mock(status=403, reason="Request had insufficient authentication scopes")
@@ -27,7 +34,7 @@ def test_ntfy_success_is_checked():
     with patch.dict(os.environ, {"NTFY_TOPIC": "private-topic"}, clear=True), patch(
         "ntfy_notifications.requests.post", return_value=response
     ) as post:
-        notify("report")
+        notify(report_with_collection_error())
     response.raise_for_status.assert_called_once_with()
     response.json.assert_called_once_with()
     assert post.call_args.kwargs["json"]["title"] == "🌙 Günlük Sosyal Medya Raporu"
@@ -42,7 +49,7 @@ def test_ntfy_topic_url_posts_json_to_root_with_explicit_topic():
     with patch.dict(os.environ, {"NTFY_TOPIC_URL": "https://ntfy.sh/private-topic"}, clear=True), patch(
         "ntfy_notifications.requests.post", return_value=response
     ) as post:
-        notify("report")
+        notify(report_with_collection_error())
     assert post.call_args.args[0] == "https://ntfy.sh/"
     assert post.call_args.kwargs["json"]["topic"] == "private-topic"
     assert post.call_args.kwargs["allow_redirects"] is False
@@ -54,7 +61,7 @@ def test_ntfy_transport_error_never_echoes_secret_topic_url():
         "ntfy_notifications.requests.post", side_effect=requests.ConnectionError(secret_url)
     ):
         try:
-            notify("report")
+            notify(report_with_collection_error())
         except RuntimeError as exc:
             assert secret_url not in str(exc)
             assert "ConnectionError" in str(exc)
@@ -72,7 +79,7 @@ def test_ntfy_http_200_with_wrong_server_topic_is_failure():
         "ntfy_notifications.requests.post", return_value=response
     ) as post:
         try:
-            notify("report")
+            notify(report_with_collection_error())
         except RuntimeError as exc:
             assert "secret-topic" not in str(exc)
             assert "different-topic" not in str(exc)
