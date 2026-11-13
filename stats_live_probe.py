@@ -86,6 +86,50 @@ def summarize(report):
             "today_verified_post_count": "N/A",
             "publisher_ledger_required": True,
         })
+    # Export only validated numeric counters and owner-defined labels so the
+    # owner can read the live result. Never copy provider errors or credentials.
+    measured_metrics = []
+    account_totals = []
+    for account in accounts:
+        if not isinstance(account, dict) or account.get("account") not in known_accounts:
+            continue
+        name = account["account"]
+        total = account.get("total")
+        if type(total) is int and total >= 0:
+            account_totals.append({
+                "account": name, "views": total,
+                "daily_change": (account.get("daily") or {}).get("delta")
+                    if type((account.get("daily") or {}).get("delta")) is int else None,
+                "weekly_change": (account.get("weekly") or {}).get("delta")
+                    if type((account.get("weekly") or {}).get("delta")) is int else None,
+            })
+        for part in account.get("platforms", []):
+            if not isinstance(part, dict) or part.get("platform") not in known_platforms:
+                continue
+            value = part.get("total")
+            if type(value) is not int or value < 0:
+                continue
+            daily = part.get("daily") or {}
+            weekly = part.get("weekly") or {}
+            measured_metrics.append({
+                "account": name, "platform": part["platform"], "views": value,
+                "daily_change": daily.get("delta") if type(daily.get("delta")) is int else None,
+                "weekly_change": weekly.get("delta") if type(weekly.get("delta")) is int else None,
+            })
+    follower_metrics = []
+    for row in comparison.get("followers", []):
+        if not isinstance(row, dict) or row.get("account") not in known_accounts:
+            continue
+        if row.get("platform") not in known_platforms:
+            continue
+        value = row.get("followers")
+        if type(value) is not int or value < 0:
+            continue
+        change = row.get("daily_change")
+        follower_metrics.append({
+            "account": row["account"], "platform": row["platform"],
+            "followers": value, "daily_change": change if type(change) is int else None,
+        })
     meta = comparison.get("meta_collection")
     return {
         "status": "measured_partial_or_complete",
@@ -94,6 +138,9 @@ def summarize(report):
         "owner_account_coverage": owner_coverage,
         "owner_account_platform_health": owner_accounts,
         "counts": counts,
+        "account_totals": account_totals,
+        "platform_metrics": measured_metrics,
+        "follower_metrics": follower_metrics,
         "missing_view_counters": missing_counters,
         "meta_collection": meta if isinstance(meta, dict) else {"status": "unverified"},
         "collection_errors_count": len(comparison.get("collection_errors", []))
