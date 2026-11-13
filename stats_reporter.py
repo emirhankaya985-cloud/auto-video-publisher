@@ -292,10 +292,14 @@ def facebook_video_snapshot(page):
         f"{page['page_id']}/videos", page["page_token"],
         fields="id,views,created_time", limit=100,
     ):
-        if item.get("views") is None:
-            raise RuntimeError("Facebook video views alanı API yanıtında yok")
-        videos[item["id"]] = {
-            "views": int(item["views"]),
+        video_id = item.get("id")
+        if not isinstance(video_id, str) or not video_id or video_id in videos:
+            raise RuntimeError("Facebook video kimliği eksik veya yinelenmiş")
+        views = counter(item.get("views"))
+        if views is None:
+            raise RuntimeError("Facebook video views sayacı geçersiz")
+        videos[video_id] = {
+            "views": views,
             "published_at": item.get("created_time", ""),
         }
     return videos
@@ -313,7 +317,10 @@ def instagram_video_snapshot(page):
     ):
         if item.get("media_type") != "VIDEO":
             continue
-        insight = graph_get(f"{item['id']}/insights", page["page_token"], metric="views")
+        video_id = item.get("id")
+        if not isinstance(video_id, str) or not video_id or video_id in videos:
+            raise RuntimeError("Instagram video kimliği eksik veya yinelenmiş")
+        insight = graph_get(f"{video_id}/insights", page["page_token"], metric="views")
         entries = insight.get("data", [])
         if not entries:
             raise RuntimeError("Instagram video views metriği erişilebilir değil")
@@ -321,9 +328,10 @@ def instagram_video_snapshot(page):
         value = entries[0].get("value")
         if value is None and values:
             value = values[0].get("value")
+        value = counter(value)
         if value is None:
-            raise RuntimeError("Instagram video views değeri API yanıtında yok")
-        videos[item["id"]] = {"views": int(value), "published_at": item.get("timestamp", "")}
+            raise RuntimeError("Instagram video views sayacı geçersiz")
+        videos[video_id] = {"views": value, "published_at": item.get("timestamp", "")}
     return videos
 
 
