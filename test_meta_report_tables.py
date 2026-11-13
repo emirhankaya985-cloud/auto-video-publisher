@@ -29,5 +29,5 @@ class MetaTableTests(unittest.TestCase):
             stats_reporter.notify(message)
         self.assertEqual(ntfy.call_count, 1)
         self.assertEqual(telegram.call_count, 1)
-        self.assertIn('Beyinsiz Penguen / YouTube', ntfy.call_args.args[1])
+        self.assertIn('Beyinsiz Penguen — YouTube', ntfy.call_args.args[1])
         self.assertNotIn('reply_markup', telegram.call_args.kwargs)
