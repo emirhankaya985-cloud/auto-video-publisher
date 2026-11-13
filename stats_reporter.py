@@ -884,7 +884,10 @@ def build_report(now=None):
                 for row in comparison["accounts"]
             ]})
         comparison["collection_errors"] = collection_errors
-        comparison["report_errors"] = list(dict.fromkeys(errors))
+        comparison["report_errors"] = [
+            error for error in dict.fromkeys(errors)
+            if not error.startswith("GitHub geçmişinde önceki ölçüm yok;")
+        ]
         comparison["followers"] = follower_changes(records, previous)
         comparison["threads_engagement"] = [
             {key: record.get(key) for key in ("account", "platform", "metric", "value", "status", "source_api", "source_metric")}
