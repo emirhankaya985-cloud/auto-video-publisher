@@ -96,3 +96,37 @@ def test_engagement_coverage_counts_only_verified_threads_metrics():
     coverage = summarize(report)["threads_engagement_coverage"]
     assert coverage["likes"] == {"expected_accounts": 2, "measured_accounts": 1}
     assert coverage["shares"] == {"expected_accounts": 2, "measured_accounts": 0}
+
+
+
+def test_live_probe_exports_validated_current_view_and_follower_counts():
+    known = next(iter(stats_live_probe.stats_reporter.ACCOUNT_TARGETS))
+    report = Mock(comparison={
+        "measured_at": "2026-11-13T10:57:00+03:00",
+        "accounts": [{"account": known, "total": 200,
+            "daily": {"delta": 12}, "weekly": {"delta": 40},
+            "platforms": [
+                {"platform": "Facebook", "total": 120, "daily": {"delta": 8},
+                 "weekly": {"delta": 20}},
+                {"platform": "Threads", "total": None, "daily": {"delta": None},
+                 "weekly": {"delta": None}},
+            ]}],
+        "followers": [{"account": known, "platform": "Instagram", "followers": 75,
+                       "daily_change": 2},
+                      {"account": known, "platform": "Threads", "followers": None,
+                       "daily_change": None}],
+        "collection_errors": ["private provider error must not be exported"],
+        "meta_collection": {"status": "complete"},
+    })
+    data = stats_live_probe.summarize(report)
+    assert data["account_totals"] == [
+        {"account": known, "views": 200, "daily_change": 12, "weekly_change": 40}
+    ]
+    assert data["platform_metrics"] == [
+        {"account": known, "platform": "Facebook", "views": 120,
+         "daily_change": 8, "weekly_change": 20}
+    ]
+    assert data["follower_metrics"] == [
+        {"account": known, "platform": "Instagram", "followers": 75, "daily_change": 2}
+    ]
+    assert "private provider error" not in str(data)
