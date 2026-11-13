@@ -922,7 +922,8 @@ def notify(message):
         ntfy_error = exc
 
     telegram_error = None
-    if telegram_configured():
+    telegram_enabled = telegram_configured()
+    if telegram_enabled:
         try:
             receipt = send_telegram(title, body)
             if receipt.get("server_ack") is not True:
@@ -930,7 +931,7 @@ def notify(message):
         except Exception as exc:
             telegram_error = exc
 
-    if ntfy_error and telegram_error:
+    if ntfy_error and (telegram_error or not telegram_enabled):
         raise RuntimeError("Error digest delivery failed") from None
     if ntfy_error:
         print(f"ntfy hata bildirimi gönderilemedi: {type(ntfy_error).__name__}", flush=True)
