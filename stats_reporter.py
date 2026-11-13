@@ -992,9 +992,6 @@ if __name__ == "__main__":
     print(report)
     write_step_summary(report)
     notify(report)
-    from nvidia_assistant import send_daily_summary
-    if report.comparison["collection"]["status"] == "complete":
-        send_daily_summary(report.comparison)
     required = report.comparison.get("meta_collection", report.comparison["collection"])
     if required["status"] != "complete":
         print("::error::Meta görüntülenme verisi eksik; bildirim teslimi veri toplama başarısı değildir.", flush=True)
