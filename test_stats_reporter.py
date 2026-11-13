@@ -37,7 +37,7 @@ def test_ntfy_success_is_checked():
         notify(report_with_collection_error())
     response.raise_for_status.assert_called_once_with()
     response.json.assert_called_once_with()
-    assert post.call_args.kwargs["json"]["title"] == "🌙 Günlük Sosyal Medya Raporu"
+    assert post.call_args.kwargs["json"]["title"] == "⚠️ Sosyal medya raporunda hata"
 
 
 def test_ntfy_topic_url_posts_json_to_root_with_explicit_topic():
