@@ -515,3 +515,64 @@ def test_threads_unsupported_batch_metric_falls_back_without_losing_supported_co
         data = threads_video_snapshot("film", on_followers=Mock())
     assert data["1234567890"]["engagement"] == {"likes": 2, "replies": 2, "reposts": 2, "quotes": 2, "shares": None}
     assert get.call_count == 8
+
+
+
+def test_facebook_view_snapshot_rejects_invalid_or_duplicate_records():
+    from stats_reporter import facebook_video_snapshot
+
+    page = {"page_id": "page", "page_token": "token"}
+    with patch("stats_reporter.graph_pages", return_value=iter([
+        {"id": "v1", "views": "12", "created_time": "2026-11-13T10:00:00+03:00"}
+    ])):
+        assert facebook_video_snapshot(page)["v1"]["views"] == 12
+
+    for bad in (-1, True, 1.5, "bad", None):
+        with patch("stats_reporter.graph_pages", return_value=iter([{"id": "v1", "views": bad}])):
+            try:
+                facebook_video_snapshot(page)
+            except RuntimeError:
+                pass
+            else:
+                raise AssertionError(f"invalid Facebook counter accepted: {bad!r}")
+
+    for rows in ([{"views": 1}], [{"id": "v1", "views": 1}, {"id": "v1", "views": 2}]):
+        with patch("stats_reporter.graph_pages", return_value=iter(rows)):
+            try:
+                facebook_video_snapshot(page)
+            except RuntimeError:
+                pass
+            else:
+                raise AssertionError("missing or duplicate Facebook video ID accepted")
+
+
+def test_instagram_view_snapshot_rejects_invalid_or_duplicate_records():
+    from stats_reporter import instagram_video_snapshot
+
+    page = {"instagram_id": "instagram", "page_token": "token"}
+    video = {"id": "v1", "media_type": "VIDEO", "timestamp": "2026-11-13T10:00:00+03:00"}
+    with patch("stats_reporter.graph_pages", return_value=iter([video])), patch(
+        "stats_reporter.graph_get", return_value={"data": [{"name": "views", "value": "19"}]}
+    ):
+        assert instagram_video_snapshot(page)["v1"]["views"] == 19
+
+    for bad in (-1, True, 1.5, "bad", None):
+        with patch("stats_reporter.graph_pages", return_value=iter([video])), patch(
+            "stats_reporter.graph_get", return_value={"data": [{"name": "views", "value": bad}]}
+        ):
+            try:
+                instagram_video_snapshot(page)
+            except RuntimeError:
+                pass
+            else:
+                raise AssertionError(f"invalid Instagram counter accepted: {bad!r}")
+
+    with patch("stats_reporter.graph_pages", return_value=iter([video, video])), patch(
+        "stats_reporter.graph_get", return_value={"data": [{"name": "views", "value": 19}]}
+    ):
+        try:
+            instagram_video_snapshot(page)
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("duplicate Instagram video ID accepted")
