@@ -884,6 +884,7 @@ def build_report(now=None):
                 for row in comparison["accounts"]
             ]})
         comparison["collection_errors"] = collection_errors
+        comparison["report_errors"] = list(dict.fromkeys(errors))
         comparison["followers"] = follower_changes(records, previous)
         comparison["threads_engagement"] = [
             {key: record.get(key) for key in ("account", "platform", "metric", "value", "status", "source_api", "source_metric")}
@@ -895,23 +896,43 @@ def build_report(now=None):
 
 
 def notify(message):
-    """Send one concise digest only when collection data is missing."""
+    """Send one concise digest only when the report contains real errors."""
     comparison = getattr(message, "comparison", None)
     if not isinstance(comparison, dict):
         return
 
+    raw_errors = comparison.get("report_errors")
+    if raw_errors is None:
+        raw_errors = comparison.get("collection_errors", [])
+    platform_errors, other_errors = {}, []
+    for raw in raw_errors:
+        error = str(raw).strip()
+        if not error:
+            continue
+        left, sep, detail = error.partition(": ")
+        account, slash, platform = left.partition(" / ")
+        if sep and slash:
+            platform_errors[(account.strip(), platform.strip())] = detail.strip()
+        else:
+            other_errors.append(error)
+
     issues = []
     for account in comparison.get("accounts", []):
+        account_name = str(account.get("account", "Hesap"))
         for platform in account.get("platforms", []):
             if platform.get("total") is None:
-                issues.append(f"{account.get('account', 'Hesap')} — {platform.get('platform', 'Platform')}: veri alınamadı")
-    issues.extend(str(error) for error in comparison.get("collection_errors", []) if error)
+                platform_name = str(platform.get("platform", "Platform"))
+                detail = platform_errors.pop((account_name, platform_name), "veri alınamadı")
+                issues.append(f"{account_name} — {platform_name}: {detail}")
+    for (account_name, platform_name), detail in platform_errors.items():
+        issues.append(f"{account_name} — {platform_name}: {detail}")
+    issues.extend(other_errors)
     issues = list(dict.fromkeys(issues))
     if not issues:
         return
 
     title = "⚠️ Sosyal medya raporunda hata"
-    body = "İzlenme verisi eksik:\n" + "\n".join(f"• {item}" for item in issues)
+    body = "Hata özeti:\n" + "\n".join(f"• {item}" for item in issues)
     if len(body.encode("utf-8")) > 3500:
         body = body.encode("utf-8")[:3400].decode("utf-8", errors="ignore") + "\n… ayrıntılar GitHub Actions logunda."
 
