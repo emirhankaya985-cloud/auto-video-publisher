@@ -144,7 +144,7 @@ class ViewComparisonTests(unittest.TestCase):
         self.assertEqual(send.call_count, 1)
         self.assertNotIn("reply_markup", send.call_args.kwargs)
         self.assertNotIn("parse_mode", send.call_args.kwargs)
-        self.assertIn("account / Instagram", send.call_args.args[1])
+        self.assertIn("account — Instagram", send.call_args.args[1])
         self.assertIn("HTTP 403", send.call_args.args[1])
 
     def test_html_transport_adds_parse_mode_and_refuses_truncated_markup(self):
