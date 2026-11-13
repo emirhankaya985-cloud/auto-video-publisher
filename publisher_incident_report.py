@@ -118,6 +118,54 @@ def build_incident_report(state, run_id, *, plan_text="", errors=None, step_outc
         row.get("route") if row.get("route") in safe_routes else "unknown"
         for row in previous_held
     ))
+
+    # Keep enough bounded, sanitized provenance in the artifact to resolve
+    # old records without dumping captions, Drive IDs, URLs, or raw API errors.
+    previous_details = []
+    for row in previous_held:
+        failure = row.get("failure") if isinstance(row.get("failure"), dict) else {}
+        route = row.get("route") if row.get("route") in safe_routes else "unknown"
+        platform = row.get("platform") if row.get("platform") in ("facebook", "instagram") else "unknown"
+        detail = {
+            "route": route,
+            "platform": platform,
+            "status": row.get("status"),
+            "source_file": str(row.get("file", ""))[:160],
+            "origin_run_id": str(row.get("run_id", ""))[:24],
+            "reason": failure.get("reason") if failure.get("reason") in _SAFE_REASONS else "unknown",
+            "action": "remote_reconciliation_required" if row.get("status") in ("intent", "uncertain") else
+                      "source_review_required_no_repost" if row.get("status") == "held" else
+                      "safe_to_reprepare_next_tick",
+        }
+        for source_field, output_field in (
+            ("stage", "failure_stage"), ("container_status", "container_status"),
+        ):
+            value = failure.get(source_field)
+            if isinstance(value, str) and value in {
+                "Instagram ikili video aktarımı", "PUBLISHED", "FINISHED",
+                "IN_PROGRESS", "ERROR", "EXPIRED", "UNVERIFIED",
+            }:
+                detail[output_field] = value
+        for field in ("http_status", "graph_code", "graph_subcode"):
+            value = failure.get(field)
+            if type(value) is int and 0 <= value <= 99999999:
+                detail[field] = value
+        for field in ("external_post_attempted", "safe_to_repost"):
+            if type(failure.get(field)) is bool:
+                detail[field] = failure[field]
+        if type(row.get("container_publish_attempted")) is bool:
+            detail["container_publish_attempted"] = row["container_publish_attempted"]
+        conflicts = failure.get("conflicting_platforms")
+        if isinstance(conflicts, list):
+            detail["conflicting_platforms"] = [
+                platform_name for platform_name in conflicts
+                if platform_name in ("facebook", "instagram")
+            ]
+        post_id = row.get("post_id")
+        if isinstance(post_id, str) and post_id.isdecimal():
+            detail["post_id"] = post_id[:32]
+        previous_details.append(detail)
+
     return {
         "schema": 2, "run_id": run_id,
         "state_available": bool(state_available),
@@ -137,6 +185,7 @@ def build_incident_report(state, run_id, *, plan_text="", errors=None, step_outc
             row.get("route") if row.get("route") in safe_routes else "unknown"
             for row in remote_reconciliation
         )),
+        "previous_unreconciled_details": previous_details,
         "incidents": incidents, "planning_blocker_counts": blockers,
         "all_error_events": events, "error_event_count": len(events),
         "step_outcomes": outcomes,
