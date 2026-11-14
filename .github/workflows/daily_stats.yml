@@ -120,7 +120,7 @@ jobs:
           path: link-runtime/publication_progress.json
           if-no-files-found: warn
           retention-days: 90
-      - name: Persist failure without phone alert (owner quiet mode)
+      - name: Send failure alert only (deduplicated)
         if: ${{ failure() }}
         continue-on-error: true
         env:
