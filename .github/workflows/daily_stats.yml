@@ -74,6 +74,12 @@ jobs:
           NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
           NVIDIA_MODEL: ${{ vars.NVIDIA_MODEL || 'nvidia/nemotron-3.5-super-vl-120b-a12b' }}
         run: python stats_reporter.py
+      - name: Sync private analytics archive to dashboard
+        if: success()
+        env:
+          DASHBOARD_INGEST_URL: ${{ secrets.DASHBOARD_INGEST_URL }}
+          DASHBOARD_INGEST_TOKEN: ${{ secrets.DASHBOARD_INGEST_TOKEN }}
+        run: python dashboard_archive_push.py
       - name: Recommend posting hours from verified historical IDs (no schedule changes)
         if: success()
         continue-on-error: true
