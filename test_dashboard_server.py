@@ -42,8 +42,8 @@ class DashboardTests(unittest.TestCase):
         rows = []
         for day, views in [(date(2026, 11, 1), 100), (date(2026, 11, 7), 140), (date(2026, 11, 13), 190)]:
             stamp = datetime.combine(day, datetime.min.time(), tzinfo=timezone.utc)
-            rows.append(("Account", "Instagram", "ok", None, "lifetime_views", views, "ok", None, stamp, day))
-            rows.append(("Account", "Instagram", "ok", None, "follower_count", 12, "ok", None, stamp, day))
+            rows.append(("Account", "Instagram", "ok", None, None, "lifetime_views", views, "ok", None, stamp, day))
+            rows.append(("Account", "Instagram", "ok", None, None, "follower_count", 12, "ok", None, stamp, day))
         self.db = patch("dashboard_server._db", return_value=FakeConnection(rows))
         self.db.start()
         self.addCleanup(self.db.stop)
@@ -61,19 +61,25 @@ class DashboardTests(unittest.TestCase):
         self.assertIsNone(row["monthly_delta"])
         self.assertIn("Kıyas ölçümü", row["data_reason"])
 
-    def test_failed_metric_is_not_rendered_as_zero(self):
-        error = ("Account", "Instagram", "ok", None, "lifetime_views", None, "error",
-                 "HTTP 403: izin reddedildi", None, date(2026, 11, 13))
-        with patch("dashboard_server._db", return_value=FakeConnection([error])):
+    def test_failed_metric_is_not_zero_and_last_verified_value_is_retained(self):
+        stamp = datetime(2026, 11, 1, tzinfo=timezone.utc)
+        good = ("Account", "Instagram", "ok", stamp, None, "lifetime_views", 100, "ok", None, stamp, date(2026, 11, 1))
+        failed = ("Account", "Instagram", "incomplete", stamp, "API 403: izin reddedildi", "lifetime_views",
+                  None, "error", "API 403: izin reddedildi", None, date(2026, 11, 13))
+        with patch("dashboard_server._db", return_value=FakeConnection([good, failed])):
             row = d.build_payload()["accounts"][0]
         self.assertIsNone(row["current_views"])
+        self.assertEqual(row["last_verified_views"]["value"], 100)
+        self.assertEqual(row["last_verified_views"]["date"], "2026-11-01")
         self.assertIn("izin reddedildi", row["data_reason"])
 
     def test_signed_cookie_session_and_expiration(self):
         class Request:
             client_address = ("127.0.0.1", 1234)
+
             def __init__(self, cookie):
                 self.headers = {"Cookie": cookie}
+
         with patch.dict(os.environ, {"DASHBOARD_PASSWORD": "strong-test-secret"}, clear=True):
             timestamp = str(int(d.time.time()))
             token = d._session_token("strong-test-secret", timestamp)
