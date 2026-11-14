@@ -13,6 +13,8 @@ on:
       - 'test_telegram_notifications.py'
       - 'scheduled_multi_publisher.py'
       - 'ntfy_report_failure_alert.py'
+      - 'notification_dedup.py'
+      - 'test_notification_dedup.py'
       - 'ntfy_daily_schedule_watch.py'
       - 'test_ntfy_daily_schedule_watch.py'
       - '.github/workflows/daily_report_watch.yml'
