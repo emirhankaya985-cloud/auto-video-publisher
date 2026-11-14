@@ -29,6 +29,7 @@ from cloud_omnichannel_publisher import (
 from instagram_media_compat import prepare_instagram_upload, probe
 from toonzone_cover_fallback import generate_part_cover
 from content_hashtags import prepare_caption
+from account_fixed_txt import selected_txt, verify_text
 from instagram_tagging import enhance_instagram_caption
 from publisher_error_journal import record_error
 from expired_ig_container_recovery import authorize_exact_expired_recovery, terminal_recovery_reserved
@@ -598,12 +599,15 @@ def clean_caption_ui(raw):
 
 def copies(route, item, files, temp, use_txt=True):
     stem = Path(item["name"]).stem
-    text = files.get(stem + ".txt") if use_txt else None
+    fixed = selected_txt(route, files) if use_txt else None
+    text = fixed if fixed else (files.get(stem + ".txt") if use_txt else None)
     raw = None
-    origin = "matching-txt"
+    origin = "account-fixed-txt" if fixed else "matching-txt"
     if text:
         try:
             raw = download(text["id"], temp / "caption.txt").read_text(encoding="utf-8-sig").strip()
+            if fixed:
+                raw = verify_text(raw, fixed["sha256"])
         except Exception as exc:
             if route != "toonzone":
                 raise RuntimeError(f"Eşleşen TXT indirilemedi: {route}/{item['name']} ({type(exc).__name__})") from None
@@ -643,13 +647,14 @@ def copies(route, item, files, temp, use_txt=True):
     else:
         # Other routes must never upload with generic filename-only captions.
         raise RuntimeError(f"Eşleşen TXT gerekli: {route}/{item['name']}")
-    if route == "daily_laugh":
+    if route == "daily_laugh" and not fixed:
         # Reused TXT bodies are paired to specific videos to avoid ambiguous reconciliation.
         reference = f"Daily Laugh Lab · Video {stem}\n\n"
         fb, ig = reference + fb, reference + ig
     # IG-only tagging, applied before caption hash/remote reconciliation.
     # FB caption remains unchanged; non-approved videos are bit-for-bit unchanged.
-    ig, _tags = enhance_instagram_caption(ig, route, stem)
+    if not fixed:
+        ig, _tags = enhance_instagram_caption(ig, route, stem)
     if not fb.strip() or not ig.strip() or len(ig) > 2200 or "<html" in fb.lower():
         raise RuntimeError("Platform açıklaması geçersiz")
     return {"facebook": fb, "instagram": ig}, origin
@@ -1341,6 +1346,10 @@ def plan(audit=False):
             if entry["route"] != route or entry["platform"] not in platforms:
                 continue
             caption_hash = entry.get("caption_hash")
+            # Fixed TXT repeats on every clip: caption is not a source identity.
+            # Remote caption matching must NEVER convert its uncertain intent to done.
+            if entry.get("caption_source") == "account-fixed-txt":
+                continue
             if entry["status"] != "done" and caption_hash in ambiguous_captions[entry["platform"]]:
                 report.append("HELD: previous uncertain intent matches multiple remote posts.")
                 continue
@@ -1579,7 +1588,7 @@ def plan(audit=False):
                         state["entries"][key] = duplicate
                         report.append(f"DUPLICATE VERIFIED: {item['name']} {p}; existing post_id={duplicate['post_id']}; no new upload.")
                         continue
-                if cap_hash in ambiguous_captions[p]:
+                if origin != "account-fixed-txt" and cap_hash in ambiguous_captions[p]:
                     if (source == "film" and
                             confirmed_existing_film_post_amid_caption_reuse(
                                 existing, route, p, histories[p])):
@@ -1602,7 +1611,7 @@ def plan(audit=False):
                         report.append("HELD: multiple Meta posts share the same caption; manual reconciliation required.")
                         held = True
                     continue
-                match = remote[p].get(cap_hash)
+                match = None if origin == "account-fixed-txt" else remote[p].get(cap_hash)
                 if (match and existing.get("status") in {"uncertain", "intent"}
                         and conflicting_done_post_source(
                             state["entries"], key, route, p, str(match.get("id") or ""))):
@@ -1788,7 +1797,7 @@ def plan(audit=False):
             # Dedupe with the original TXT first; decorate only genuinely new
             # intents, before their exact publication hashes are persisted.
             for p in pending:
-                if not state["entries"].get(f"{route}:{p}:{item['id']}"):
+                if origin != "account-fixed-txt" and not state["entries"].get(f"{route}:{p}:{item['id']}"):
                     captions[p] = prepare_caption(captions[p], route, Path(item["name"]).stem, p)
             if any((route, p, caption_key(captions[p])) in planned_caption_hashes
                    for p in pending):
@@ -1846,7 +1855,7 @@ def plan(audit=False):
                     state["entries"][key] = {
                         "route": route, "platform": p, "status": "intent",
                         "caption_hash": caption_key(captions[p]), "file": item["name"],
-                        "publish_caption": captions[p],
+                        "publish_caption": captions[p], "caption_source": origin,
                         "day": clock.date().isoformat(), "run_id": os.environ["GITHUB_RUN_ID"],
                         "prepublish_retry_count": old_attempts,
                     }
