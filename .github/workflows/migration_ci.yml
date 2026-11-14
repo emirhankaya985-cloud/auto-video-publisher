@@ -4,6 +4,8 @@ on:
     branches: [main]
   pull_request:
     paths:
+      - 'notification_dedup.py'
+      - 'test_notification_dedup.py'
       - 'dashboard_server.py'
       - 'test_dashboard_server.py'
       - 'dashboard.html'
