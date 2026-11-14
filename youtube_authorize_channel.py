@@ -7,6 +7,7 @@ import argparse
 import os
 from pathlib import Path
 import sys
+import tempfile
 
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import AuthorizedSession
@@ -44,14 +45,16 @@ def verify_selected_channel(credentials, target, *, session_factory=AuthorizedSe
     return channel_id, title
 
 
-def authorize(target, *, base_dir=ROOT):
+def authorize(target, *, base_dir=ROOT, renew=False):
     if target not in TARGETS:
         raise ValueError("YouTube kanalı geçersiz.")
     base_dir = Path(base_dir)
     dest = base_dir / TOKEN_PATHS[target]
     client_path = base_dir / "client_secrets.json"
-    if dest.exists():
-        raise FileExistsError("Bu kanalın OAuth token dosyası zaten mevcut; üzerine yazılmadı.")
+    if dest.is_symlink():
+        raise RuntimeError("Token yolu sembolik bağ; güvenli yenileme durduruldu.")
+    if dest.exists() and renew is not True:
+        raise FileExistsError("Bu kanalın OAuth token dosyası zaten mevcut; --renew gerekli.")
     if not client_path.is_file():
         raise FileNotFoundError("client_secrets.json yerel OAuth istemcisi bulunamadı.")
     flow = InstalledAppFlow.from_client_secrets_file(str(client_path), scopes=[YOUTUBE_UPLOAD_SCOPE])
@@ -60,10 +63,28 @@ def authorize(target, *, base_dir=ROOT):
     if not credentials.refresh_token:
         raise RuntimeError("OAuth refresh token verilmedi.")
     channel_id, title = verify_selected_channel(credentials, target)
-    # Exclusive create prevents overwriting an already-authorized channel.
-    fd = os.open(dest, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(credentials.to_json())
+    # Only after an exact live channel GET succeeds may an expired local token
+    # be replaced. The same-directory atomic replace keeps the old token
+    # untouched if consent or identity verification fails.
+    serialized = credentials.to_json()
+    if dest.exists():
+        fd, tmp_path = tempfile.mkstemp(prefix=".youtube-token-renew-", suffix=".tmp",
+                                       dir=str(base_dir))
+        try:
+            if hasattr(os, "fchmod"):
+                os.fchmod(fd, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(serialized)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, dest)
+        finally:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+    else:
+        fd = os.open(dest, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(serialized)
     print(f"PASS: {target} -> {title} ({channel_id}); token saved locally: {dest.name}.")
     print("Entire JSON should be stored in the selected TOKEN_*_JSON Actions secret. Do not paste it into chat.")
     return dest
@@ -72,9 +93,11 @@ def authorize(target, *, base_dir=ROOT):
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Safe, local YouTube OAuth setup")
     parser.add_argument("channel", choices=TOKEN_PATHS)
+    parser.add_argument("--renew", action="store_true",
+                        help="Refresh a local token only after fresh OAuth consent and exact channel verification")
     args = parser.parse_args(argv)
     try:
-        authorize(args.channel)
+        authorize(args.channel, renew=args.renew)
     except Exception as exc:
         print(f"FAILED: {type(exc).__name__}. No upload was attempted.", file=sys.stderr)
         return 1
