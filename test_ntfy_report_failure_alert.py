@@ -2,12 +2,17 @@ import io
 import os
 import unittest
 from contextlib import redirect_stdout
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import ntfy_report_failure_alert as alert
 
 
 class FailureAlertTests(unittest.TestCase):
+    def setUp(self):
+        self.dedup = patch("ntfy_report_failure_alert.should_send", return_value=True)
+        self.dedup.start()
+        self.addCleanup(self.dedup.stop)
+
     def test_missing_secret_skips_without_send(self):
         output = io.StringIO()
         with patch.dict(os.environ, {}, clear=True), patch(
@@ -18,7 +23,7 @@ class FailureAlertTests(unittest.TestCase):
         self.assertIn("ntfy_secret_missing", output.getvalue())
         send.assert_not_called()
 
-    def test_alert_only_once_and_requires_server_ack(self):
+    def test_alert_requires_server_ack_and_sanitizes_secret(self):
         output = io.StringIO()
         env = {
             "NTFY_TOPIC_URL": "https://ntfy.sh/private-notification",
@@ -54,7 +59,7 @@ class FailureAlertTests(unittest.TestCase):
             self.assertEqual(alert.notify_failure(), 0)
         self.assertIsNone(sender.call_args.kwargs["click"])
 
-    def test_api_exception_never_prints_secret_or_retries(self):
+    def test_delivery_failure_returns_failure_without_leaking_secret(self):
         output = io.StringIO()
         with patch.dict(os.environ, {"NTFY_TOPIC": "private-topic"}, clear=True), patch(
             "ntfy_report_failure_alert.send_ntfy",
@@ -66,16 +71,25 @@ class FailureAlertTests(unittest.TestCase):
         self.assertNotIn("private-topic", output.getvalue())
         self.assertIn("failure_alert_not_delivered", output.getvalue())
 
-    def test_quiet_environment_does_not_disable_critical_alert(self):
+    def test_quiet_mode_does_not_suppress_critical_failure(self):
         output = io.StringIO()
         with patch.dict(os.environ, {"QUIET_FAILURE_NOTIFICATIONS": "true",
                                     "NTFY_TOPIC": "private-topic"}, clear=True), patch(
-            "ntfy_report_failure_alert.send_ntfy"
-        ) as ntfy, patch("ntfy_report_failure_alert.send_telegram") as telegram, redirect_stdout(output):
+            "ntfy_report_failure_alert.send_ntfy",
+            return_value={"http_status": 200, "server_ack": True}
+        ) as ntfy, redirect_stdout(output):
             self.assertEqual(alert.notify_failure(), 0)
-        ntfy.assert_not_called()
-        telegram.assert_not_called()
-        self.assertIn("silenced_by_owner", output.getvalue())
+        ntfy.assert_called_once()
+        self.assertIn("server_acknowledged", output.getvalue())
+
+    def test_existing_deduplication_suppresses_resend(self):
+        output = io.StringIO()
+        with patch.dict(os.environ, {"NTFY_TOPIC": "topic"}, clear=True), patch(
+            "ntfy_report_failure_alert.should_send", return_value=False
+        ), patch("ntfy_report_failure_alert.send_ntfy") as sender, redirect_stdout(output):
+            self.assertEqual(alert.notify_failure(), 0)
+        sender.assert_not_called()
+        self.assertIn("duplicate_suppressed", output.getvalue())
 
 
 if __name__ == "__main__":
