@@ -4,6 +4,7 @@ import os
 
 from ntfy_notifications import send_ntfy
 from telegram_notifications import send_telegram, telegram_configured
+from notification_dedup import should_send
 
 
 def notify_failure():
@@ -24,7 +25,7 @@ def notify_failure():
             repository in {"emirhankaya-AFK/auto-video-publisher",
                            "emirhankaya985-cloud/auto-video-publisher"} and run_id.isdecimal()):
         click = f"https://github.com/{repository}/actions/runs/{run_id}"
-    title = "🚨 Gün sonu raporu başarısız"
+    dedup_key = "|".join((repository, run_id, "daily-report-failure"))\n    if not should_send(dedup_key):\n        print(json.dumps({"state": "duplicate_suppressed", "alert_sent": False}), flush=True)\n        return 0\n\n    title = "🚨 Gün sonu raporu başarısız"
     body = ("⚠️ Sosyal medya günlük rapor işi başarısız oldu. "
             "Bu bildirim yalnızca iş hatasını belirtir; eksik izlenmeleri sıfır saymayın. "
             "Ayrıntı için GitHub Actions kaydını inceleyin.")
