@@ -263,7 +263,8 @@ class Handler(BaseHTTPRequestHandler):
                               SET status=EXCLUDED.status,
                                   last_verified_at=GREATEST(social_accounts.last_verified_at, EXCLUDED.last_verified_at)
                             RETURNING id
-                        """, (account, platform, str(row.get("platform_account_id") or ""), row.get("status", "unknown"),
+                        """, (account, platform, str(row.get("platform_account_id") or row.get("entity_id") or ""),
+                              row.get("status", "unknown"),
                               measured_at if row.get("status") == "ok" else None))
                         account_id = cur.fetchone()[0]
                         cur.execute("""
@@ -272,7 +273,10 @@ class Handler(BaseHTTPRequestHandler):
                             ON CONFLICT(account_id, metric, measurement_key) DO UPDATE SET
                               value=EXCLUDED.value, status=EXCLUDED.status, reason=EXCLUDED.reason,
                               period_date=EXCLUDED.period_date, source=EXCLUDED.source
-                        """, (account_id, metric, value, row.get("status", "unknown"), row.get("reason"),
+                        """, (account_id, metric, value, row.get("status", "unknown"),
+                              row.get("reason") or (("API verisi " + str(row.get("status")) + ": " +
+                                  str(row.get("source_api") or row.get("source_metric") or "kaynak ayrıntısı yok"))
+                                  if row.get("status") != "ok" else None),
                               measured_at, day, "github-actions-analytics-archive",
                               measured_at.isoformat() if measured_at else day))
                         inserted += 1
