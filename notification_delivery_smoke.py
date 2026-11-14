@@ -24,7 +24,7 @@ def trusted_run(env):
             and env.get("GITHUB_REF") == "refs/heads/main"
             and env.get("GITHUB_EVENT_NAME") == "push"
             and env.get("GITHUB_RUN_ATTEMPT") == "1"
-            and env.get("NOTIFICATION_SMOKE_COMMIT_TITLE") == COMMIT_MARKER
+            and str(env.get("NOTIFICATION_SMOKE_COMMIT_TITLE", "")).split("\n", 1)[0] == COMMIT_MARKER
             and str(env.get("GITHUB_RUN_ID", "")).isdecimal())
 
 
