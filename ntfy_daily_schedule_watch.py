@@ -12,6 +12,7 @@ import requests
 
 from ntfy_notifications import send_ntfy
 from telegram_notifications import send_telegram, telegram_configured
+from notification_dedup import should_send
 
 
 EXPECTED_REPOSITORY = "emirhankaya985-cloud/auto-video-publisher"
