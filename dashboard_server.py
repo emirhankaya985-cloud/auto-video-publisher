@@ -1,99 +1,68 @@
-"""Private read-only dashboard API for archived social analytics."""
+"""Password-protected, read-only UI over daily analytics snapshots."""
 from __future__ import annotations
-import base64
-import hashlib
-import hmac
-import json
-import os
-from datetime import datetime
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import hmac,json,os
+from datetime import date,datetime,timedelta
+from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from pathlib import Path
 from zoneinfo import ZoneInfo
-
-ROOT = Path(__file__).resolve().parent
-ARCHIVE = Path(os.getenv("ANALYTICS_ARCHIVE_PATH", ROOT / "dashboard-data" / "daily_video_views.jsonl"))
-TZ = ZoneInfo("Europe/Istanbul")
-PLATFORMS = ("Facebook", "Instagram", "Facebook 1", "Facebook 2", "YouTube")
-
-def _key():
-    return os.getenv("DASHBOARD_PASSWORD", "")
+ROOT=Path(__file__).resolve().parent
+ARCHIVE=Path(os.getenv("ANALYTICS_ARCHIVE_PATH",ROOT/"dashboard-data"/"daily_video_views.jsonl"))
+TZ=ZoneInfo("Europe/Istanbul")
 
 def _authorized(handler):
-    expected = _key()
-    provided = handler.headers.get("Authorization", "")
-    return bool(expected) and hmac.compare_digest(provided, "Bearer " + expected)
+    expected=os.getenv("DASHBOARD_PASSWORD","")
+    return bool(expected) and hmac.compare_digest(handler.headers.get("Authorization",""),"Bearer "+expected)
 
-def _rows():
-    records = []
-    try:
-        with ARCHIVE.open(encoding="utf-8") as f:
-            records = [json.loads(line) for line in f if line.strip()]
-    except FileNotFoundError:
-        pass
-    latest = {}
-    for r in records:
-        if r.get("status") != "ok" or r.get("value") is None:
-            continue
-        if r.get("metric") not in {"lifetime_views", "follower_count", "snapshot_status", "view_count"}:
-            continue
-        key=(r.get("period"),r.get("account"),r.get("platform"),r.get("entity_type"),r.get("entity_id"),r.get("metric"))
-        latest[key]=r
+def _read():
+    latest={}
+    if not ARCHIVE.exists(): return []
+    with ARCHIVE.open(encoding="utf-8") as f:
+        for line in f:
+            if not line.strip(): continue
+            try:r=json.loads(line)
+            except (ValueError,TypeError):continue
+            if not isinstance(r,dict) or r.get("metric") not in {"lifetime_views","follower_count","snapshot_status"}:continue
+            key=(r.get("period"),r.get("account"),r.get("platform"),r.get("entity_type"),r.get("entity_id"),r.get("metric"))
+            latest[key]=r
     return list(latest.values())
 
 def build_payload():
-    rows=_rows()
-    now=datetime.now(TZ)
-    periods={"daily":(now.date()).isoformat(),"weekly":(now.date()).isoformat(),"monthly":(now.date()).isoformat()}
-    totals={}
-    for r in rows:
-        account,platform=r.get("account"),r.get("platform")
-        if not account or not platform: continue
-        obj=totals.setdefault((account,platform),{"account":account,"platform":platform,"current_views":None,"followers":None,"video_count":None,"status":"ok"})
-        if r["metric"]=="lifetime_views" and r.get("entity_type")=="account":
-            obj["current_views"]=r["value"];obj["period"]=r.get("period");obj["measured_at"]=r.get("measured_at")
-        elif r["metric"]=="follower_count":
-            obj["followers"]=r["value"]
-        elif r["metric"]=="snapshot_status":
-            obj["video_count"]=r["value"]
-    snapshots={}
-    for r in rows:
-        if r["metric"]!="lifetime_views" or r.get("entity_type")!="account": continue
-        snapshots[(r.get("account"),r.get("platform"),r.get("period"))]=r["value"]
-    for obj in totals.values():
-        for p,day in periods.items():
-            if p=="daily":
-                oldday=(now.date()).isoformat()
-            elif p=="weekly":
-                from datetime import timedelta
-                oldday=(now.date()-timedelta(days=7)).isoformat()
-            else:
-                oldday=(now.date().replace(day=1)).isoformat()
-            base=snapshots.get((obj["account"],obj["platform"],oldday))
-            obj[p+"_delta"]=obj["current_views"]-base if obj["current_views"] is not None and base is not None else None
-    hist=[]
-    for r in rows:
-        if r["metric"]=="lifetime_views" and r.get("entity_type")=="account":
-            hist.append({"period":r.get("period"),"account":r.get("account"),"platform":r.get("platform"),"metric":"daily","value":r["value"],"status":"ok"})
-    measured=max((r.get("measured_at","") for r in rows),default=None)
-    return {"measured_at":measured,"accounts":list(totals.values()),"history":hist}
+    rows=_read();points={}
+    for r in rows: points[(r.get("account"),r.get("platform"),r.get("period"),r.get("metric"),r.get("entity_type"))]=r
+    groups=sorted({(r.get("account"),r.get("platform")) for r in rows if r.get("account") and r.get("platform")})
+    accounts=[]
+    for account,platform in groups:
+        candidates=[r for r in rows if r.get("account")==account and r.get("platform")==platform and r.get("metric")=="lifetime_views" and r.get("entity_type")=="account"]
+        day=max((r.get("period","") for r in candidates),default="")
+        current=points.get((account,platform,day,"lifetime_views","account"))
+        snap=points.get((account,platform,day,"snapshot_status","account"))
+        followers=[r for r in rows if r.get("account")==account and r.get("platform")==platform and r.get("period")==day and r.get("metric")=="follower_count" and r.get("status")=="ok"]
+        valid=bool(current and current.get("status")=="ok" and type(current.get("value")) is int and current["value"]>=0)
+        item={"account":account,"platform":platform,"current_views":current.get("value") if valid else None,"followers":followers[-1].get("value") if followers else None,"video_count":snap.get("value") if snap and snap.get("status")=="ok" else None,"status":"ok" if valid else "incomplete","measured_at":(current or {}).get("measured_at"),"latest_day":day,"history":[]}
+        try:end=date.fromisoformat(day)
+        except ValueError:end=None
+        for name,days in (("daily",1),("weekly",7),("monthly",30)):
+            base_day=(end-timedelta(days=days)).isoformat() if end else ""
+            base=points.get((account,platform,base_day,"lifetime_views","account"))
+            item[name+"_delta"]=current["value"]-base["value"] if valid and base and base.get("status")=="ok" and type(base.get("value")) is int else None
+        for r in candidates:
+            item["history"].append({"date":r.get("period"),"value":r.get("value") if r.get("status")=="ok" and type(r.get("value")) is int else None})
+        item["history"].sort(key=lambda x:x["date"] or "")
+        accounts.append(item)
+    measured=max((a.get("measured_at") or "" for a in accounts),default=None)
+    return {"measured_at":measured,"accounts":accounts}
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path=="/healthz":
             self.send_response(200);self.end_headers();self.wfile.write(b"ok");return
-        if self.path=="/" or self.path=="/index.html":
-            body=(ROOT/"dashboard.html").read_bytes()
-            self.send_response(200);self.send_header("Content-Type","text/html; charset=utf-8");self.send_header("Content-Length",str(len(body)));self.end_headers();self.wfile.write(body);return
+        if self.path in ("/","/index.html"):
+            body=(ROOT/"dashboard.html").read_bytes();self.send_response(200);self.send_header("Content-Type","text/html; charset=utf-8");self.send_header("Content-Length",str(len(body)));self.end_headers();self.wfile.write(body);return
         if self.path=="/api/analytics":
-            if not _authorized(self):
-                self.send_response(401);self.send_header("WWW-Authenticate","Bearer");self.end_headers();return
-            body=json.dumps(build_payload(),ensure_ascii=False).encode()
-            self.send_response(200);self.send_header("Content-Type","application/json; charset=utf-8");self.send_header("Cache-Control","no-store");self.send_header("Content-Length",str(len(body)));self.end_headers();self.wfile.write(body);return
+            if not _authorized(self):self.send_response(401);self.send_header("Cache-Control","no-store");self.end_headers();return
+            body=json.dumps(build_payload(),ensure_ascii=False).encode();self.send_response(200);self.send_header("Content-Type","application/json; charset=utf-8");self.send_header("Cache-Control","no-store");self.send_header("Content-Length",str(len(body)));self.end_headers();self.wfile.write(body);return
         self.send_error(404)
-    def log_message(self,fmt,*args):
-        pass
+    def log_message(self,*_):return
 
-if not _key():
-    raise SystemExit("DASHBOARD_PASSWORD is required")
-port=int(os.getenv("PORT","10000"))
-ThreadingHTTPServer(("0.0.0.0",port),Handler).serve_forever()
+if not os.getenv("DASHBOARD_PASSWORD"):raise SystemExit("DASHBOARD_PASSWORD is required")
+ThreadingHTTPServer(("0.0.0.0",int(os.getenv("PORT","10000"))),Handler).serve_forever()
