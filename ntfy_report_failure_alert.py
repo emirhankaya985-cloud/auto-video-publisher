@@ -8,18 +8,16 @@ from notification_dedup import should_send
 
 
 def notify_failure():
-    if os.getenv("QUIET_FAILURE_NOTIFICATIONS") == "true":
-        print(json.dumps({"state": "silenced_by_owner", "alert_sent": False}), flush=True)
-        return 0
+    # Critical workflow failures must not be silenced by a success-notification
+    # preference. The quiet flag is retained for backwards-compatible workflows.
     if not (os.getenv("NTFY_TOPIC_URL", "").strip() or
             os.getenv("NTFY_TOPIC", "").strip() or telegram_configured()):
-        print(json.dumps({"state": "skipped", "reason": "ntfy_secret_missing"}), flush=True)
+        print(json.dumps({"state": "skipped", "reason": "notification_secret_missing"}), flush=True)
         return 0
 
     server_url = os.getenv("GITHUB_SERVER_URL", "https://github.com")
     repository = os.getenv("GITHUB_REPOSITORY", "")
     run_id = os.getenv("GITHUB_RUN_ID", "")
-    # Only allow the expected GitHub.com host and this known repository.
     click = None
     if (server_url == "https://github.com" and
             repository in {"emirhankaya-AFK/auto-video-publisher",
@@ -59,7 +57,6 @@ def notify_failure():
         "http_status": http_status, "phone_delivery_verified": False,
     }, sort_keys=True), flush=True)
     return 0 if (ntfy_ack or telegram_ack) else 1
-
 
 
 if __name__ == "__main__":
