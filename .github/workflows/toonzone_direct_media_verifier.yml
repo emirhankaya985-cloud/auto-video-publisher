@@ -1,0 +1,68 @@
+name: ToonZone archived Instagram IDs exact GET audit (no uploads)
+
+on:
+  pull_request:
+    paths:
+      - toonzone_direct_media_verifier.py
+      - test_toonzone_direct_media_verifier.py
+      - .github/workflows/toonzone_direct_media_verifier.yml
+  push:
+    branches: [main]
+    paths:
+      - toonzone_direct_media_verifier.py
+      - test_toonzone_direct_media_verifier.py
+      - .github/workflows/toonzone_direct_media_verifier.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: toonzone-ig-direct-id-readonly
+  cancel-in-progress: false
+
+jobs:
+  no-network-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - run: pip install --require-hashes -r requirements.txt
+      - name: Check source-ID and credential safety without Meta calls
+        run: python -m unittest -v test_toonzone_direct_media_verifier.py test_toonzone_season1_gate.py
+
+  read-only-direct-ids:
+    needs: no-network-regression
+    if: >-
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 14
+    env:
+      META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
+      PUBLISH_ACCOUNT_SCOPE: toonzone
+      TOONZONE_SEASON2_RELEASE_ENABLED: 'false'
+      ENABLE_FIXED_ACCOUNT_TXT: 'false'
+      YOUTUBE_PUBLISHING_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - run: pip install --require-hashes -r requirements.txt
+      - run: pip install gdown==6.4.2 pillow==13.0.0
+      - name: GET archived media IDs only, verify owner, media type, timestamp and caption
+        run: python toonzone_direct_media_verifier.py
+      - name: Archive redacted exact-ID proof or structured failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: toonzone-instagram-original-id-evidence
+          path: toonzone-direct-id-audit/result.json
+          if-no-files-found: warn
+          retention-days: 30
