@@ -57,18 +57,28 @@ def candidates(state):
             entry = indexes.get(key) or {}
             media_id = str(entry.get("post_id") or "")
             digest = str(entry.get("caption_hash") or "")
-            ok = (entry.get("status") == "done"
-                  and media_id.isdecimal() and len(media_id) >= 10
-                  and bool(HASH.fullmatch(digest))
+            id_valid = media_id.isdecimal() and len(media_id) >= 10
+            digest_valid = bool(HASH.fullmatch(digest))
+            done = entry.get("status") == "done"
+            ok = (done and id_valid and digest_valid
                   and entry.get("route") == "toonzone" and entry.get("platform") == "instagram")
+            archive_issue = (
+                None if ok else
+                "archive_source_slot_missing" if not entry else
+                "archive_status_not_done" if not done else
+                "archive_post_id_invalid" if not id_valid else
+                "archive_caption_digest_not_sha256" if not digest_valid else
+                "archive_route_mismatch"
+            )
             rows.append({
                 "slot": f"S01E{episode:02d} Part{part}",
                 "file": entry.get("file") if entry else None,
-                "post_id": media_id if ok else None,
-                "caption_hash": digest if ok else None,
+                "post_id": media_id if id_valid else None,
+                "caption_hash": digest if digest_valid else None,
                 "eligible": ok,
+                "archive_issue": archive_issue,
             })
-    post_ids = [r["post_id"] for r in rows if r["eligible"]]
+    post_ids = [r["post_id"] for r in rows if r["post_id"]]
     if len(post_ids) != len(set(post_ids)):
         raise ValueError("same_media_id_bound_to_multiple_sources")
     return rows
@@ -82,11 +92,12 @@ def read_json(get, url, token, fields):
         body = response.json()
         http = response.status_code
         if http != 200 or not isinstance(body, dict) or body.get("error"):
-            err = body.get("error") if isinstance(body, dict) else {}
-            err = err.get("error") if isinstance(err, dict) else {}
+            err = body.get("error") if isinstance(body, dict) else None
             code = err.get("code") if isinstance(err, dict) else None
+            subcode = err.get("error_subcode") if isinstance(err, dict) else None
             return None, {"reason": "provider_get_rejected", "http_status": http,
-                          "graph_code": code if type(code) is int else None}
+                          "graph_code": code if type(code) is int else None,
+                          "graph_subcode": subcode if type(subcode) is int else None}
         return body, None
     except (requests.RequestException, ValueError, TypeError):
         return None, {"reason": "provider_read_unavailable"}
@@ -111,7 +122,8 @@ def inspect_post(candidate, *, owner_username, token, get=requests.get):
     """Source-linked metadata proof, never a claim about uploaded video bytes."""
     base = {"slot": candidate["slot"], "file": candidate["file"], "post_id": candidate["post_id"]}
     if not candidate["eligible"]:
-        return {**base, "status": "held", "reason": "archive_missing_exact_done_receipt"}
+        return {**base, "status": "held",
+                "reason": candidate.get("archive_issue") or "archive_receipt_unverified"}
     media_id = candidate["post_id"]
     body, error = read_json(
         get, API + media_id, token,
