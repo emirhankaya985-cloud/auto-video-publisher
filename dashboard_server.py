@@ -129,9 +129,10 @@ def _record_login(handler, outcome):
                 "INSERT INTO login_events(outcome, client_fingerprint) VALUES (%s, %s)",
                 (outcome, _client_fingerprint(handler)),
             )
+        return True
     except Exception:
-        # Do not leak credentials or break authentication due solely to audit write.
-        pass
+        # Do not leak credentials; reject authentication if its audit record cannot be saved.
+        return False
 
 
 def _security_login_notice():
@@ -252,7 +253,9 @@ class Handler(BaseHTTPRequestHandler):
             password = os.getenv("DASHBOARD_PASSWORD", "")
             supplied = payload.get("password", "") if isinstance(payload, dict) else ""
             valid = bool(password) and isinstance(supplied, str) and hmac.compare_digest(password, supplied)
-            _record_login(self, "success" if valid else "failure")
+            if not _record_login(self, "success" if valid else "failure"):
+                self._json(503, {"error": "audit_unavailable"})
+                return
             if not valid:
                 self._json(401, {"error": "invalid_credentials"})
                 return
