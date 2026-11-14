@@ -1,4 +1,7 @@
+import http.client
+import json
 import os
+import threading
 import unittest
 from datetime import date, datetime, timezone
 from unittest.mock import patch
@@ -85,6 +88,65 @@ class DashboardTests(unittest.TestCase):
             token = d._session_token("strong-test-secret", timestamp)
             self.assertTrue(d._valid_session(Request(f"{d.SESSION_COOKIE}={token}")))
             self.assertFalse(d._valid_session(Request(f"{d.SESSION_COOKIE}=wrong")))
+
+
+
+
+class DashboardLoginHttpTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server = d.ThreadingHTTPServer(("127.0.0.1", 0), d.Handler)
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+        cls.port = cls.server.server_address[1]
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.thread.join(timeout=3)
+        cls.server.server_close()
+
+    def request(self, method, path, body=None, headers=None):
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=3)
+        encoded = json.dumps(body).encode() if body is not None else None
+        req_headers = dict(headers or {})
+        if encoded is not None:
+            req_headers["Content-Type"] = "application/json"
+        conn.request(method, path, body=encoded, headers=req_headers)
+        response = conn.getresponse()
+        data = response.read()
+        result = (response.status, dict(response.getheaders()), data)
+        conn.close()
+        return result
+
+    def test_wrong_password_and_audit_failure_do_not_create_session(self):
+        with patch.dict(os.environ, {"DASHBOARD_PASSWORD": "secure-test"}, clear=True), \
+             patch("dashboard_server._record_login", return_value=True):
+            status, headers, _ = self.request("POST", "/api/login", {"password": "wrong"})
+            self.assertEqual(status, 401)
+            self.assertNotIn("Set-Cookie", headers)
+        with patch.dict(os.environ, {"DASHBOARD_PASSWORD": "secure-test"}, clear=True), \
+             patch("dashboard_server._record_login", return_value=False):
+            status, headers, _ = self.request("POST", "/api/login", {"password": "secure-test"})
+            self.assertEqual(status, 503)
+            self.assertNotIn("Set-Cookie", headers)
+
+    def test_success_issues_secure_cookie_and_unlocks_analytics(self):
+        with patch.dict(os.environ, {"DASHBOARD_PASSWORD": "secure-test"}, clear=True), \
+             patch("dashboard_server._record_login", return_value=True), \
+             patch("dashboard_server._security_login_notice"), \
+             patch("dashboard_server.build_payload", return_value={"accounts": [], "measured_at": None}):
+            status, headers, _ = self.request("POST", "/api/login", {"password": "secure-test"})
+            self.assertEqual(status, 200)
+            cookie = headers["Set-Cookie"]
+            self.assertIn("HttpOnly", cookie)
+            self.assertIn("Secure", cookie)
+            self.assertIn("SameSite=Strict", cookie)
+            status, _, body = self.request("GET", "/api/analytics", headers={"Cookie": cookie.split(";", 1)[0]})
+            self.assertEqual(status, 200)
+            self.assertEqual(json.loads(body), {"accounts": [], "measured_at": None})
+        status, _, _ = self.request("GET", "/api/analytics")
+        self.assertEqual(status, 401)
 
 
 if __name__ == "__main__":
