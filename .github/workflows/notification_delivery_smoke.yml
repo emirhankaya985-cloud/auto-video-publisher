@@ -1,0 +1,69 @@
+name: One-time owner-requested Telegram and ntfy server ACK proof
+
+on:
+  pull_request:
+    paths:
+      - notification_delivery_smoke.py
+      - test_notification_delivery_smoke.py
+      - .github/workflows/notification_delivery_smoke.yml
+  push:
+    branches: [main]
+    paths:
+      - notification_delivery_smoke.py
+      - test_notification_delivery_smoke.py
+      - .github/workflows/notification_delivery_smoke.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: task2-notification-safe-smoke-once
+  cancel-in-progress: false
+
+jobs:
+  pure-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - run: pip install --require-hashes -r requirements.txt
+      - name: Verify both notification transports and no duplicate provider calls (mocked)
+        run: python -m unittest -v test_notification_delivery_smoke.py test_ntfy_report_failure_alert.py test_publish_error_only_notifications.py
+
+  live-single-attempt:
+    needs: pure-tests
+    if: >-
+      github.event_name == 'push' && github.ref == 'refs/heads/main'
+      && github.run_attempt == 1
+      && startsWith(github.event.head_commit.message, 'ops: safe-once-notification-ack-2026-11-14')
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      NTFY_TOPIC_URL: ${{ secrets.NTFY_TOPIC_URL }}
+      NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+      NOTIFICATION_SMOKE_COMMIT_TITLE: ${{ github.event.head_commit.message }}
+      NOTIFICATION_DEDUP_PATH: notification-smoke/dedup.json
+      DATABASE_URL: ''
+      YOUTUBE_PUBLISHING_ENABLED: 'false'
+      FILM_PART17_EXPIRED_RECOVERY_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - run: pip install --require-hashes -r requirements.txt
+      - name: Deliver one clearly marked test error to existing owner destinations only
+        run: python notification_delivery_smoke.py
+      - name: Retain sanitized actual server receipts even if either transport fails
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: notification-smoke-20261114-server-ack
+          path: notification-smoke/receipt.json
+          if-no-files-found: warn
+          retention-days: 30
