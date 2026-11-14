@@ -32,7 +32,10 @@ from content_hashtags import prepare_caption
 from account_fixed_txt import selected_txt, verify_text
 from instagram_tagging import enhance_instagram_caption
 from publisher_error_journal import record_error
-from expired_ig_container_recovery import authorize_exact_expired_recovery, terminal_recovery_reserved
+from expired_ig_container_recovery import (
+    authorize_exact_expired_recovery, authorize_film_part17_expired_recovery,
+    terminal_recovery_reserved,
+)
 from meta_auth_loader import load_meta_auth
 from ordered_channels import TOONZONE_ETSY_LINK, parse_order, toonzone_metadata
 from publication_safety import route_paused
@@ -1654,6 +1657,9 @@ def plan(audit=False):
                 if not audit:
                     if authorize_exact_expired_recovery(route, p, item, existing, page, history_reconciled=True):
                         report.append("RECOVERY: exact never-published Film container expired; one fresh upload reserved.")
+                    if authorize_film_part17_expired_recovery(
+                            route, p, item, existing, page, history_reconciled=True):
+                        report.append("RECOVERY: Film Part17 exact expired IG container; one bounded re-encoding reserved.")
                     bind_legacy_ig_container(route, p, item, existing, page)
                 # Historical compact IG uploads that failed *before*
                 # media_publish were incorrectly treated as uncertain forever.
