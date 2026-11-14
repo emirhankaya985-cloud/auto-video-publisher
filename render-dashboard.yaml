@@ -4,7 +4,7 @@ services:
     runtime: python
     plan: free
     region: frankfurt
-    branch: feature/private-analytics-dashboard
+    branch: feature/secure-dashboard-v2
     buildCommand: "python --version"
     startCommand: "python dashboard_server.py"
     healthCheckPath: /healthz
