@@ -24,7 +24,8 @@ def notify_failure():
                            "emirhankaya985-cloud/auto-video-publisher"} and run_id.isdecimal()):
         click = f"https://github.com/{repository}/actions/runs/{run_id}"
     title = "🚨 Gün sonu raporu başarısız"
-    dedup_key = "|".join((repository, run_id, title))
+    workflow = os.getenv("GITHUB_WORKFLOW", "daily-stats-report")
+    dedup_key = "|".join((repository, workflow, title))
     if already_sent(dedup_key):
         print(json.dumps({"state": "duplicate_suppressed", "alert_sent": False}), flush=True)
         return 0
@@ -54,11 +55,13 @@ def notify_failure():
              "failure_alert_not_delivered")
     if ntfy_ack or telegram_ack:
         mark_sent(dedup_key)
+    delivered = ntfy_ack or telegram_ack
+    mark_result(dedup_key, delivered, None if delivered else "notification_delivery_failed")
     print(json.dumps({
         "state": state, "server_ack": ntfy_ack, "telegram_server_ack": telegram_ack,
         "http_status": http_status, "phone_delivery_verified": False,
     }, sort_keys=True), flush=True)
-    return 0 if (ntfy_ack or telegram_ack) else 1
+    return 0 if delivered else 1
 
 
 if __name__ == "__main__":
