@@ -122,6 +122,73 @@ class ToonZoneExactIdTests(unittest.TestCase):
         self.assertEqual(record["graph_subcode"], 33)
         self.assertNotIn("secret-key-would-be-sensitive", str(record))
 
+    def test_only_exact_graph_100_33_tries_user_token_without_post(self):
+        state, caption = self.make_state()
+        count = {"page": 0, "user": 0}
+        get = Mock()
+        def read(url, **kwargs):
+            token = kwargs["headers"]["Authorization"]
+            self.assertFalse(kwargs["allow_redirects"])
+            if url.endswith(audit.IG_USER_ID):
+                self.assertEqual(token, "Bearer " + self.PAGE["page_token"])
+                return response({"id": audit.IG_USER_ID, "username": "toonzone.tr"})
+            if token == "Bearer " + self.PAGE["page_token"]:
+                count["page"] += 1
+                return response({"error": {"code": 100, "error_subcode": 33,
+                                           "message": "TOKEN SHOULD NEVER BE ECHOED"}}, 400)
+            self.assertEqual(token, "Bearer USER_TOKEN")
+            count["user"] += 1
+            return response({"id": "18100507712530539", "username": "toonzone.tr",
+                             "caption": caption, "media_type": "VIDEO",
+                             "timestamp": "2026-10-27T14:00:00+00:00"})
+        get.side_effect = read
+        before = repr(state)
+        result = audit.audit(state, self.PAGE, get=get, secondary_token="USER_TOKEN")
+        self.assertEqual(result["verified"], 1)
+        self.assertEqual(result["secondary_queries"], 1)
+        self.assertEqual(count, {"page": 1, "user": 1})
+        self.assertEqual(repr(state), before)
+        verified = [row for row in result["rows"] if row["status"].startswith("verified_live_exact")]
+        self.assertEqual(verified[0]["verified_via"], "user_token_direct_get")
+        self.assertNotIn("USER_TOKEN", str(result))
+        self.assertNotIn("SHOULD NEVER", str(result))
+
+    def test_secondary_same_graph_error_retains_uncertainty(self):
+        state, _ = self.make_state()
+        calls = {"media": 0}
+        def read(url, **kwargs):
+            if url.endswith(audit.IG_USER_ID):
+                return response({"id": audit.IG_USER_ID, "username": "toonzone.tr"})
+            calls["media"] += 1
+            return response({"error": {"code": 100, "error_subcode": 33}}, 400)
+        result = audit.audit(state, self.PAGE, get=read, secondary_token="USER_TOKEN")
+        item = next(v for v in result["rows"] if v["slot"] == "S01E04 Part1")
+        self.assertEqual(item["reason"], "provider_get_rejected")
+        self.assertEqual(item["secondary_graph_code"], 100)
+        self.assertEqual(item["secondary_graph_subcode"], 33)
+        self.assertEqual(item["secondary_status"], "held")
+        self.assertEqual(calls["media"], 2)
+        self.assertFalse(result["reenqueue_authorized"])
+
+    def test_no_alt_query_for_non_graph_100_33_or_bad_token(self):
+        state, _ = self.make_state()
+        calls = []
+        def read(url, **kwargs):
+            calls.append(kwargs["headers"]["Authorization"])
+            if url.endswith(audit.IG_USER_ID):
+                return response({"id": audit.IG_USER_ID, "username": "toonzone.tr"})
+            return response({"error": {"code": 190, "error_subcode": 463}}, 401)
+        r = audit.audit(state, self.PAGE, get=read, secondary_token="USER_TOKEN")
+        self.assertEqual(r["secondary_queries"], 0)
+        self.assertEqual(len(calls), 2)
+
+    def test_legacy_source_hash_marker_is_not_a_corrupt_sha256(self):
+        state, _ = self.make_state()
+        state["entries"]["source"]["caption_hash"] = "verified-file-id:1WPrqw8SEmCyjaSLDvAe-VuP2S-AWYeuX"
+        x = next(r for r in audit.candidates(state) if r["slot"] == "S01E04 Part1")
+        self.assertEqual(x["archive_issue"], "legacy_file_id_provenance_marker")
+        self.assertFalse(x["eligible"])
+
     def test_full_audit_preserves_missing_receipts_and_never_posts(self):
         state, caption = self.make_state()
         source = next(r for r in audit.candidates(state) if r["eligible"])

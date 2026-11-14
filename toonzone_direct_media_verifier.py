@@ -67,6 +67,7 @@ def candidates(state):
                 "archive_source_slot_missing" if not entry else
                 "archive_status_not_done" if not done else
                 "archive_post_id_invalid" if not id_valid else
+                "legacy_file_id_provenance_marker" if digest.startswith("verified-file-id:") else
                 "archive_caption_digest_not_sha256" if not digest_valid else
                 "archive_route_mismatch"
             )
@@ -150,19 +151,49 @@ def inspect_post(candidate, *, owner_username, token, get=requests.get):
             "verified_timestamp": stamp.isoformat()}
 
 
-def audit(state, page, *, get=requests.get):
+def audit(state, page, *, get=requests.get, secondary_token=None):
     rows = candidates(state)
     username, identity_error = identity_username(page, get=get)
     if identity_error:
         return {"schema": 1, "mode": "strict_read_only", "status": "identity_blocked",
                 "reason": identity_error, "total": len(rows), "rows": [],
                 "media_posts_created": 0, "state_mutations": 0}
+    # Both tokens are read-only, discovered from the same verified User/Page
+    # association; an alternate token cannot substitute for source proof.
+    alt_ok = (isinstance(secondary_token, str) and bool(secondary_token)
+              and not any(ch.isspace() for ch in secondary_token)
+              and secondary_token != page["page_token"])
     output = []
     for item in rows:
-        output.append(inspect_post(
-            item, owner_username=username, token=page["page_token"], get=get))
+        primary = inspect_post(
+            item, owner_username=username, token=page["page_token"], get=get)
+        current = primary
+        # Meta's object-not-readable (100/33) is ambiguous: either ID absent
+        # or a token/permission context problem. Only this exact error
+        # authorizes a single GET with the User token, never a POST.
+        if (alt_ok and item["eligible"] and primary.get("status") == "held"
+                and primary.get("reason") == "provider_get_rejected"
+                and primary.get("http_status") == 400
+                and primary.get("graph_code") == 100
+                and primary.get("graph_subcode") == 33):
+            second = inspect_post(
+                item, owner_username=username, token=secondary_token, get=get)
+            if second["status"].startswith("verified_live_exact"):
+                current = {**second, "verified_via": "user_token_direct_get"}
+            else:
+                current = {
+                    **primary, "secondary_attempted": True,
+                    "secondary_status": "held",
+                    "secondary_reason": second.get("reason", "unknown"),
+                    "secondary_http_status": second.get("http_status"),
+                    "secondary_graph_code": second.get("graph_code"),
+                    "secondary_graph_subcode": second.get("graph_subcode"),
+                }
+        output.append(current)
         last = output[-1]
-        if last.get("http_status") == 429 or last.get("graph_code") in {4, 17, 32, 613}:
+        secondary_limited = last.get("secondary_http_status") == 429 or last.get("secondary_graph_code") in {4, 17, 32, 613}
+        if (last.get("http_status") == 429 or last.get("graph_code") in {4, 17, 32, 613}
+                or secondary_limited):
             # Stop early: never hammer Meta once throttled.
             for leftover in rows[len(output):]:
                 output.append({"slot": leftover["slot"], "file": leftover["file"],
@@ -180,7 +211,9 @@ def audit(state, page, *, get=requests.get):
             "episodes_4_to_12_verified": verified_current,
             "episodes_4_to_12_missing_or_unverified": 36 - verified_current,
             "rows": output, "media_posts_created": 0, "state_mutations": 0,
-            "owner_verified": True, "reenqueue_authorized": False}
+            "owner_verified": True, "reenqueue_authorized": False,
+            "secondary_token_query_enabled": bool(alt_ok),
+            "secondary_queries": sum(bool(x.get("secondary_attempted") or x.get("verified_via")) for x in output)}
 
 
 def main():
@@ -198,7 +231,7 @@ def main():
                     and str(p.get("page_id")) == PAGE_ID and str(p.get("instagram_id")) == IG_USER_ID]
         if len(selected) != 1 or check_page(selected[0]).get("status") != "identity_verified":
             raise ValueError("page_preflight_unverified")
-        report = audit(restore(), selected[0])
+        report = audit(restore(), selected[0], secondary_token=os.getenv("META_ACCESS_TOKEN"))
     except Exception as exc:
         # No arbitrary provider exception strings or secrets in artifacts.
         report = {"schema": 1, "mode": "strict_read_only", "status": "blocked",
