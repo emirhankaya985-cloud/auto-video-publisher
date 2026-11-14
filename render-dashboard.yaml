@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: social-analytics-dashboard
+    runtime: python
+    plan: free
+    region: frankfurt
+    branch: main
+    buildCommand: "pip install -r requirements-dashboard.txt"
+    startCommand: "python dashboard_server.py"
+    healthCheckPath: /healthz
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: DASHBOARD_PASSWORD
+        sync: false
+      - key: DASHBOARD_INGEST_TOKEN
+        sync: false
+      - key: LOGIN_LOG_SALT
+        generateValue: true

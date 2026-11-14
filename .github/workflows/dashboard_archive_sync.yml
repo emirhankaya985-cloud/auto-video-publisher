@@ -1,0 +1,13 @@
+name: Private dashboard archive sync (disabled pending private database)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  blocked:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "Private database endpoint is required before dashboard archive sync."
+          echo "No analytics values are written to this public repository."
+          exit 1
