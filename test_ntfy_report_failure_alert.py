@@ -66,7 +66,7 @@ class FailureAlertTests(unittest.TestCase):
         self.assertNotIn("private-topic", output.getvalue())
         self.assertIn("failure_alert_not_delivered", output.getvalue())
 
-    def test_owner_quiet_mode_never_sends_failure_notice(self):
+    def test_quiet_environment_does_not_disable_critical_alert(self):
         output = io.StringIO()
         with patch.dict(os.environ, {"QUIET_FAILURE_NOTIFICATIONS": "true",
                                     "NTFY_TOPIC": "private-topic"}, clear=True), patch(
