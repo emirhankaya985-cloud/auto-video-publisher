@@ -1,17 +1,13 @@
-# Özel Sosyal Medya İstatistik Paneli
+# Özel İstatistik Paneli
 
-Panel günlük ölçüm arşivindeki görüntülenme, takipçi/abone, video sayısı ve hesap/platform dağılımını gösterir. Günlük, haftalık, aylık ve tüm dönem filtreleri; çizgi grafik, dairesel grafik ve hesap kırılımı içerir.
+Render üzerinde çalışan, parola korumalı salt-okunur panel. Günlük, haftalık, aylık ve tüm dönem görünümleri; hesap/platform kırılımı ve çizgi/dairesel grafikler sunar. Veriler yalnız mevcut doğrulanmış istatistik arşivinden alınır; ölçüm bulunmazsa boş bırakılır.
 
-## Güvenlik ve veri kaynağı
-- Render'da `DASHBOARD_PASSWORD` zorunlu; parola uygulama koduna veya GitHub'a yazılmaz.
-- API yalnızca doğru Bearer parolasıyla veri döndürür; yanıtlar önbelleğe alınmaz.
-- Arşiv, günlük istatistik workflow'unun `meta-daily-analytics-history` artifact'ından alınır.
-- API/token/secret veya platformlara yazma işlemi yoktur. Geçmişte olmayan veri N/A/boş kalır.
-- Artifact eksik veya bozuksa mevcut veri sıfırlanmaz; yalnız değişiklik varsa commit edilir.
+## Güvenlik
+- Bu repo public olduğundan gerçek istatistik verisi, token veya parola buraya commit edilmez.
+- Panel API'si `DASHBOARD_PASSWORD` Bearer değerini doğrulamadan veri döndürmez.
+- Rapor artifact'ı yalnız runner'ın geçici alanında açılır; private Render endpoint'ine gönderilir.
+- Gerçek Render dağıtımı, archive push endpoint/token ve ortak erişim parolası Render secrets olarak girildikten sonra etkinleştirilir.
+- Bu ayarlar kurulana dek raporlar otomatik aktarılmaz ve panelde veri görünmez.
 
-## Çalıştırma
-```bash
-DASHBOARD_PASSWORD='uzun-rastgele-bir-parola' python dashboard_server.py
-```
-
-Render Blueprint yapılandırması `render-dashboard.yaml` içindedir. Servisi kurarken Dashboard Password alanına ortak parolayı Render secret olarak gir. Uygulama için ek ücretli veritabanı gerekmiyor.
+## Veriler
+Günlük snapshotlar platform/API erişimine göre farklı dönemlerde oluşabilir. Aylık değer, son ölçümden 30 gün öncesiyle kıyaslanır; kıyas tabanı yoksa N/A/boş görünür. Etkileşim ve oturum kayıtları bu arşivde olmadığı için uydurulmaz.
