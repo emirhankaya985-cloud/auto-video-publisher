@@ -1,30 +1,31 @@
 name: Refresh private analytics dashboard archive
 on:
   workflow_run:
-    workflows: ["Daily social media statistics"]
+    workflows: ["Hesap Bazli Izlenme Raporu"]
     types: [completed]
   workflow_dispatch:
 permissions:
   actions: read
-  contents: read
+  contents: write
 jobs:
   update:
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Download dashboard archive if available
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Download analytics archive
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p dashboard-data
-          gh run download --repo "${GITHUB_REPOSITORY}" -n meta-daily-analytics-history -D dashboard-data || true
-      - name: Commit changed archive
+          gh run download --repo "${GITHUB_REPOSITORY}" -n meta-daily-analytics-history -D dashboard-data
+      - name: Commit archive only when changed
         run: |
-          if [ -s dashboard-data/daily_video_views.jsonl ] && ! git diff --quiet -- dashboard-data/daily_video_views.jsonl; then
+          test -s dashboard-data/daily_video_views.jsonl
+          if ! git diff --quiet -- dashboard-data/daily_video_views.jsonl; then
             git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git config user.email "41898282+users.noreply.github.com"
             git add dashboard-data/daily_video_views.jsonl
-            git commit -m "Update private dashboard analytics archive"
+            git commit -m "Refresh private dashboard analytics archive"
             git push
           fi
