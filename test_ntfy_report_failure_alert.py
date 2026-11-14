@@ -13,7 +13,7 @@ class FailureAlertTests(unittest.TestCase):
         self.dedup.start()
         self.addCleanup(self.dedup.stop)
         self.result = patch("ntfy_report_failure_alert.mark_result")
-        self.result.start()
+        self.mark_result = self.result.start()
         self.addCleanup(self.result.stop)
 
     def test_missing_secret_skips_without_send(self):
@@ -47,7 +47,7 @@ class FailureAlertTests(unittest.TestCase):
                          "https://github.com/emirhankaya-AFK/auto-video-publisher/actions/runs/1234")
         self.assertIn("server_acknowledged", output.getvalue())
         self.assertNotIn("private-notification", output.getvalue())
-        self.result.return_value.assert_called_once()
+        self.mark_result.assert_called_once()
 
     def test_untrusted_actions_url_cannot_become_click_target(self):
         env = {
@@ -66,7 +66,7 @@ class FailureAlertTests(unittest.TestCase):
     def test_delivery_failure_is_recorded_and_retryable(self):
         self.dedup.return_value = True
         output = io.StringIO()
-        with patch.dict(os.environ, {"NTFY_TOPIC": "private-topic"}, clear=True), patch(
+        with patch.dict(os.environ, {"NTFY_TOPIC": "private-topic", "GITHUB_REPOSITORY": "repo", "GITHUB_WORKFLOW": "daily"}, clear=True), patch(
             "ntfy_report_failure_alert.send_ntfy",
             side_effect=RuntimeError("https://ntfy.sh/private-topic")
         ) as sender, redirect_stdout(output):
@@ -75,8 +75,8 @@ class FailureAlertTests(unittest.TestCase):
         self.assertEqual(sender.call_count, 1)
         self.assertNotIn("private-topic", output.getvalue())
         self.assertIn("failure_alert_not_delivered", output.getvalue())
-        self.result.return_value.assert_called_once_with(
-            "||🚨 Gün sonu raporu başarısız", False, "notification_delivery_failed"
+        self.mark_result.assert_called_once_with(
+            "repo|daily|🚨 Gün sonu raporu başarısız", False, "notification_delivery_failed"
         )
 
     def test_quiet_mode_does_not_suppress_critical_failure(self):
