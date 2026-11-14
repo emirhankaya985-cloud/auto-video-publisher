@@ -47,7 +47,7 @@ def migrate_schema():
 def build_payload():
     with _db() as conn, conn.cursor() as cur:
         cur.execute("""
-            SELECT a.account_name, a.platform, a.status, a.last_verified_at,
+            SELECT a.account_name, a.platform, a.status, a.last_verified_at, a.source_reason,
                    m.metric, m.value, m.status, m.reason, m.measured_at, m.period_date
               FROM social_accounts a
               LEFT JOIN metric_snapshots m ON m.account_id = a.id
@@ -56,10 +56,10 @@ def build_payload():
         records = cur.fetchall()
 
     grouped = {}
-    for account, platform, account_status, verified, metric, value, status, reason, measured_at, period_date in records:
+    for account, platform, account_status, verified, account_reason, metric, value, status, reason, measured_at, period_date in records:
         key = (account, platform)
         group = grouped.setdefault(key, {"account": account, "platform": platform,
-                                         "status": account_status, "verified_at": verified,
+                                         "status": account_status, "verified_at": verified, "account_reason": account_reason,
                                          "snapshots": {}})
         if not metric:
             continue
@@ -90,6 +90,15 @@ def build_payload():
             return now - base if now is not None and base is not None else None
         view = current.get("lifetime_views", {})
         follower = current.get("follower_count", {})
+        def last_verified(metric):
+            for past_day in reversed(days):
+                item = snaps.get(past_day, {}).get(metric, {})
+                if item.get("status") == "ok" and item.get("value") is not None:
+                    return {"value": item["value"], "date": past_day,
+                            "measured_at": item["measured_at"].isoformat() if item.get("measured_at") else None}
+            return None
+        last_views = last_verified("lifetime_views")
+        last_followers = last_verified("follower_count")
         latest_measure = view.get("measured_at") or follower.get("measured_at")
         reason_items = [item.get("reason") for item in current.values()
                         if item.get("status") != "ok" and item.get("reason")]
@@ -109,7 +118,10 @@ def build_payload():
             "all_delta": (metric_value(latest, "lifetime_views") - metric_value(days[0], "lifetime_views"))
                          if len(days) > 1 and metric_value(latest, "lifetime_views") is not None
                          and metric_value(days[0], "lifetime_views") is not None else None,
-            "data_reason": "; ".join(dict.fromkeys(reason_items)) if reason_items else
+            "last_verified_views": last_views,
+            "last_verified_followers": last_followers,
+            "data_reason": "; ".join(dict.fromkeys(([group["account_reason"]] if group.get("account_reason") else []) + reason_items))
+                           if group.get("account_reason") or reason_items else
                            ("Kıyas ölçümü arşivde yok" if latest else "Henüz doğrulanmış ölçüm yok"),
         })
     measured = [a["measured_at"] for a in accounts if a.get("measured_at")]
@@ -295,15 +307,19 @@ class Handler(BaseHTTPRequestHandler):
                         if isinstance(value, bool) or not (value is None or isinstance(value, (int, float))):
                             continue
                         cur.execute("""
-                            INSERT INTO social_accounts(account_name, platform, platform_account_id, status, last_verified_at)
-                            VALUES (%s, %s, %s, %s, %s)
+                            INSERT INTO social_accounts(account_name, platform, platform_account_id, status, last_verified_at, source_reason)
+                            VALUES (%s, %s, %s, %s, %s, %s)
                             ON CONFLICT(account_name, platform, platform_account_id) DO UPDATE
                               SET status=EXCLUDED.status,
-                                  last_verified_at=GREATEST(social_accounts.last_verified_at, EXCLUDED.last_verified_at)
+                                  last_verified_at=GREATEST(social_accounts.last_verified_at, EXCLUDED.last_verified_at),
+                                  source_reason=EXCLUDED.source_reason
                             RETURNING id
                         """, (account, platform, str(row.get("platform_account_id") or row.get("entity_id") or ""),
                               row.get("status", "unknown"),
-                              measured_at if row.get("status") == "ok" else None))
+                              measured_at if row.get("status") == "ok" else None,
+                              row.get("reason") or (("API verisi " + str(row.get("status")) + ": " +
+                                  str(row.get("source_api") or row.get("source_metric") or "kaynak ayrıntısı yok"))
+                                  if row.get("status") != "ok" else None)))
                         account_id = cur.fetchone()[0]
                         cur.execute("""
                             INSERT INTO metric_snapshots(account_id, metric, value, status, reason, measured_at, period_date, source, measurement_key)
