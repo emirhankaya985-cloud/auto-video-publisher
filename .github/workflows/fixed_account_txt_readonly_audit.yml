@@ -29,6 +29,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install --require-hashes -r requirements.txt
+      - run: pip install gdown==6.4.2 pillow==13.0.0
       - run: python -m unittest -v test_account_fixed_txt.py test_fixed_account_txt_readonly_audit.py
 
   original-source-readonly:
