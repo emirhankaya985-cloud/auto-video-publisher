@@ -126,8 +126,11 @@ def resolve(key: str) -> None:
 
 if __name__ == "__main__":
     import sys
-    if len(sys.argv) == 3 and sys.argv[1] == "resolve":
-        resolve(sys.argv[2])
+    if len(sys.argv) == 2 and sys.argv[1] == "resolve":
+        key = os.getenv("NOTIFICATION_INCIDENT_KEY", "")
+        if not key:
+            raise SystemExit("NOTIFICATION_INCIDENT_KEY is required")
+        resolve(key)
         print("notification_incident=resolved")
     else:
         raise SystemExit("usage: notification_dedup.py resolve <incident-key>")
