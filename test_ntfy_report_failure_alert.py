@@ -10,7 +10,7 @@ import ntfy_report_failure_alert as alert
 class FailureAlertTests(unittest.TestCase):
     def setUp(self):
         self.dedup = patch("ntfy_report_failure_alert.should_send", return_value=True)
-        self.dedup.start()
+        self.should_send = self.dedup.start()
         self.addCleanup(self.dedup.stop)
         self.result = patch("ntfy_report_failure_alert.mark_result")
         self.mark_result = self.result.start()
@@ -64,7 +64,7 @@ class FailureAlertTests(unittest.TestCase):
         self.assertIsNone(sender.call_args.kwargs["click"])
 
     def test_delivery_failure_is_recorded_and_retryable(self):
-        self.dedup.return_value = True
+        self.should_send.return_value = True
         output = io.StringIO()
         with patch.dict(os.environ, {"NTFY_TOPIC": "private-topic", "GITHUB_REPOSITORY": "repo", "GITHUB_WORKFLOW": "daily"}, clear=True), patch(
             "ntfy_report_failure_alert.send_ntfy",
