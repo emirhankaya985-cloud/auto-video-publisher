@@ -29,6 +29,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install --require-hashes -r requirements.txt
+      - run: pip install gdown==6.4.2
       - name: Compile fixed caption guards
         run: python -m py_compile account_fixed_txt.py public_link_runtime.py test_account_fixed_txt.py
       - name: Run no-network caption and Meta safety regressions
