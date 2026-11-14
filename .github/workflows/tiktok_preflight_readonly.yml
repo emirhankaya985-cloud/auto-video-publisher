@@ -4,13 +4,22 @@ on:
     branches: [main]
     paths:
       - 'tiktok_preflight.py'
+      - 'tiktok_post_status.py'
+      - 'test_tiktok_post_status.py'
       - '.github/workflows/tiktok_preflight_readonly.yml'
   pull_request:
     paths:
       - 'tiktok_preflight.py'
+      - 'tiktok_post_status.py'
+      - 'test_tiktok_post_status.py'
       - 'test_tiktok_preflight.py'
       - '.github/workflows/tiktok_preflight_readonly.yml'
   workflow_dispatch:
+    inputs:
+      publish_id:
+        description: Existing TikTok publish_id to reconcile (read-only, no upload)
+        required: false
+        type: string
 permissions:
   contents: read
 jobs:
@@ -33,4 +42,10 @@ jobs:
       - name: Emit only boolean readiness without contacting TikTok
         run: python tiktok_preflight.py
       - name: Verify fail-closed behavior and never publish
-        run: python -m unittest -v test_tiktok_preflight.py
+        run: python -m unittest -v test_tiktok_preflight.py test_tiktok_post_status.py
+      - name: Read existing TikTok publish status only when explicitly requested
+        if: github.event_name == 'workflow_dispatch' && inputs.publish_id != ''
+        env:
+          TIKTOK_STATUS_PROBE_ENABLED: 'true'
+          TIKTOK_PUBLISH_ID: ${{ inputs.publish_id }}
+        run: python tiktok_preflight.py --status-publish-id "$TIKTOK_PUBLISH_ID"
