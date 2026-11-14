@@ -5,6 +5,7 @@ from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
+from verified_post_receipts import require_youtube_video_id
 
 BASE_DIR = Path(__file__).resolve().parent
 TOKEN_FILE = BASE_DIR / "token.json"
@@ -75,6 +76,8 @@ def upload_video(youtube, file_path, title, description, privacy_status="private
             progress = int(status.progress() * 100)
             print(f"Yukleme durumu: %{progress}", end="\r", flush=True)
 
-    video_id = response.get("id")
+    # A transport completion without a valid video ID is UNCERTAIN, never success.
+    # The caller still must verify identity and processing via videos.list.
+    video_id = require_youtube_video_id(response)
     print(f"\nYukleme tamamlandi! Video ID: {video_id}")
     return video_id

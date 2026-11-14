@@ -6,11 +6,17 @@ on:
       - youtube_readonly_connection.py
       - youtube_account_inventory.py
       - test_youtube_account_inventory.py
+      - youtube_uploader.py
+      - verified_post_receipts.py
+      - test_verified_post_receipts.py
       - youtube_authorize_channel.py
       - test_youtube_authorize_channel.py
       - test_youtube_readonly_connection.py
       - youtube_account_inventory.py
       - test_youtube_account_inventory.py
+      - youtube_uploader.py
+      - verified_post_receipts.py
+      - test_verified_post_receipts.py
       - .github/workflows/youtube_readonly_connection.yml
   push:
     branches: [main]
@@ -18,11 +24,17 @@ on:
       - youtube_readonly_connection.py
       - youtube_account_inventory.py
       - test_youtube_account_inventory.py
+      - youtube_uploader.py
+      - verified_post_receipts.py
+      - test_verified_post_receipts.py
       - youtube_authorize_channel.py
       - test_youtube_authorize_channel.py
       - test_youtube_readonly_connection.py
       - youtube_account_inventory.py
       - test_youtube_account_inventory.py
+      - youtube_uploader.py
+      - verified_post_receipts.py
+      - test_verified_post_receipts.py
       - .github/workflows/youtube_readonly_connection.yml
   workflow_dispatch:
     inputs:
@@ -50,7 +62,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install --require-hashes -r requirements.txt
-      - run: python -m unittest -v test_youtube_readonly_connection.py test_youtube_authorize_channel.py test_youtube_account_inventory.py
+      - run: python -m unittest -v test_youtube_readonly_connection.py test_youtube_authorize_channel.py test_youtube_account_inventory.py test_verified_post_receipts.py
 
   google-readonly:
     # PRs use mocked tests. Trusted main pushes check all four authorized

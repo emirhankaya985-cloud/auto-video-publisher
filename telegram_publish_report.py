@@ -249,41 +249,73 @@ def main():
         print('{"status":"no_posts_or_errors","messages_sent":0}', flush=True)
         return 0
 
-    messages = [post_message(row, run_id) for row in posts]
-    # An already-known held intent is not another failed API request. Keep
-    # its daily audit trail, but reserve urgent phone alerts for NEW failures.
-    known_holds_only = (bool(events) and category != "alert"
-        and all(row.get("stage") == "previous_intent_hold"
-                and row.get("reason") == "unreconciled_previous_intent"
-                for row in events))
-    # Owner preference: retain every incident in artifacts, but send success receipts only.
-    if (category == "alert" or events) and os.getenv("PUBLISH_QUIET_FAILURES") != "true":
-        # One actionable warning per run; every sanitized event stays intact
-        # in the error-journal and 90-day artifact, even if the alert is short.
-        details = []
-        for entry in events[:8]:
-            part = (f"• {entry.get('route') or '?'} / {entry.get('platform') or '?'}"
-                    f" / {entry.get('video') or '-'}"
-                    f" — {entry.get('stage')}: {entry.get('reason')}")
-            if "http_status" in entry:
-                part += f" (HTTP {entry['http_status']})"
-            if "graph_code" in entry:
-                part += f" [Graph {entry['graph_code']}]"
-            details.append(part)
-        if len(events) > 8:
-            details.append(f"• Diğer {len(events) - 8} olayın tamamı GitHub error journal'da.")
-        title = "ℹ️ Mevcut Instagram engelleri" if known_holds_only else "⚠️ Kısmi yayın sonucu" if posts else "🚨 Meta yayın uyarısı"
-        warning = (message if category == "alert" else
-                   (f"ℹ️ Daha önce bildirilen engeller devam ediyor; yeni Meta POST hatası yok.\nGitHub çalışma: {run_id}"
-                    if known_holds_only else
-                    f"🚨 Yayın iş akışında engel veya hata kaydedildi.\nGitHub çalışma: {run_id}"))
-        warning += ("\n🧩 Kaydedilen hata/engel: " + str(len(events)) +
-                    "\n" + "\n".join(details)) if events else ""
-        messages.append((title, warning))
+    alerts_only = os.getenv("PUBLISH_ALERTS_ONLY", "false").strip().lower() == "true"
+    if alerts_only:
+        # New production policy: only unresolved, actionable failures. Preserve
+        # ALL routine successes and transient failures in artifacts, not in
+        # phone notifications. One consolidated notification per run.
+        manual_reasons = {
+            "credentials_or_permissions", "meta_account_missing",
+            "unreconciled_previous_intent", "invalid_media_or_graph_request",
+            "unclassified_upload_result", "state_restore_failed",
+            "intent_validation_failed", "source_content_changed",
+            "existing_container_reconciliation_failed", "cover_missing",
+            "no_eligible_content", "notification_delivery_failed",
+            "film_part8_source_visually_duplicate",
+        }
+        actionable = [ev for ev in events
+                      if ev.get("reason") in manual_reasons
+                      and ev.get("retry_policy") != "pre_upload_only"]
+        messages = []
+        if actionable or (category == "alert" and not events):
+            grouped = Counter((ev.get("route") or "workflow",
+                               ev.get("platform") or "unknown",
+                               ev.get("reason") or "unverified") for ev in actionable)
+            details = [
+                f"• {route} / {platform}: {reason} ({count})"
+                for (route, platform, reason), count in sorted(grouped.items())
+            ]
+            body = (f"GitHub çalışma: {run_id}\n"
+                    + "\n".join(details[:16])
+                    + (f"\nDiğer {len(details) - 16} kayıt arşivde." if len(details) > 16 else "")
+                    + f"\nhttps://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/{run_id}")
+            messages = [("🚨 Müdahale gerektiren Meta hataları", body)]
+    else:
+        messages = [post_message(row, run_id) for row in posts]
+        # An already-known held intent is not another failed API request. Keep
+        # its daily audit trail, but reserve urgent phone alerts for NEW failures.
+        known_holds_only = (bool(events) and category != "alert"
+            and all(row.get("stage") == "previous_intent_hold"
+                    and row.get("reason") == "unreconciled_previous_intent"
+                    for row in events))
+        # Owner preference: retain every incident in artifacts, but send success receipts only.
+        if (category == "alert" or events) and os.getenv("PUBLISH_QUIET_FAILURES") != "true":
+            # One actionable warning per run; every sanitized event stays intact
+            # in the error-journal and 90-day artifact, even if the alert is short.
+            details = []
+            for entry in events[:8]:
+                part = (f"• {entry.get('route') or '?'} / {entry.get('platform') or '?'}"
+                        f" / {entry.get('video') or '-'}"
+                        f" — {entry.get('stage')}: {entry.get('reason')}")
+                if "http_status" in entry:
+                    part += f" (HTTP {entry['http_status']})"
+                if "graph_code" in entry:
+                    part += f" [Graph {entry['graph_code']}]"
+                details.append(part)
+            if len(events) > 8:
+                details.append(f"• Diğer {len(events) - 8} olayın tamamı GitHub error journal'da.")
+            title = "ℹ️ Mevcut Instagram engelleri" if known_holds_only else "⚠️ Kısmi yayın sonucu" if posts else "🚨 Meta yayın uyarısı"
+            warning = (message if category == "alert" else
+                       (f"ℹ️ Daha önce bildirilen engeller devam ediyor; yeni Meta POST hatası yok.\nGitHub çalışma: {run_id}"
+                        if known_holds_only else
+                        f"🚨 Yayın iş akışında engel veya hata kaydedildi.\nGitHub çalışma: {run_id}"))
+            warning += ("\n🧩 Kaydedilen hata/engel: " + str(len(events)) +
+                        "\n" + "\n".join(details)) if events else ""
+            messages.append((title, warning))
     run_url = f"https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/{run_id}"
     acknowledged = {"telegram": 0, "ntfy": 0}
     failures = 0
-    if require_both and (messages or os.getenv("PUBLISH_QUIET_FAILURES") != "true"):
+    if require_both and messages:
         # Publishing remains committed; missing phone channels are separately
         # recorded as a DELIVERY failure, never a reason to repeat Meta POST.
         missing = []
@@ -298,12 +330,18 @@ def main():
             record_error("ntfy_notification", "notification_delivery_failed",
                          error=RuntimeError("ntfy configuration missing"))
         if missing and (telegram_on or ntfy_on) and os.getenv("PUBLISH_QUIET_FAILURES") != "true":
-            messages.append(("🚨 Bildirim kanalı eksik",
-                             "Gönderi yeniden yayımlanmayacak. Eksik kanal: "
-                             + ", ".join(missing)
-                             + "\n🔎 " + run_url))
+            if alerts_only:
+                # Append configuration failures to the SAME per-account incident
+                # notification. Never create another phone message per platform.
+                title, body = messages[0]
+                messages[0] = (title, body + "\nEksik bildirim kanalı: " + ", ".join(missing))
+            else:
+                messages.append(("🚨 Bildirim kanalı eksik",
+                                 "Gönderi yeniden yayımlanmayacak. Eksik kanal: "
+                                 + ", ".join(missing)
+                                 + "\n🔎 " + run_url))
     if os.getenv("PUBLISH_ALERT_MODE")=="prepare":
-        return _prepare_durable(messages,posts,events,state,run_id,telegram_on=telegram_on,
+        return _prepare_durable(messages, [] if alerts_only else posts, events, state, run_id, telegram_on=telegram_on,
             ntfy_on=ntfy_on,base_failures=failures,category=category)
     for title, body in messages:
         if telegram_on:
