@@ -9,9 +9,12 @@ import ntfy_report_failure_alert as alert
 
 class FailureAlertTests(unittest.TestCase):
     def setUp(self):
-        self.dedup = patch("ntfy_report_failure_alert.should_send", return_value=True)
+        self.dedup = patch("ntfy_report_failure_alert.already_sent", return_value=False)
         self.dedup.start()
         self.addCleanup(self.dedup.stop)
+        self.ack = patch("ntfy_report_failure_alert.mark_sent", return_value=True)
+        self.ack.start()
+        self.addCleanup(self.ack.stop)
 
     def test_missing_secret_skips_without_send(self):
         output = io.StringIO()
@@ -81,6 +84,17 @@ class FailureAlertTests(unittest.TestCase):
             self.assertEqual(alert.notify_failure(), 0)
         ntfy.assert_called_once()
         self.assertIn("server_acknowledged", output.getvalue())
+
+    def test_real_ack_marks_only_once_and_failed_ack_stays_retryable(self):
+        with patch.dict(os.environ, {"NTFY_TOPIC": "topic"}, clear=True), patch(
+            "ntfy_report_failure_alert.send_ntfy",
+            side_effect=[RuntimeError("offline"), {"http_status": 200, "server_ack": True}],
+        ) as sender, patch("ntfy_report_failure_alert.mark_sent") as mark, redirect_stdout(io.StringIO()):
+            self.assertEqual(alert.notify_failure(), 1)
+            mark.assert_not_called()
+            self.assertEqual(alert.notify_failure(), 0)
+            mark.assert_called_once()
+            self.assertEqual(sender.call_count, 2)
 
     def test_existing_deduplication_suppresses_resend(self):
         output = io.StringIO()
