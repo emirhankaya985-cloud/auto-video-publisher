@@ -32,6 +32,10 @@ def migrate_schema():
         cur.execute("ALTER TABLE metric_snapshots ALTER COLUMN measured_at DROP NOT NULL")
         cur.execute("ALTER TABLE metric_snapshots ADD COLUMN IF NOT EXISTS period_date DATE")
         cur.execute("ALTER TABLE metric_snapshots ADD COLUMN IF NOT EXISTS reason TEXT")
+        cur.execute("ALTER TABLE metric_snapshots ADD COLUMN IF NOT EXISTS measurement_key TEXT")
+        cur.execute("UPDATE metric_snapshots SET measurement_key = COALESCE(measured_at::text, period_date::text) WHERE measurement_key IS NULL")
+        cur.execute("ALTER TABLE metric_snapshots ALTER COLUMN measurement_key SET NOT NULL")
+        cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS metric_snapshots_idempotency_idx ON metric_snapshots(account_id, metric, measurement_key)")
         cur.execute("CREATE INDEX IF NOT EXISTS metric_snapshots_account_metric_period_idx ON metric_snapshots(account_id, metric, period_date)")
 
 
@@ -263,13 +267,14 @@ class Handler(BaseHTTPRequestHandler):
                               measured_at if row.get("status") == "ok" else None))
                         account_id = cur.fetchone()[0]
                         cur.execute("""
-                            INSERT INTO metric_snapshots(account_id, metric, value, status, reason, measured_at, period_date, source)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                            ON CONFLICT(account_id, metric, measured_at) DO UPDATE SET
+                            INSERT INTO metric_snapshots(account_id, metric, value, status, reason, measured_at, period_date, source, measurement_key)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            ON CONFLICT(account_id, metric, measurement_key) DO UPDATE SET
                               value=EXCLUDED.value, status=EXCLUDED.status, reason=EXCLUDED.reason,
                               period_date=EXCLUDED.period_date, source=EXCLUDED.source
                         """, (account_id, metric, value, row.get("status", "unknown"), row.get("reason"),
-                              measured_at, day, "github-actions-analytics-archive"))
+                              measured_at, day, "github-actions-analytics-archive",
+                              measured_at.isoformat() if measured_at else day))
                         inserted += 1
                 self._json(200, {"accepted": inserted})
             except Exception:
