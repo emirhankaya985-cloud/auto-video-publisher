@@ -330,10 +330,16 @@ def main():
             record_error("ntfy_notification", "notification_delivery_failed",
                          error=RuntimeError("ntfy configuration missing"))
         if missing and (telegram_on or ntfy_on) and os.getenv("PUBLISH_QUIET_FAILURES") != "true":
-            messages.append(("🚨 Bildirim kanalı eksik",
-                             "Gönderi yeniden yayımlanmayacak. Eksik kanal: "
-                             + ", ".join(missing)
-                             + "\n🔎 " + run_url))
+            if alerts_only:
+                # Append configuration failures to the SAME per-account incident
+                # notification. Never create another phone message per platform.
+                title, body = messages[0]
+                messages[0] = (title, body + "\nEksik bildirim kanalı: " + ", ".join(missing))
+            else:
+                messages.append(("🚨 Bildirim kanalı eksik",
+                                 "Gönderi yeniden yayımlanmayacak. Eksik kanal: "
+                                 + ", ".join(missing)
+                                 + "\n🔎 " + run_url))
     if os.getenv("PUBLISH_ALERT_MODE")=="prepare":
         return _prepare_durable(messages, [] if alerts_only else posts, events, state, run_id, telegram_on=telegram_on,
             ntfy_on=ntfy_on,base_failures=failures,category=category)
