@@ -23,7 +23,7 @@ class FailureAlertTests(unittest.TestCase):
         ) as send, redirect_stdout(output):
             result = alert.notify_failure()
         self.assertEqual(result, 0)
-        self.assertIn("ntfy_secret_missing", output.getvalue())
+        self.assertIn("notification_secret_missing", output.getvalue())
         send.assert_not_called()
 
     def test_alert_requires_server_ack_and_sanitizes_secret(self):
@@ -99,7 +99,7 @@ class FailureAlertTests(unittest.TestCase):
     def test_existing_deduplication_suppresses_resend(self):
         output = io.StringIO()
         with patch.dict(os.environ, {"NTFY_TOPIC": "topic"}, clear=True), patch(
-            "ntfy_report_failure_alert.should_send", return_value=False
+            "ntfy_report_failure_alert.already_sent", return_value=True
         ), patch("ntfy_report_failure_alert.send_ntfy") as sender, redirect_stdout(output):
             self.assertEqual(alert.notify_failure(), 0)
         sender.assert_not_called()
