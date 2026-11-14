@@ -51,5 +51,6 @@ class H(BaseHTTPRequestHandler):
    b=json.dumps(payload(),ensure_ascii=False).encode();self.send_response(200);self.send_header("Content-Type","application/json; charset=utf-8");self.send_header("Cache-Control","no-store");self.send_header("Content-Length",str(len(b)));self.end_headers();self.wfile.write(b);return
   self.send_error(404)
  def log_message(self,*a):pass
-if not os.getenv("DASHBOARD_PASSWORD"):raise SystemExit("DASHBOARD_PASSWORD is required")
-ThreadingHTTPServer(("0.0.0.0",int(os.getenv("PORT","10000"))),H).serve_forever()
+if __name__ == "__main__":
+ if not os.getenv("DASHBOARD_PASSWORD"):raise SystemExit("DASHBOARD_PASSWORD is required")
+ ThreadingHTTPServer(("0.0.0.0",int(os.getenv("PORT","10000"))),H).serve_forever()
