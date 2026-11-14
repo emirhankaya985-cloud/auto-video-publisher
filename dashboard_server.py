@@ -7,6 +7,9 @@ import json
 import os
 import secrets
 import time
+import uuid
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 from datetime import date, datetime, timedelta
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -129,6 +132,35 @@ def _record_login(handler, outcome):
         pass
 
 
+def _security_login_notice():
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+    if not token or not chat_id:
+        return
+    event_key = "admin-login:" + str(uuid.uuid4())
+    status, error = "failed", None
+    try:
+        data = urlencode({"chat_id": chat_id, "text": "🔐 Sosyal medya yönetim paneline başarılı yönetici girişi yapıldı."}).encode()
+        request = Request("https://api.telegram.org/bot" + token + "/sendMessage", data=data, method="POST")
+        with urlopen(request, timeout=8) as response:
+            result = json.loads(response.read(65536).decode("utf-8"))
+        if result.get("ok") is True:
+            status = "sent"
+        else:
+            error = "telegram_api_rejected"
+    except Exception:
+        error = "telegram_delivery_failed"
+    try:
+        with _db() as conn, conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO notification_events(event_key, channel, status, payload_redacted, delivered_at, error) "
+                "VALUES (%s, 'telegram_security', %s, %s, CASE WHEN %s='sent' THEN now() ELSE NULL END, %s)",
+                (event_key, status, "admin_login_success", status, error),
+            )
+    except Exception:
+        pass
+
+
 def _session_token(password, timestamp):
     signature = hmac.new(password.encode(), timestamp.encode(), hashlib.sha256).hexdigest()
     return timestamp + "." + signature
@@ -222,6 +254,7 @@ class Handler(BaseHTTPRequestHandler):
             if not valid:
                 self._json(401, {"error": "invalid_credentials"})
                 return
+            _security_login_notice()
             timestamp = str(int(time.time()))
             token = _session_token(password, timestamp)
             self._json(200, {"ok": True}, (("Set-Cookie", f"{SESSION_COOKIE}={token}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age={SESSION_SECONDS}"),))
