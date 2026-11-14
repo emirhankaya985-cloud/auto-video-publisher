@@ -1,0 +1,30 @@
+name: Refresh private analytics dashboard archive
+on:
+  workflow_run:
+    workflows: ["Daily social media statistics"]
+    types: [completed]
+  workflow_dispatch:
+permissions:
+  actions: read
+  contents: read
+jobs:
+  update:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download dashboard archive if available
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p dashboard-data
+          gh run download --repo "${GITHUB_REPOSITORY}" -n meta-daily-analytics-history -D dashboard-data || true
+      - name: Commit changed archive
+        run: |
+          if [ -s dashboard-data/daily_video_views.jsonl ] && ! git diff --quiet -- dashboard-data/daily_video_views.jsonl; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add dashboard-data/daily_video_views.jsonl
+            git commit -m "Update private dashboard analytics archive"
+            git push
+          fi
