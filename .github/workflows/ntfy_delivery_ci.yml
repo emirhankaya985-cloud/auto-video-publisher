@@ -3,6 +3,9 @@ name: NTFY delivery safety tests
 on:
   pull_request:
     paths:
+      - 'dashboard_server.py'
+      - 'test_dashboard_server.py'
+      - 'dashboard.html'
       - 'views_comparison.py'
       - 'test_views_comparison.py'
       - 'ntfy_notifications.py'
