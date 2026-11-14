@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
 from expired_ig_container_recovery import (
@@ -15,7 +16,6 @@ from expired_ig_container_recovery import (
     FILM17_SOURCE_SHA256, FILM17_CONTAINER_ID, FILM17_ORIGIN_RUN,
 )
 from toonzone_direct_media_verifier import caption_digest, read_json
-from public_link_runtime import graph_rows, timestamp
 
 FILM_PAGE_ID = "1239298989276639"
 FILM_IG_ID = "17841477990224124"
@@ -63,6 +63,8 @@ def reconcile(state, page, *, get=None, rows=None):
     if container_status not in {"EXPIRED", "PUBLISHED", "FINISHED", "ERROR", "IN_PROGRESS", "unavailable"}:
         container_status = "unrecognized"
     if rows is None:
+        # The publisher runtime depends on gdown; pure tests never import it.
+        from public_link_runtime import graph_rows
         rows = graph_rows(page, "instagram")
     if not isinstance(rows, list):
         raise ValueError("film17_history_unavailable")
@@ -75,8 +77,12 @@ def reconcile(state, page, *, get=None, rows=None):
         if caption_digest(item.get("caption")) != FILM17_CAPTION_HASH:
             continue
         try:
-            created = timestamp(item)
-        except (ValueError, RuntimeError, TypeError):
+            raw_time = item.get("timestamp") or item.get("created_time")
+            created = datetime.fromisoformat(raw_time.replace("Z", "+00:00"))
+            if created.tzinfo is None:
+                continue
+            created = created.astimezone(ZoneInfo("Europe/Istanbul"))
+        except (ValueError, TypeError, AttributeError):
             continue
         if created.date().isoformat() < "2026-11-12":
             continue
