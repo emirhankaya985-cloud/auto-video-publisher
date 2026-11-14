@@ -1,52 +1,84 @@
-import json
-import tempfile
+import os
 import unittest
-from pathlib import Path
+from datetime import date, datetime, timezone
+from unittest.mock import patch
 
 import dashboard_server as d
 
 
+class FakeCursor:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def execute(self, *_args):
+        return None
+
+    def fetchall(self):
+        return self.rows
+
+
+class FakeConnection:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def cursor(self):
+        return FakeCursor(self.rows)
+
+
 class DashboardTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.old_archive = d.ARCHIVE
-        d.ARCHIVE = Path(self.tmp.name) / "history.jsonl"
         rows = []
-        for day, views in [("2026-11-01", 100), ("2026-11-07", 140), ("2026-11-13", 190)]:
-            rows.append({
-                "period": day, "account": "Account", "platform": "Instagram",
-                "entity_type": "account", "entity_id": None, "metric": "lifetime_views",
-                "value": views, "status": "ok", "measured_at": day + "T22:00:00+03:00",
-            })
-            rows.append({
-                "period": day, "account": "Account", "platform": "Instagram",
-                "entity_type": "account", "entity_id": None, "metric": "follower_count",
-                "value": 12, "status": "ok",
-            })
-        d.ARCHIVE.write_text("\n".join(map(json.dumps, rows)), encoding="utf-8")
+        for day, views in [(date(2026, 11, 1), 100), (date(2026, 11, 7), 140), (date(2026, 11, 13), 190)]:
+            stamp = datetime.combine(day, datetime.min.time(), tzinfo=timezone.utc)
+            rows.append(("Account", "Instagram", "ok", None, "lifetime_views", views, "ok", None, stamp, day))
+            rows.append(("Account", "Instagram", "ok", None, "follower_count", 12, "ok", None, stamp, day))
+        self.db = patch("dashboard_server._db", return_value=FakeConnection(rows))
+        self.db.start()
+        self.addCleanup(self.db.stop)
 
-    def tearDown(self):
-        d.ARCHIVE = self.old_archive
-        self.tmp.cleanup()
-
-    def test_current_and_history_are_real_snapshots(self):
+    def test_current_history_and_followers_use_database_snapshots(self):
         row = d.build_payload()["accounts"][0]
         self.assertEqual(row["current_views"], 190)
         self.assertEqual(len(row["history"]), 3)
         self.assertEqual(row["followers"], 12)
+        self.assertEqual(row["latest_day"], "2026-11-13")
 
-    def test_missing_baseline_is_not_reported_as_zero(self):
+    def test_missing_baselines_remain_unknown(self):
         row = d.build_payload()["accounts"][0]
         self.assertIsNone(row["weekly_delta"])
         self.assertIsNone(row["monthly_delta"])
+        self.assertIn("Kıyas ölçümü", row["data_reason"])
 
-    def test_failed_measurement_is_not_zero(self):
-        d.ARCHIVE.write_text(json.dumps({
-            "period": "2026-11-13", "account": "Account", "platform": "Instagram",
-            "entity_type": "account", "metric": "lifetime_views", "value": None,
-            "status": "error",
-        }), encoding="utf-8")
-        self.assertIsNone(d.build_payload()["accounts"][0]["current_views"])
+    def test_failed_metric_is_not_rendered_as_zero(self):
+        error = ("Account", "Instagram", "ok", None, "lifetime_views", None, "error",
+                 "HTTP 403: izin reddedildi", None, date(2026, 11, 13))
+        with patch("dashboard_server._db", return_value=FakeConnection([error])):
+            row = d.build_payload()["accounts"][0]
+        self.assertIsNone(row["current_views"])
+        self.assertIn("izin reddedildi", row["data_reason"])
+
+    def test_signed_cookie_session_and_expiration(self):
+        class Request:
+            client_address = ("127.0.0.1", 1234)
+            def __init__(self, cookie):
+                self.headers = {"Cookie": cookie}
+        with patch.dict(os.environ, {"DASHBOARD_PASSWORD": "strong-test-secret"}, clear=True):
+            timestamp = str(int(d.time.time()))
+            token = d._session_token("strong-test-secret", timestamp)
+            self.assertTrue(d._valid_session(Request(f"{d.SESSION_COOKIE}={token}")))
+            self.assertFalse(d._valid_session(Request(f"{d.SESSION_COOKIE}=wrong")))
 
 
 if __name__ == "__main__":
