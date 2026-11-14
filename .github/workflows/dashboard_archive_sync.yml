@@ -6,26 +6,29 @@ on:
   workflow_dispatch:
 permissions:
   actions: read
-  contents: write
+  contents: read
 jobs:
   update:
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - name: Download analytics archive
+      - name: Download report artifact into runner-local temporary storage
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          mkdir -p dashboard-data
-          gh run download --repo "${GITHUB_REPOSITORY}" -n meta-daily-analytics-history -D dashboard-data
-      - name: Commit archive only when changed
+          mkdir -p /tmp/dashboard-analytics
+          gh run download --repo "${GITHUB_REPOSITORY}" -n meta-daily-analytics-history -D /tmp/dashboard-analytics
+          test -s /tmp/dashboard-analytics/daily_video_views.jsonl
+      - name: Upload secured archive to Render private storage
+        env:
+          ARCHIVE_PUSH_URL: ${{ secrets.DASHBOARD_ARCHIVE_PUSH_URL }}
+          ARCHIVE_PUSH_TOKEN: ${{ secrets.DASHBOARD_ARCHIVE_PUSH_TOKEN }}
         run: |
-          test -s dashboard-data/daily_video_views.jsonl
-          if ! git diff --quiet -- dashboard-data/daily_video_views.jsonl; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+users.noreply.github.com"
-            git add dashboard-data/daily_video_views.jsonl
-            git commit -m "Refresh private dashboard analytics archive"
-            git push
-          fi
+          test -n "$ARCHIVE_PUSH_URL" && test -n "$ARCHIVE_PUSH_TOKEN"
+          curl --fail --silent --show-error --max-time 30 -X PUT \
+            -H "Authorization: Bearer $ARCHIVE_PUSH_TOKEN" \
+            -H "Content-Type: application/x-ndjson" \
+            --data-binary @/tmp/dashboard-analytics/daily_video_views.jsonl \
+            "$ARCHIVE_PUSH_URL"
+          rm -f /tmp/dashboard-analytics/daily_video_views.jsonl
