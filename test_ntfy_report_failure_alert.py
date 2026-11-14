@@ -9,12 +9,12 @@ import ntfy_report_failure_alert as alert
 
 class FailureAlertTests(unittest.TestCase):
     def setUp(self):
-        self.dedup = patch("ntfy_report_failure_alert.already_sent", return_value=False)
+        self.dedup = patch("ntfy_report_failure_alert.should_send", return_value=True)
         self.dedup.start()
         self.addCleanup(self.dedup.stop)
-        self.ack = patch("ntfy_report_failure_alert.mark_sent", return_value=True)
-        self.ack.start()
-        self.addCleanup(self.ack.stop)
+        self.result = patch("ntfy_report_failure_alert.mark_result")
+        self.result.start()
+        self.addCleanup(self.result.stop)
 
     def test_missing_secret_skips_without_send(self):
         output = io.StringIO()
@@ -47,6 +47,7 @@ class FailureAlertTests(unittest.TestCase):
                          "https://github.com/emirhankaya-AFK/auto-video-publisher/actions/runs/1234")
         self.assertIn("server_acknowledged", output.getvalue())
         self.assertNotIn("private-notification", output.getvalue())
+        self.result.return_value.assert_called_once()
 
     def test_untrusted_actions_url_cannot_become_click_target(self):
         env = {
@@ -62,7 +63,8 @@ class FailureAlertTests(unittest.TestCase):
             self.assertEqual(alert.notify_failure(), 0)
         self.assertIsNone(sender.call_args.kwargs["click"])
 
-    def test_delivery_failure_returns_failure_without_leaking_secret(self):
+    def test_delivery_failure_is_recorded_and_retryable(self):
+        self.dedup.return_value = True
         output = io.StringIO()
         with patch.dict(os.environ, {"NTFY_TOPIC": "private-topic"}, clear=True), patch(
             "ntfy_report_failure_alert.send_ntfy",
@@ -73,6 +75,9 @@ class FailureAlertTests(unittest.TestCase):
         self.assertEqual(sender.call_count, 1)
         self.assertNotIn("private-topic", output.getvalue())
         self.assertIn("failure_alert_not_delivered", output.getvalue())
+        self.result.return_value.assert_called_once_with(
+            "||🚨 Gün sonu raporu başarısız", False, "notification_delivery_failed"
+        )
 
     def test_quiet_mode_does_not_suppress_critical_failure(self):
         output = io.StringIO()
@@ -85,21 +90,10 @@ class FailureAlertTests(unittest.TestCase):
         ntfy.assert_called_once()
         self.assertIn("server_acknowledged", output.getvalue())
 
-    def test_real_ack_marks_only_once_and_failed_ack_stays_retryable(self):
-        with patch.dict(os.environ, {"NTFY_TOPIC": "topic"}, clear=True), patch(
-            "ntfy_report_failure_alert.send_ntfy",
-            side_effect=[RuntimeError("offline"), {"http_status": 200, "server_ack": True}],
-        ) as sender, patch("ntfy_report_failure_alert.mark_sent") as mark, redirect_stdout(io.StringIO()):
-            self.assertEqual(alert.notify_failure(), 1)
-            mark.assert_not_called()
-            self.assertEqual(alert.notify_failure(), 0)
-            mark.assert_called_once()
-            self.assertEqual(sender.call_count, 2)
-
     def test_existing_deduplication_suppresses_resend(self):
         output = io.StringIO()
         with patch.dict(os.environ, {"NTFY_TOPIC": "topic"}, clear=True), patch(
-            "ntfy_report_failure_alert.already_sent", return_value=True
+            "ntfy_report_failure_alert.should_send", return_value=False
         ), patch("ntfy_report_failure_alert.send_ntfy") as sender, redirect_stdout(output):
             self.assertEqual(alert.notify_failure(), 0)
         sender.assert_not_called()
