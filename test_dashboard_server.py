@@ -71,10 +71,55 @@ class DashboardTests(unittest.TestCase):
                   None, "error", "API 403: izin reddedildi", None, date(2026, 11, 13))
         with patch("dashboard_server._db", return_value=FakeConnection([good, failed])):
             row = d.build_payload()["accounts"][0]
-        self.assertIsNone(row["current_views"])
+        self.assertEqual(row["current_views"], 100)
+        self.assertTrue(row["current_views_is_stale"])
         self.assertEqual(row["last_verified_views"]["value"], 100)
         self.assertEqual(row["last_verified_views"]["date"], "2026-11-01")
         self.assertIn("izin reddedildi", row["data_reason"])
+
+    def test_archive_keeps_account_and_video_identity_separate(self):
+        row = {
+            "account": "🌱 Tarladaki Fasulye", "platform": "Instagram",
+            "entity_type": "video", "entity_id": "video-123", "metric": "view_count",
+            "period": "2026-11-13", "measured_at": "2026-11-13T20:00:00+03:00",
+            "status": "ok", "value": 1234,
+        }
+        normalized, reason = d.classify_archive_row(row)
+        self.assertIsNone(reason)
+        self.assertIsNone(normalized["platform_account_id"])
+        self.assertEqual(normalized["video_id"], "video-123")
+        self.assertEqual(normalized["entity_id"], "video-123")
+        account_row = dict(row, entity_type="account", entity_id="🌱 Tarladaki Fasulye", metric="lifetime_views")
+        account, reason = d.classify_archive_row(account_row)
+        self.assertIsNone(reason)
+        self.assertEqual(account["source_key"], normalized["source_key"])
+        self.assertEqual(account["entity_id"], "🌱 Tarladaki Fasulye")
+
+    def test_unmapped_account_is_queued_for_review_instead_of_guessed(self):
+        row = {
+            "account": "unknown account", "platform": "Instagram", "entity_type": "video",
+            "entity_id": "video-1", "metric": "view_count", "period": "2026-11-13",
+            "status": "ok", "value": 1,
+        }
+        normalized, reason = d.classify_archive_row(row)
+        self.assertIsNone(normalized)
+        self.assertEqual(reason, "unmapped_account")
+
+    def test_payload_sums_distinct_video_snapshots_without_adding_days(self):
+        day = date(2026, 11, 13)
+        stamp = datetime(2026, 11, 13, tzinfo=timezone.utc)
+        prefix = ("Account", "Instagram", None, "source-key", "ok", stamp, None)
+        rows = [
+            prefix + ("lifetime_views", 100, "ok", None, stamp, day, "account", "Account", None, None),
+            prefix + ("follower_count", 5, "ok", None, stamp, day, "account", "Account", None, None),
+            prefix + ("view_count", 30, "ok", None, stamp, day, "video", "v1", "v1", None),
+            prefix + ("view_count", 20, "ok", None, stamp, day, "video", "v2", "v2", None),
+        ]
+        with patch("dashboard_server._db", return_value=FakeConnection(rows)):
+            row = d.build_payload()["accounts"][0]
+        self.assertEqual(row["current_views"], 100)
+        self.assertEqual(row["video_views"], 50)
+        self.assertEqual(row["video_view_count"], 2)
 
     def test_signed_cookie_session_and_expiration(self):
         class Request:
@@ -151,3 +196,4 @@ class DashboardLoginHttpTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
