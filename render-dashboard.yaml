@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: social-analytics-dashboard
+    runtime: python
+    plan: free
+    region: frankfurt
+    branch: feature/private-analytics-dashboard
+    buildCommand: "python --version"
+    startCommand: "python dashboard_server.py"
+    healthCheckPath: /healthz
+    envVars:
+      - key: DASHBOARD_PASSWORD
+        sync: false
+      - key: ANALYTICS_ARCHIVE_PATH
+        value: dashboard-data/daily_video_views.jsonl
