@@ -34,6 +34,7 @@ class ToonZoneExactIdTests(unittest.TestCase):
         self.assertEqual(valid[0]["slot"], "S01E04 Part1")
         self.assertEqual(valid[0]["post_id"], "18100507712530539")
         self.assertFalse(rows[0]["eligible"])
+        self.assertEqual(rows[0]["archive_issue"], "archive_source_slot_missing")
 
     def test_verified_only_by_id_owner_caption_video_and_timestamp(self):
         state, caption = self.make_state()
@@ -76,6 +77,8 @@ class ToonZoneExactIdTests(unittest.TestCase):
                                     token="SECRET", get=get)
         self.assertEqual(record["status"], "held")
         self.assertEqual(record["reason"], "provider_get_rejected")
+        self.assertEqual(record["graph_code"], 190)
+        self.assertEqual(record["http_status"], 401)
         self.assertNotIn("SHOULD_NOT_APPEAR", str(record))
 
     def test_wrong_page_identity_uses_no_provider_calls(self):
@@ -93,6 +96,31 @@ class ToonZoneExactIdTests(unittest.TestCase):
         duplicate["entries"]["same"] = dict(state["entries"]["source"])
         with self.assertRaisesRegex(ValueError, "duplicate_archived_source_slot"):
             audit.candidates(duplicate)
+
+    def test_historical_non_sha256_caption_digest_is_not_a_deleted_post(self):
+        state, _ = self.make_state()
+        entry = state["entries"]["source"]
+        entry["caption_hash"] = "historical-legacy-id"
+        rows = audit.candidates(state)
+        candidate = next(x for x in rows if x["slot"] == "S01E04 Part1")
+        self.assertFalse(candidate["eligible"])
+        self.assertEqual(candidate["archive_issue"], "archive_caption_digest_not_sha256")
+        self.assertEqual(candidate["post_id"], entry["post_id"])
+        get = Mock()
+        result = audit.inspect_post(candidate, owner_username="toonzone.tr", token="secret", get=get)
+        self.assertEqual(result["reason"], "archive_caption_digest_not_sha256")
+        get.assert_not_called()
+
+    def test_graph_permission_subcode_sanitized(self):
+        state, _ = self.make_state()
+        candidate = next(x for x in audit.candidates(state) if x["eligible"])
+        fake = {"error": {"message": "secret-key-would-be-sensitive",
+                          "code": 100, "error_subcode": 33}}
+        record = audit.inspect_post(candidate, owner_username="toonzone.tr",
+                                    token="secret", get=Mock(return_value=response(fake, 400)))
+        self.assertEqual(record["graph_code"], 100)
+        self.assertEqual(record["graph_subcode"], 33)
+        self.assertNotIn("secret-key-would-be-sensitive", str(record))
 
     def test_full_audit_preserves_missing_receipts_and_never_posts(self):
         state, caption = self.make_state()
