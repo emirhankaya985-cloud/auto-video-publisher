@@ -11,6 +11,8 @@ on:
       - 'dashboard.html'
       - 'chart.js'
       - 'dashboard_archive_push.py'
+      - 'dashboard_history_migrate.py'
+      - '.github/workflows/dashboard_history_migrate.yml'
       - 'requirements-dashboard.txt'
       - 'render-dashboard.yaml'
       - 'meta_cross_engagement.py'
