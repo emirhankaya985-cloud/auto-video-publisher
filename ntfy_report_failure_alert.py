@@ -4,7 +4,7 @@ import os
 
 from ntfy_notifications import send_ntfy
 from telegram_notifications import send_telegram, telegram_configured
-from notification_dedup import already_sent, mark_sent
+from notification_dedup import mark_result, should_send
 
 
 def notify_failure():
@@ -26,7 +26,7 @@ def notify_failure():
     title = "🚨 Gün sonu raporu başarısız"
     workflow = os.getenv("GITHUB_WORKFLOW", "daily-stats-report")
     dedup_key = "|".join((repository, workflow, title))
-    if already_sent(dedup_key):
+    if not should_send(dedup_key):
         print(json.dumps({"state": "duplicate_suppressed", "alert_sent": False}), flush=True)
         return 0
     body = ("⚠️ Sosyal medya günlük rapor işi başarısız oldu. "
@@ -53,8 +53,6 @@ def notify_failure():
     state = ("failure_alert_server_acknowledged" if ntfy_ack else
              "failure_alert_telegram_acknowledged" if telegram_ack else
              "failure_alert_not_delivered")
-    if ntfy_ack or telegram_ack:
-        mark_sent(dedup_key)
     delivered = ntfy_ack or telegram_ack
     mark_result(dedup_key, delivered, None if delivered else "notification_delivery_failed")
     print(json.dumps({
