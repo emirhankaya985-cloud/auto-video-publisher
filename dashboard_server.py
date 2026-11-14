@@ -40,6 +40,8 @@ def migrate_schema():
         cur.execute("ALTER TABLE metric_snapshots ALTER COLUMN measurement_key SET NOT NULL")
         cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS metric_snapshots_idempotency_idx ON metric_snapshots(account_id, metric, measurement_key)")
         cur.execute("CREATE INDEX IF NOT EXISTS metric_snapshots_account_metric_period_idx ON metric_snapshots(account_id, metric, period_date)")
+        cur.execute("CREATE TABLE IF NOT EXISTS dashboard_schema_migrations (version TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())")
+        cur.execute("INSERT INTO dashboard_schema_migrations(version) VALUES ('2026-11-neon-dashboard-v1') ON CONFLICT(version) DO NOTHING")
 
 
 def build_payload():
