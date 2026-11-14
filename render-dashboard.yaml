@@ -12,4 +12,4 @@ services:
       - key: DASHBOARD_PASSWORD
         sync: false
       - key: ANALYTICS_ARCHIVE_PATH
-        value: /var/data/daily_video_views.jsonl
+        value: dashboard-data/daily_video_views.jsonl
