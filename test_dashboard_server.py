@@ -25,7 +25,7 @@ class DashboardTests(unittest.TestCase):
   self.assertEqual(row["current_views"],190)
   self.assertEqual(row["weekly_delta"],50)
   self.assertEqual(row["monthly_delta"],90)
-  self.assertEqual(len(row["history"]),3)
+  self.assertEqual(len(row["history"]),3)\n  self.assertEqual(row["data_reason"],"Kıyas tarihi 2026-11-06 arşivde bulunamadı")
  def test_missing_measurement_is_not_zero(self):
   d.ARCHIVE.write_text(json.dumps({"period":"2026-11-13","account":"Account","platform":"Instagram","entity_type":"account","metric":"lifetime_views","value":None,"status":"error"}),encoding="utf-8")
   self.assertIsNone(d.build_payload()["accounts"][0]["current_views"])
