@@ -4,10 +4,20 @@ on:
   pull_request:
     paths:
       - '.github/workflows/task2_full_regression_ci.yml'
+      - 'youtube_local_token_probe.py'
+      - 'test_youtube_local_token_probe.py'
+      - 'youtube_oauth_renew_windows.ps1'
+      - 'youtube_authorize_channel.py'
+      - 'youtube_readonly_connection.py'
   push:
     branches: [main]
     paths:
       - '.github/workflows/task2_full_regression_ci.yml'
+      - 'youtube_local_token_probe.py'
+      - 'test_youtube_local_token_probe.py'
+      - 'youtube_oauth_renew_windows.ps1'
+      - 'youtube_authorize_channel.py'
+      - 'youtube_readonly_connection.py'
   workflow_dispatch:
 
 permissions:
