@@ -1,0 +1,52 @@
+name: YouTube local OAuth reuse only exact channel - no Google network on CI
+
+on:
+  pull_request:
+    paths:
+      - youtube_local_token_probe.py
+      - youtube_oauth_renew_windows.ps1
+      - test_youtube_local_token_probe.py
+      - youtube_authorize_channel.py
+      - .github/workflows/youtube_local_token_probe_ci.yml
+  push:
+    branches: [main]
+    paths:
+      - youtube_local_token_probe.py
+      - youtube_oauth_renew_windows.ps1
+      - test_youtube_local_token_probe.py
+      - youtube_authorize_channel.py
+      - .github/workflows/youtube_local_token_probe_ci.yml
+
+permissions:
+  contents: read
+
+jobs:
+  offline:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      TOKEN_CHANNEL1_JSON: ''
+      TOKEN_CHANNEL2_JSON: ''
+      TOKEN_DAILY_LAUGH_LAB_JSON: ''
+      TOKEN_GONLE_DUSEN_JSON: ''
+      YOUTUBE_PUBLISHING_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --require-hashes -r requirements.txt
+      - name: Mocked channel identity, token expiry, wrong account and safe renewal tests
+        run: python -m unittest -v test_youtube_local_token_probe.py test_youtube_authorize_channel.py test_youtube_readonly_connection.py
+      - name: Validate Windows script never enables uploads or leaks tokens
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          text = Path("youtube_oauth_renew_windows.ps1").read_text()
+          assert "youtube_local_token_probe.py" in text
+          assert text.index("youtube_local_token_probe.py") < text.index("youtube_authorize_channel.py")
+          assert "gh secret set" in text
+          assert "gh workflow run 'youtube_readonly_connection.yml'" in text
+          assert "YOUTUBE_PUBLISHING_ENABLED=true" not in text
+          assert "gh api user" in text
+          PY
