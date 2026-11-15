@@ -1,5 +1,5 @@
 # Run locally from this repository, on the owner's Windows PC.
-# A browser OAuth consent step is mandatory for every selected channel.
+# Browser OAuth consent is required only if its existing local token fails exact live channel-ID verification.
 # Never paste a token, OAuth URL, secret or authorization code into chat.
 param(
     [switch] $AllFour
@@ -8,9 +8,6 @@ $ErrorActionPreference = 'Stop'
 $Repo = 'emirhankaya985-cloud/auto-video-publisher'
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ClientPath = Join-Path $Root 'client_secrets.json'
-if (-not (Test-Path -LiteralPath $ClientPath -PathType Leaf)) {
-    throw 'Missing local client_secrets.json: obtain the Desktop OAuth client from the correct Google Cloud project.'
-}
 if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
     throw 'Python not installed or not on PATH.'
 }
@@ -36,11 +33,20 @@ if ($AllFour) {
     )
 }
 foreach ($Target in $Targets) {
-    # Opens only the owner's local browser and checks the exact channel ID
-    # with channels.list; does not upload a video.
-    & python (Join-Path $Root 'youtube_authorize_channel.py') $Target.Route '--renew'
+    # First use an existing locally authorized-user token if a real Google
+    # channels.list GET proves that it belongs to this exact route's channel.
+    # This avoids unnecessary consent and refresh-token rotation.
+    & python (Join-Path $Root 'youtube_local_token_probe.py') $Target.Route
     if ($LASTEXITCODE -ne 0) {
-        throw ('Authorization failed for ' + $Target.Route + '; existing GitHub secrets unchanged for this target.')
+        if (-not (Test-Path -LiteralPath $ClientPath -PathType Leaf)) {
+            throw ('Local token not verified for ' + $Target.Route + '; missing correct Desktop OAuth client_secrets.json. No GitHub secret updated.')
+        }
+        # Only now ask the owner for browser consent. The old token remains
+        # untouched until a new refresh token and exact channel GET are verified.
+        & python (Join-Path $Root 'youtube_authorize_channel.py') $Target.Route '--renew'
+        if ($LASTEXITCODE -ne 0) {
+            throw ('Authorization failed for ' + $Target.Route + '; existing GitHub secrets unchanged for this target.')
+        }
     }
     $File = Join-Path $Root $Target.File
     if (-not (Test-Path -LiteralPath $File -PathType Leaf)) {
