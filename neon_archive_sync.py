@@ -7,9 +7,11 @@ all rows plus its import receipt atomically. Unsupported rows stay in review.
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import math
 import os
+import zipfile
 from datetime import datetime, timezone
 from urllib.parse import urlsplit, unquote
 
@@ -23,6 +25,9 @@ SOURCE = "github-actions-daily-neon-direct"
 DAILY_WORKFLOW = "Hesap Bazli Izlenme Raporu"
 REPOSITORY = "emirhankaya985-cloud/auto-video-publisher"
 SYNC_LOCK = 985162026
+REPORT_ARTIFACT_NAME = "account-views-comparison"
+REPORT_FILENAME = "account_views_comparison.json"
+REPORT_MAX_BYTES = 2 * 1024 * 1024
 
 
 def validate_neon_url(url):
@@ -58,6 +63,83 @@ def verify_successful_main_run(session, *, run_id, github_token):
             or run.get("status") != "completed"):
         raise ValueError("daily_source_not_successful_main_report")
     return True
+
+
+def read_report_comparison(session, *, run_id, github_token):
+    """Read the machine-readable report from the same verified Actions run."""
+    headers = {"Authorization": "Bearer " + github_token,
+               "Accept": "application/vnd.github+json",
+               "X-GitHub-Api-Version": "2022-11-28"}
+    response = request_with_retry(
+        session, "get", f"{API}/repos/{REPOSITORY}/actions/runs/{run_id}/artifacts",
+        headers=headers, timeout=(10, 30), allow_redirects=False,
+    )
+    artifact = next((item for item in response.json().get("artifacts", [])
+                     if item.get("name") == REPORT_ARTIFACT_NAME
+                     and not item.get("expired")), None)
+    if not artifact or not artifact.get("archive_download_url"):
+        raise ValueError("daily_report_artifact_unavailable")
+    archive_response = request_with_retry(
+        session, "get", artifact["archive_download_url"], headers=headers,
+        timeout=(10, 90),
+    )
+    archive = archive_response.content
+    if len(archive) > REPORT_MAX_BYTES:
+        raise ValueError("daily_report_artifact_too_large")
+    try:
+        with zipfile.ZipFile(io.BytesIO(archive)) as bundle:
+            files = [name for name in bundle.namelist()
+                     if name.rsplit("/", 1)[-1] == REPORT_FILENAME]
+            if len(files) != 1 or bundle.getinfo(files[0]).file_size > REPORT_MAX_BYTES:
+                raise ValueError("daily_report_artifact_shape_invalid")
+            comparison = json.loads(bundle.read(files[0]).decode("utf-8"))
+    except (zipfile.BadZipFile, UnicodeDecodeError, json.JSONDecodeError):
+        raise ValueError("daily_report_artifact_invalid") from None
+    if not isinstance(comparison, dict):
+        raise ValueError("daily_report_payload_invalid")
+    return comparison, hashlib.sha256(archive).hexdigest()
+
+
+def daily_report_record(comparison, *, source_run_id, artifact_sha256):
+    """Validate and normalize one report row without filling missing metrics."""
+    if not isinstance(comparison, dict):
+        raise ValueError("daily_report_payload_invalid")
+    try:
+        report_date = datetime.strptime(str(comparison.get("day", "")), "%Y-%m-%d").date()
+        generated_at = datetime.fromisoformat(
+            str(comparison.get("measured_at", "")).replace("Z", "+00:00"))
+    except ValueError:
+        raise ValueError("daily_report_date_or_timestamp_invalid") from None
+    if generated_at.tzinfo is None:
+        raise ValueError("daily_report_timestamp_timezone_missing")
+    report_timezone = comparison.get("timezone", "Europe/Istanbul")
+    if report_timezone != "Europe/Istanbul":
+        raise ValueError("daily_report_timezone_invalid")
+    if not isinstance(comparison.get("accounts"), list):
+        raise ValueError("daily_report_accounts_missing")
+    errors = comparison.get("report_errors", [])
+    if not isinstance(errors, list) or any(not isinstance(item, str) for item in errors):
+        raise ValueError("daily_report_errors_invalid")
+    collection = comparison.get("collection")
+    meta_collection = comparison.get("meta_collection")
+    if not isinstance(collection, dict) or not isinstance(meta_collection, dict):
+        raise ValueError("daily_report_coverage_missing")
+    status = ("success" if collection.get("status") == "complete"
+              and meta_collection.get("status") == "complete" and not errors
+              else "partial")
+    payload = dict(comparison)
+    payload["timezone"] = report_timezone
+    payload["source_run_id"] = str(source_run_id)
+    payload["source_report_artifact_sha256"] = artifact_sha256
+    error = "; ".join(errors)[:4000] or None
+    return {
+        "report_date": report_date,
+        "timezone": report_timezone,
+        "status": status,
+        "generated_at": generated_at,
+        "payload": json.dumps(payload, ensure_ascii=False, sort_keys=True),
+        "error": error,
+    }
 
 
 def normalize_for_neon(rows):
@@ -132,10 +214,23 @@ INSERT INTO metric_snapshots(
 ON CONFLICT(account_id,metric,entity_type,entity_id,measurement_key) DO NOTHING
 """
 
+DAILY_REPORT_UPSERT = """
+INSERT INTO daily_reports(report_date,timezone,status,generated_at,payload,error)
+VALUES (%s,%s,%s,%s,%s::jsonb,%s)
+ON CONFLICT(report_date) DO UPDATE SET
+    timezone=EXCLUDED.timezone,
+    status=EXCLUDED.status,
+    generated_at=EXCLUDED.generated_at,
+    payload=EXCLUDED.payload,
+    error=EXCLUDED.error
+WHERE daily_reports.generated_at <= EXCLUDED.generated_at
+RETURNING report_date
+"""
+
 
 def ingest(conn, rows, review, *, source_run_id, archive_sha, latest_period,
-           rows_seen, deduplicated, days, started):
-    """One atomic transaction per source artifact, with replay protection."""
+           rows_seen, deduplicated, days, started, report):
+    """Atomically persist measurements, their report, and the import receipt."""
     if len(archive_sha) != 64 or any(c not in "0123456789abcdef" for c in archive_sha):
         raise ValueError("invalid_archive_sha")
     if not rows:
@@ -154,6 +249,11 @@ def ingest(conn, rows, review, *, source_run_id, archive_sha, latest_period,
             row = cur.fetchone()
             if row:
                 return {"status": "already_synced", "audit_id": row[0], "inserted": 0}
+            cur.execute(DAILY_REPORT_UPSERT, (
+                report["report_date"], report["timezone"], report["status"],
+                report["generated_at"], report["payload"], report["error"],
+            ))
+            report_written = cur.fetchone() is not None
             account_ids = {}
             for key, item in _account_candidates(rows).items():
                 cur.execute(ACCOUNT_UPSERT, (item["account"], item["platform"],
@@ -186,6 +286,9 @@ def ingest(conn, rows, review, *, source_run_id, archive_sha, latest_period,
                 "rows_validated": len(rows), "rows_inserted": inserted,
                 "records_reviewed": len(review),
                 "verified_platform_account_ids_invented": 0,
+                "daily_report_date": report["report_date"].isoformat(),
+                "daily_report_status": report["status"],
+                "daily_report_written": report_written,
             }
             cur.execute("""INSERT INTO archive_import_runs(
                 source,archive_sha256,rows_seen,rows_deduplicated,rows_accepted,
@@ -199,7 +302,8 @@ def ingest(conn, rows, review, *, source_run_id, archive_sha, latest_period,
             audit_id = cur.fetchone()[0]
             return {"status": "synced", "audit_id": audit_id,
                     "inserted": inserted, "already_present": len(rows)-inserted,
-                    "review": review_inserted, "period": latest_period}
+                    "review": review_inserted, "period": latest_period,
+                    "daily_report_written": report_written}
 
 
 def main():
@@ -214,6 +318,10 @@ def main():
         session = _session()
         verify_successful_main_run(session,run_id=run_id,github_token=token)
         rows, invalid, digest = read_source_rows(session)
+        comparison, report_digest = read_report_comparison(
+            session, run_id=run_id, github_token=token)
+        report = daily_report_record(comparison, source_run_id=run_id,
+                                     artifact_sha256=report_digest)
         days = max(1, min(30, int(os.getenv("DASHBOARD_SYNC_DAYS", "7"))))
         filtered, latest = recent_rows(rows,days=days)
         filtered.extend(invalid)
@@ -223,7 +331,8 @@ def main():
         with psycopg.connect(url, connect_timeout=10) as conn:
             result = ingest(conn, good, review,source_run_id=run_id,
                 archive_sha=digest,latest_period=latest, rows_seen=len(rows)+len(invalid),
-                deduplicated=duplicates,days=days,started=datetime.now(timezone.utc))
+                deduplicated=duplicates,days=days,started=datetime.now(timezone.utc),
+                report=report)
         print("neon_direct=" + result["status"] +
               " inserted=" + str(result["inserted"]) +
               " audit_id=" + str(result["audit_id"]),flush=True)
