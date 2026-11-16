@@ -20,6 +20,8 @@ on:
       - 'test_public_link_runtime.py'
       - 'instagram_media_compat.py'
       - 'test_instagram_media_compat.py'
+      - 'neon_archive_sync.py'
+      - 'test_neon_archive_sync.py'
       - 'tracked_meta_routes.py'
       - 'test_tracked_meta_routes.py'
       - '.github/workflows/tracked_meta_routes.yml'

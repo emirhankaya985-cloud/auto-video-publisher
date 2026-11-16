@@ -247,6 +247,8 @@ class NeonDirectArchiveSafetyTests(unittest.TestCase):
             started=datetime(2026,11,16,tzinfo=timezone.utc),
             report=sample_report())
         self.assertEqual(outcome["status"], "already_synced")
+        self.assertTrue(outcome["daily_report_written"])
+        self.assertTrue(any("INSERT INTO daily_reports" in sql for sql in conn.cur.sql))
         self.assertFalse(any("INSERT INTO metric_snapshots" in sql for sql in conn.cur.sql))
 
     def test_without_neon_tls_transaction_fails_closed(self):
