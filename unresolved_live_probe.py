@@ -54,6 +54,72 @@ def summarize_film_blockers(rows):
     return film_blockers
 
 
+CRITICAL_IG_INTENTS = {
+    "tarladaki": ("192.mp4", "41301342606", "18111440750133751"),
+    "film": ("En_Buyuk_Saban_Part_17.mp4", "43235604132", "17906869221599675"),
+}
+
+
+def critical_ig_intent_evidence(state, remote_rows):
+    """Bind old IG intent + recent read-only Graph result without releasing it.
+
+    A Facebook receipt, expired creation container or matching caption NEVER
+    proves that an Instagram post exists (or is absent). No state mutation.
+    """
+    import hashlib
+    entries = state.get("entries") if isinstance(state, dict) else None
+    if not isinstance(entries, dict) or not isinstance(remote_rows, list):
+        raise ValueError("critical_ig_evidence_invalid")
+    summary = {}
+    for route, (filename, origin_run, container_id) in CRITICAL_IG_INTENTS.items():
+        matches = [(key, row) for key, row in entries.items()
+                   if isinstance(row, dict) and row.get("route") == route
+                   and row.get("platform") == "instagram"
+                   and row.get("file") == filename
+                   and str(row.get("run_id")) == origin_run]
+        record = {"route": route, "platform": "instagram",
+                  "source_file": filename, "origin_run_id": origin_run,
+                  "safe_to_repost": False, "state_mutations": 0,
+                  "instagram_post_confirmed": False,
+                  "facebook_post_not_instagram_proof": True}
+        if len(matches) != 1:
+            record["status"] = "blocked_original_ig_ledger_not_unique"
+            summary[route] = record
+            continue
+        key, row = matches[0]
+        failure = row.get("failure") if isinstance(row.get("failure"), dict) else {}
+        record["ledger_status"] = row.get("status") if row.get("status") in (
+            "done", "intent", "uncertain", "held", "ready") else "unknown"
+        record["original_container_binding_verified"] = failure.get("container_id") == container_id
+        record["original_sha256_present"] = bool(
+            isinstance(row.get("source_sha256"), str)
+            and re.fullmatch(r"[0-9a-f]{64}", row["source_sha256"]))
+        record["has_ig_post_id_in_ledger"] = bool(str(row.get("post_id") or "").isdecimal())
+        # Cross-platform same-Drive/source evidence is just a clue, never an IG receipt.
+        source_ref = key.split(":", 2)[2] if key.startswith(route + ":instagram:") else ""
+        record["facebook_sibling_done"] = any(
+            isinstance(other, dict) and other.get("route") == route
+            and other.get("platform") == "facebook" and other.get("status") == "done"
+            and str(other.get("post_id") or "").isdecimal()
+            for other_key, other in entries.items()
+            if other_key.startswith(route + ":facebook:" + source_ref) and source_ref)
+        fingerprint = hashlib.sha256(key.encode()).hexdigest()[:16]
+        related = [x for x in remote_rows if isinstance(x, dict)
+                   and x.get("route") == route and x.get("platform") == "instagram"
+                   and (x.get("source_evidence") or {}).get("entry_fingerprint") == fingerprint]
+        if len(related) == 1:
+            evidence = related[0]
+            record["remote_reason"] = evidence.get("reason", "read_result_unclassified")
+            record["container_phase"] = evidence.get("existing_container_phase", "not_read")
+            if str(evidence.get("candidate_post_id") or "").isdecimal():
+                record["unverified_caption_candidate_id"] = evidence["candidate_post_id"]
+            record["status"] = "held_requires_exact_ig_source_proof"
+        else:
+            record["status"] = "blocked_remote_evidence_unavailable"
+        summary[route] = record
+    return summary
+
+
 def main():
     if (os.getenv("GITHUB_REPOSITORY") != "emirhankaya985-cloud/auto-video-publisher"
             or os.getenv("GITHUB_REF") != "refs/heads/main"
@@ -83,6 +149,7 @@ def main():
     rows = remote_evidence(state, pages,
         history_reader=graph_rows, status_reader=container_status)
     film_blockers = summarize_film_blockers(rows)
+    critical_intents = critical_ig_intent_evidence(state, rows)
     payload = {"run_id": os.getenv("GITHUB_RUN_ID"), "mode": "readonly",
                "source": "saved_GitHub_actions_publication_ledger",
                "previous_unresolved_count": len(rows),
@@ -93,13 +160,15 @@ def main():
                "safe_to_repost": False, "state_mutations": 0,
                "provider_post_requests": 0,
                "film_blockers": film_blockers,
+               "critical_ig_intents": critical_intents,
                "rows": rows}
     REPORT.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
                       encoding="utf-8")
     print(json.dumps({k: payload[k] for k in
         ("mode", "previous_unresolved_count", "reason_counts",
          "container_phase_counts", "safe_to_repost",
-         "state_mutations", "provider_post_requests", "film_blockers")}, ensure_ascii=False))
+         "state_mutations", "provider_post_requests", "film_blockers",
+         "critical_ig_intents")}, ensure_ascii=False))
     return 0
 
 
