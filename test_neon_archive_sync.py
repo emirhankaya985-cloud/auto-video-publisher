@@ -100,7 +100,7 @@ class NeonDirectArchiveSafetyTests(unittest.TestCase):
         base = {"id": 123, "name": sync.DAILY_WORKFLOW,
                 "status": "completed", "conclusion": "success", "head_branch": "main"}
         reply = Mock(json=lambda: base)
-        with patch.dict(os.environ, {"GITHUB_REPOSITORY": sync.REPOSITORY}), \\
+        with patch.dict(os.environ, {"GITHUB_REPOSITORY": sync.REPOSITORY}), \
              patch.object(sync, "request_with_retry", return_value=reply) as get:
             self.assertTrue(sync.verify_successful_main_run(Mock(),run_id="123",github_token="PRIVATE"))
         self.assertEqual(get.call_count, 1)
@@ -108,7 +108,7 @@ class NeonDirectArchiveSafetyTests(unittest.TestCase):
         self.assertNotIn("PRIVATE", str(base))
         for change in ({"head_branch": "feature"}, {"conclusion": "failure"},
                        {"name": "Some other workflow"}, {"status": "in_progress"}):
-            with patch.dict(os.environ, {"GITHUB_REPOSITORY": sync.REPOSITORY}), \\
+            with patch.dict(os.environ, {"GITHUB_REPOSITORY": sync.REPOSITORY}), \
                  patch.object(sync, "request_with_retry",
                               return_value=Mock(json=lambda: dict(base, **change))):
                 with self.assertRaisesRegex(ValueError, "daily_source_not_successful"):
@@ -173,7 +173,7 @@ class NeonDirectArchiveSafetyTests(unittest.TestCase):
         self.assertFalse(any("INSERT INTO metric_snapshots" in sql for sql in conn.cur.sql))
 
     def test_no_new_secrets_means_explicit_blocked_without_network(self):
-        with patch.dict(os.environ, {},clear=True), \\
+        with patch.dict(os.environ, {},clear=True), \
              patch.object(sync, "_session") as session:
             self.assertEqual(sync.main(), 2)
         session.assert_not_called()
