@@ -1114,6 +1114,7 @@ def notify_report_if_usable(report, *, send=None):
 
 if __name__ == "__main__":
     report = build_report()
+    report.comparison["timezone"] = "Europe/Istanbul"
     comparison_path = Path("link-runtime/account_views_comparison.json")
     comparison_path.parent.mkdir(parents=True, exist_ok=True)
     comparison_path.write_text(json.dumps(report.comparison, ensure_ascii=False, indent=2), encoding="utf-8")
