@@ -242,18 +242,22 @@ def ingest(conn, rows, review, *, source_run_id, archive_sha, latest_period,
             if dbname != "neondb" or tls is not True:
                 raise ValueError("wrong_neon_database_or_tls")
             cur.execute("SELECT pg_advisory_xact_lock(%s)", (SYNC_LOCK,))
+            # Repair the report row even when this archive was ingested before
+            # daily_reports was wired into the sync. The upsert is monotonic,
+            # so replay cannot replace a newer same-day report with stale data.
+            cur.execute(DAILY_REPORT_UPSERT, (
+                report["report_date"], report["timezone"], report["status"],
+                report["generated_at"], report["payload"], report["error"],
+            ))
+            report_written = cur.fetchone() is not None
             cur.execute("""SELECT id FROM archive_import_runs
                 WHERE source=%s AND archive_sha256=%s
                   AND details->>'source_run_id'=%s AND dry_run=false
                 ORDER BY id DESC LIMIT 1""", (SOURCE, archive_sha, str(source_run_id)))
             row = cur.fetchone()
             if row:
-                return {"status": "already_synced", "audit_id": row[0], "inserted": 0}
-            cur.execute(DAILY_REPORT_UPSERT, (
-                report["report_date"], report["timezone"], report["status"],
-                report["generated_at"], report["payload"], report["error"],
-            ))
-            report_written = cur.fetchone() is not None
+                return {"status": "already_synced", "audit_id": row[0], "inserted": 0,
+                        "daily_report_written": report_written}
             account_ids = {}
             for key, item in _account_candidates(rows).items():
                 cur.execute(ACCOUNT_UPSERT, (item["account"], item["platform"],
