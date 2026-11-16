@@ -75,21 +75,14 @@ jobs:
           NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
           NVIDIA_MODEL: ${{ vars.NVIDIA_MODEL || 'nvidia/nemotron-3.5-super-vl-120b-a12b' }}
         run: python -u stats_reporter.py
-      - name: Sync private analytics archive to dashboard
+      - name: Record separate, non-blocking Neon archive transfer
         if: success()
-        env:
-          DASHBOARD_INGEST_URL: ${{ secrets.DASHBOARD_INGEST_URL }}
-          DASHBOARD_INGEST_TOKEN: ${{ secrets.DASHBOARD_INGEST_TOKEN }}
         run: |
-          # The dashboard is optional. Never fail a successfully collected,
-          # archived and delivered nightly report due to missing dashboard secrets.
-          # Configured endpoints still fail loudly on an actual sync error.
-          if [ -z "$DASHBOARD_INGEST_URL" ] || [ -z "$DASHBOARD_INGEST_TOKEN" ]; then
-            echo "dashboard_sync=blocked_missing_ingest_configuration"
-            echo "⚠️ Dashboard senkronizasyonu yapılmadı: DASHBOARD_INGEST_URL/TOKEN tanımlı değil; günlük rapor bağımsız tamamlandı." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          python dashboard_archive_push.py
+          # The archive upload happens below. After this entire report job
+          # succeeds, dashboard_archive_sync.yml gets a workflow_run event.
+          # Never POST twice: the independent sync owns Neon/HTTP ingestion.
+          echo "archive_sync=pending_independent_workflow_run"
+          echo "Neon arşiv aktarımı ayrı bir işte yürütülür; bu adım veri yazıldığı anlamına gelmez." >> "$GITHUB_STEP_SUMMARY"
       - name: Recommend posting hours from verified historical IDs (no schedule changes)
         if: success()
         continue-on-error: true
