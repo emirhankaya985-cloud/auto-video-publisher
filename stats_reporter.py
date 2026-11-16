@@ -93,6 +93,8 @@ def safe_error(exc):
     if isinstance(exc, requests.RequestException):
         return type(exc).__name__
     message = str(exc)
+    if type(exc) is RuntimeError and message == "read_http_401_code_190":
+        return "Threads HTTP 401 / kod 190: erişim tokenı reddedildi (süresi dolmuş veya iptal edilmiş olabilir); yeniden yetkilendirme kontrolü gerekli"
     message = re.sub(r"https?://[^\s\"'<>]+", "[URL gizlendi]", message, flags=re.IGNORECASE)
     for env_name in ("META_ACCESS_TOKEN", "THREADS_ACCESS_TOKEN", "NTFY_TOPIC_URL"):
         secret = os.getenv(env_name, "")
@@ -526,6 +528,56 @@ def _read_day_records(path, day):
     return result
 
 
+def _last_verified_account_metrics(path, *, before_day=None):
+    """Read only genuinely successful archived account metrics, never missing-as-zero.
+
+    Stale values are not current totals. Exclude the current report day to avoid
+    presenting a potentially incomplete fresh inventory as verified history.
+    """
+    latest = {}
+    source = Path(path)
+    if not source.exists():
+        return latest
+    with source.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            try:
+                row = json.loads(line)
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(row, dict) or row.get("entity_type") != "account" or row.get("status") != "ok":
+                continue
+            metric = row.get("metric")
+            if metric not in {"lifetime_views", "followers", *THREADS_ENGAGEMENT_METRICS}:
+                continue
+            period = row.get("period")
+            if not isinstance(period, str):
+                continue
+            try:
+                datetime.strptime(period, "%Y-%m-%d")
+                measured = datetime.fromisoformat(str(row.get("measured_at", "")).replace("Z", "+00:00"))
+            except (TypeError, ValueError):
+                continue
+            if measured.tzinfo is None or (before_day and period >= before_day):
+                continue
+            value = counter(row.get("value"))
+            if value is None or value < 0:
+                continue
+            key = (row.get("account"), row.get("platform"), metric)
+            if not all(isinstance(x, str) and x for x in key):
+                continue
+            if key not in latest or measured > latest[key][1]:
+                latest[key] = (value, measured)
+    return latest
+
+
+def _last_verified_text(metrics, account, platform, metric):
+    reading = metrics.get((account, platform, metric))
+    if reading is None:
+        return None
+    value, measured = reading
+    return f"{tr_number(value)} ({measured.astimezone(TZ):%d.%m.%Y %H:%M} TRT; güncel değil)"
+
+
 def _platform_totals(snapshot, previous, account, platform, today):
     current = snapshot.get((account, platform))
     total = sum(x["views"] for x in current.values()) if current is not None else None
@@ -728,6 +780,10 @@ def build_report(now=None):
         elif drive and archive_folder:
             errors.append("Geçmiş okunamadığı için Drive arşivi korunuyor; üzerine yazılmadı.")
 
+        # Only archive-backed, previously measured values may be shown as stale.
+        # They are never included in today's aggregate or growth calculations.
+        last_verified = (_last_verified_account_metrics(history_path, before_day=today)
+                         if history_read_ok else {})
         publication_state = None
         if meta_only:
             try:
@@ -825,16 +881,44 @@ def build_report(now=None):
                                               f" | Son: {stats['latest_status']}")
                 rows.append(f"{platform}: {delta_text} | Genel {total_text}")
                 rows.append(f"  {publication_status}")
+                if total is None:
+                    stale_views = _last_verified_text(last_verified, account, platform, "lifetime_views")
+                    rows.append("  Son doğrulanan izlenme: " + (stale_views or "bulunamadı"))
+                    cause = next((error.partition(": ")[2] for error in collection_errors
+                                  if error.startswith(f"{account} / {platform}: ")), None)
+                    if cause:
+                        rows.append("  Veri alınamama nedeni: " + cause)
+                follower_rows = [record for record in records
+                                 if record.get("account") == account and record.get("platform") == platform
+                                 and record.get("entity_type") == "account" and record.get("metric") == "followers"]
+                if follower_rows:
+                    current_follower = next((counter(record.get("value")) for record in follower_rows
+                                             if record.get("status") == "ok"), None)
+                    if current_follower is not None:
+                        rows.append("  Takipçi: " + tr_number(current_follower))
+                    else:
+                        old_followers = _last_verified_text(last_verified, account, platform, "followers")
+                        rows.append("  Takipçi: güncel değer alınamadı" +
+                                    (f"; son {old_followers}" if old_followers else "; önceki doğrulanmış ölçüm yok"))
                 if platform == "Threads":
                     metrics = {record["metric"]: record["value"] for record in records
                                if record.get("account") == account and record.get("platform") == "Threads"
                                and record.get("entity_type") == "account"
                                and record.get("metric") in THREADS_ENGAGEMENT_METRICS
                                and record.get("status") == "ok"}
-                    rows.append("  Video etkileşimleri: " + " · ".join(
-                        f"{label} {number(metrics.get(metric))}" for metric, label in (
-                            ("likes", "beğeni"), ("replies", "yanıt"), ("reposts", "yeniden paylaşım"),
-                            ("quotes", "alıntı"), ("shares", "dış paylaşım"))))
+                    labels = (("likes", "beğeni"), ("replies", "yanıt"),
+                              ("reposts", "yeniden paylaşım"), ("quotes", "alıntı"),
+                              ("shares", "dış paylaşım"))
+                    engagement_values = []
+                    for metric, label in labels:
+                        reading = counter(metrics.get(metric))
+                        if reading is not None:
+                            value_text = tr_number(reading)
+                        else:
+                            stale = _last_verified_text(last_verified, account, platform, metric)
+                            value_text = "güncel değil; son " + stale if stale else "ölçüm yok"
+                        engagement_values.append(f"{label} {value_text}")
+                    rows.append("  Video etkileşimleri: " + " · ".join(engagement_values))
             rows.append("")
         progress_known = all(item[3] is not None for item in report_accounts.values())
         if delayed and all_lifetime:
@@ -883,6 +967,9 @@ def build_report(now=None):
                                if part["platform"].startswith(("Facebook", "Instagram"))]}
                 for row in comparison["accounts"]
             ]})
+        # Explicitly classify whether the report archive was prepared, even
+        # when one independent provider endpoint could not be measured.
+        comparison["archive_saved"] = archive_saved
         comparison["collection_errors"] = collection_errors
         comparison["report_errors"] = [
             error for error in dict.fromkeys(errors)
@@ -983,6 +1070,29 @@ def write_step_summary(report):
         return False
 
 
+def report_delivery_health(comparison):
+    """Distinguish a safely archived partial report from a failed report.
+
+    A partial provider outage must never invalidate independently confirmed
+    measurements. Never mark a report complete unless every required Meta
+    source actually succeeded; never succeed when no Meta measurement or
+    durable archive exists.
+    """
+    required = comparison.get("meta_collection", comparison.get("collection", {}))
+    if required.get("status") == "complete":
+        return "complete" if comparison.get("archive_saved", False) else "blocked_archive"
+    if not comparison.get("archive_saved", False):
+        return "blocked_archive"
+    known_meta = any(
+        isinstance(part.get("total"), int) and part["total"] >= 0
+        for account in comparison.get("accounts", [])
+        for part in account.get("platforms", [])
+        if isinstance(part, dict)
+        and str(part.get("platform", "")).startswith(("Facebook", "Instagram"))
+    )
+    return "partial_persisted" if known_meta else "blocked_no_meta_measurement"
+
+
 if __name__ == "__main__":
     report = build_report()
     comparison_path = Path("link-runtime/account_views_comparison.json")
@@ -992,7 +1102,9 @@ if __name__ == "__main__":
     print(report)
     write_step_summary(report)
     notify(report)
-    required = report.comparison.get("meta_collection", report.comparison["collection"])
-    if required["status"] != "complete":
-        print("::error::Meta görüntülenme verisi eksik; bildirim teslimi veri toplama başarısı değildir.", flush=True)
+    outcome = report_delivery_health(report.comparison)
+    if outcome == "partial_persisted":
+        print("::warning::Rapor kısmi: platform hataları belirtildi, doğrulanmış veri arşivlendi; eksik metrikler sıfır değildir.", flush=True)
+    elif outcome != "complete":
+        print(f"::error::Günlük rapor güvenilir biçimde tamamlanamadı: {outcome}. Bildirim teslimi başarı kanıtı değildir.", flush=True)
         raise SystemExit(1)
