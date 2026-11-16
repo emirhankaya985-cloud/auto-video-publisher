@@ -967,6 +967,9 @@ def build_report(now=None):
                                if part["platform"].startswith(("Facebook", "Instagram"))]}
                 for row in comparison["accounts"]
             ]})
+        # Explicitly classify whether the report archive was prepared, even
+        # when one independent provider endpoint could not be measured.
+        comparison["archive_saved"] = archive_saved
         comparison["collection_errors"] = collection_errors
         comparison["report_errors"] = [
             error for error in dict.fromkeys(errors)
@@ -1067,6 +1070,29 @@ def write_step_summary(report):
         return False
 
 
+def report_delivery_health(comparison):
+    """Distinguish a safely archived partial report from a failed report.
+
+    A partial provider outage must never invalidate independently confirmed
+    measurements. Never mark a report complete unless every required Meta
+    source actually succeeded; never succeed when no Meta measurement or
+    durable archive exists.
+    """
+    required = comparison.get("meta_collection", comparison.get("collection", {}))
+    if required.get("status") == "complete":
+        return "complete" if comparison.get("archive_saved", False) else "blocked_archive"
+    if not comparison.get("archive_saved", False):
+        return "blocked_archive"
+    known_meta = any(
+        isinstance(part.get("total"), int) and part["total"] >= 0
+        for account in comparison.get("accounts", [])
+        for part in account.get("platforms", [])
+        if isinstance(part, dict)
+        and str(part.get("platform", "")).startswith(("Facebook", "Instagram"))
+    )
+    return "partial_persisted" if known_meta else "blocked_no_meta_measurement"
+
+
 if __name__ == "__main__":
     report = build_report()
     comparison_path = Path("link-runtime/account_views_comparison.json")
@@ -1076,7 +1102,9 @@ if __name__ == "__main__":
     print(report)
     write_step_summary(report)
     notify(report)
-    required = report.comparison.get("meta_collection", report.comparison["collection"])
-    if required["status"] != "complete":
-        print("::error::Meta görüntülenme verisi eksik; bildirim teslimi veri toplama başarısı değildir.", flush=True)
+    outcome = report_delivery_health(report.comparison)
+    if outcome == "partial_persisted":
+        print("::warning::Rapor kısmi: platform hataları belirtildi, doğrulanmış veri arşivlendi; eksik metrikler sıfır değildir.", flush=True)
+    elif outcome != "complete":
+        print(f"::error::Günlük rapor güvenilir biçimde tamamlanamadı: {outcome}. Bildirim teslimi başarı kanıtı değildir.", flush=True)
         raise SystemExit(1)
