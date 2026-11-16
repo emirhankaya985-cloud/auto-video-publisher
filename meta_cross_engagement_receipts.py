@@ -66,13 +66,25 @@ def message(groups, run_id):
             item = counts[(row["actor"], row["platform"], row["owner"])]
             item["likes"] += 1
             item["self"] += int(row["self_like"])
+    all_accounts = sorted({
+        name for (platform, _account_id), name in names.items()
+        if platform in ("facebook", "instagram")
+    }, key=str.casefold)
     rows = [
-        ("BEĞENEN HESAP", "PLATFORM", "BEĞENİLEN HESAP", "ADET", "KENDİ?"),
+        ("BEĞENEN HESAP", "PLATFORM", "BEĞENDİĞİ HESAP", "ADET", "KENDİ?"),
     ]
-    for (actor, platform, owner), value in sorted(counts.items(), key=lambda item: (
-            item[0][0].casefold(), item[0][1], item[0][2].casefold())):
-        rows.append((actor, platform, owner, str(value["likes"]),
-                     "Evet" if value["self"] else "Hayır"))
+    for actor in all_accounts:
+        for platform in ("facebook", "instagram"):
+            platform_rows = [
+                (owner, value) for (liker, row_platform, owner), value in counts.items()
+                if liker == actor and row_platform == platform
+            ]
+            if platform_rows:
+                for owner, value in sorted(platform_rows, key=lambda item: item[0].casefold()):
+                    rows.append((actor, platform, owner, str(value["likes"]),
+                                 "Evet" if value["self"] else "Hayır"))
+            else:
+                rows.append((actor, platform, "Henüz doğrulanmış beğeni yok", "0", "—"))
     widths = [20, 10, 20, 5, 6]
     table = [" | ".join(cell.ljust(width) for cell, width in zip(row, widths))
              for row in rows]
