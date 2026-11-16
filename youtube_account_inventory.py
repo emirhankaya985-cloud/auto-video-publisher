@@ -66,11 +66,11 @@ def probe_all(*, checker=check_channel):
             if scope is True or scope is False:
                 item["upload_scope_in_file"] = scope
             else:
-                item["upload_scope_in_file"] = "N/A"
+                item["upload_scope_in_file"] = "scope_not_recorded_in_token_json"
         except Exception:
             item = {"route": route, "status": "authorization_or_connection_failed",
                     "expected_channel_id_matched": False,
-                    "upload_scope_in_file": "N/A"}
+                    "upload_scope_in_file": "scope_not_recorded_in_token_json"}
         checked.append(item)
     return {"status": "all_four_verified" if all(r["expected_channel_id_matched"]
              for r in checked) else "auth_or_identity_incomplete",
