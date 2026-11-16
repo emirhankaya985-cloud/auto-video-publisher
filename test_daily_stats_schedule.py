@@ -19,21 +19,29 @@ class DailyStatsScheduleTest(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/daily_stats.yml").read_text(encoding="utf-8")
         self.assertIn("    timeout-minutes: 35", workflow)
         report_step = workflow.split("      - name: Istatistikleri Telefona Gonder", 1)[1].split(
-            "      - name: Sync private analytics archive to dashboard", 1
+            "      - name: Record separate, non-blocking Neon archive transfer", 1
         )[0]
         self.assertIn("        timeout-minutes: 28", report_step)
         self.assertIn("run: python -u stats_reporter.py", report_step)
 
-    def test_missing_optional_dashboard_secrets_do_not_fail_daily_report(self):
+    def test_dashboard_sync_is_independent_and_never_double_posts(self):
         workflow = (ROOT / ".github/workflows/daily_stats.yml").read_text(encoding="utf-8")
-        sync_step = workflow.split("      - name: Sync private analytics archive to dashboard", 1)[1].split(
+        archive = (ROOT / ".github/workflows/dashboard_archive_sync.yml").read_text(encoding="utf-8")
+        step = workflow.split("      - name: Record separate, non-blocking Neon archive transfer", 1)[1].split(
             "      - name: Recommend posting hours", 1
         )[0]
-        self.assertIn('if [ -z "$DASHBOARD_INGEST_URL" ] || [ -z "$DASHBOARD_INGEST_TOKEN" ]; then', sync_step)
-        self.assertIn('dashboard_sync=blocked_missing_ingest_configuration', sync_step)
-        self.assertIn('exit 0', sync_step)
-        self.assertIn('python dashboard_archive_push.py', sync_step)
-        self.assertNotIn('continue-on-error: true', sync_step)
+        self.assertIn("archive_sync=pending_independent_workflow_run", step)
+        self.assertNotIn("python dashboard_archive_push.py", workflow)
+        self.assertNotIn("python neon_archive_sync.py", workflow)
+        self.assertIn("meta-daily-analytics-history", workflow)
+        self.assertIn("workflow_run:", archive)
+        self.assertIn("github.event.workflow_run.conclusion == 'success'", archive)
+        self.assertIn("SOURCE_RUN_ID:", archive)
+        self.assertIn("DASHBOARD_DATABASE_URL:", archive)
+        self.assertIn("python neon_archive_sync.py", archive)
+        self.assertIn("python dashboard_archive_push.py", archive)
+        self.assertIn("exit 2", archive)
+        self.assertNotIn("continue-on-error: true", step)
 
     def test_backup_target_follows_report(self):
         workflow = (ROOT / ".github/workflows/publication_backup.yml").read_text(encoding="utf-8")
