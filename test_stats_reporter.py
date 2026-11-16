@@ -1,4 +1,5 @@
 import os
+import unittest
 from unittest.mock import Mock, patch
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -593,3 +594,52 @@ def test_instagram_view_snapshot_rejects_invalid_or_duplicate_records():
             pass
         else:
             raise AssertionError("duplicate Instagram video ID accepted")
+
+
+class ArchivedLastGoodMetricsTests(unittest.TestCase):
+    def test_only_prior_successful_positive_or_zero_counts_are_stale_evidence(self):
+        import json
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from stats_reporter import _last_verified_account_metrics, _last_verified_text
+
+        def row(period, value, status, stamp, metric="lifetime_views"):
+            return {
+                "account": "Penguen", "platform": "Threads",
+                "entity_type": "account", "metric": metric,
+                "period": period, "value": value, "status": status,
+                "measured_at": stamp,
+            }
+
+        with TemporaryDirectory() as folder:
+            path = Path(folder) / "history.jsonl"
+            readings = [
+                row("2026-11-13", 80, "ok", "2026-11-13T21:00:00Z"),
+                row("2026-11-14", None, "error", "2026-11-14T21:00:00Z"),
+                row("2026-11-15", 0, "ok", "2026-11-15T21:00:00Z", "likes"),
+                row("2026-11-16", 1, "ok", "2026-11-16T08:00:00Z"),
+            ]
+            path.write_text("\n".join(json.dumps(item) for item in readings) +
+                            "\ninvalid-json\n", encoding="utf-8")
+            metrics = _last_verified_account_metrics(path, before_day="2026-11-16")
+        self.assertEqual(metrics[("Penguen", "Threads", "lifetime_views")][0], 80)
+        self.assertEqual(metrics[("Penguen", "Threads", "likes")][0], 0)
+        self.assertIn("14.11.2026", _last_verified_text(metrics, "Penguen", "Threads", "lifetime_views"))
+        self.assertIn("güncel değil", _last_verified_text(metrics, "Penguen", "Threads", "likes"))
+        self.assertIsNone(_last_verified_text(metrics, "Penguen", "Threads", "followers"))
+
+    def test_rejected_threads_401_is_actionable_without_exposing_token(self):
+        diagnostic = safe_error(RuntimeError("read_http_401_code_190"))
+        self.assertIn("HTTP 401", diagnostic)
+        self.assertIn("190", diagnostic)
+        self.assertIn("yeniden yetkilendirme", diagnostic)
+        self.assertNotIn("read_http_401_code_190", diagnostic)
+
+    def test_missing_archive_is_not_interpreted_as_zero(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from stats_reporter import _last_verified_account_metrics, _last_verified_text
+        with TemporaryDirectory() as folder:
+            metrics = _last_verified_account_metrics(Path(folder) / "not-there.jsonl")
+        self.assertEqual(metrics, {})
+        self.assertIsNone(_last_verified_text(metrics, "Penguen", "Threads", "lifetime_views"))
