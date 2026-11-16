@@ -15,6 +15,17 @@ class DailyStatsScheduleTest(unittest.TestCase):
         self.assertIn("    - cron: '59 20 * * *'", workflow)
         self.assertNotIn("    - cron: '15 20 * * *'", workflow)
 
+    def test_missing_optional_dashboard_secrets_do_not_fail_daily_report(self):
+        workflow = (ROOT / ".github/workflows/daily_stats.yml").read_text(encoding="utf-8")
+        sync_step = workflow.split("      - name: Sync private analytics archive to dashboard", 1)[1].split(
+            "      - name: Recommend posting hours", 1
+        )[0]
+        self.assertIn('if [ -z "$DASHBOARD_INGEST_URL" ] || [ -z "$DASHBOARD_INGEST_TOKEN" ]; then', sync_step)
+        self.assertIn('dashboard_sync=blocked_missing_ingest_configuration', sync_step)
+        self.assertIn('exit 0', sync_step)
+        self.assertIn('python dashboard_archive_push.py', sync_step)
+        self.assertNotIn('continue-on-error: true', sync_step)
+
     def test_backup_target_follows_report(self):
         workflow = (ROOT / ".github/workflows/publication_backup.yml").read_text(encoding="utf-8")
         # Backup targets 00:23 Turkey time, after the 23:59 report trigger.
