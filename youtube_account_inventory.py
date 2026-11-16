@@ -2,7 +2,8 @@
 
 This never inserts, modifies, deletes, or retries videos. No raw Google error
 bodies, tokens, URLs, or OAuth credentials are ever written to the artifact.
-"""
+
+Owner-requested read-only four-channel identity audit trigger (2026-11-17)."""
 import json
 from pathlib import Path
 
