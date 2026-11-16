@@ -57,7 +57,7 @@ def verified_batch(ledger, plan, run_id, names):
     return groups
 
 
-def message(groups, run_id):
+def message(groups, run_id, names):
     if not groups:
         return None
     counts = defaultdict(lambda: {"likes": 0, "self": 0})
@@ -67,8 +67,8 @@ def message(groups, run_id):
             item["likes"] += 1
             item["self"] += int(row["self_like"])
     all_accounts = sorted({
-        name for (platform, _account_id), name in names.items()
-        if platform in ("facebook", "instagram")
+        row[field] for result in groups.values() for row in result["rows"]
+        for field in ("actor", "owner")
     }, key=str.casefold)
     rows = [
         ("BEĞENEN HESAP", "PLATFORM", "BEĞENDİĞİ HESAP", "ADET", "KENDİ?"),
@@ -90,9 +90,16 @@ def message(groups, run_id):
              for row in rows]
     confirmed = sum(result["count"] for result in groups.values())
     self_likes = sum(result["self_count"] for result in groups.values())
+    detail_rows = [
+        f"{actor} / {platform}: {value['likes']} beğeni → {owner} "
+        f"(kendi gönderisi: {value['self']})"
+        for (actor, platform, owner), value in sorted(counts.items())
+    ]
     body = "\n".join([
         "Doğrulanmış Meta beğenileri — her satır beğenen hesabı ve hedef hesabı gösterir.",
+        "Durum: tüm hesapları ve iki platformu listeler; 0 yalnızca bu çalıştırmada doğrulanmış beğeni olmadığını belirtir.",
         "<pre>" + escape("\n".join(table)) + "</pre>",
+        "Ayrıntı: " + "; ".join(detail_rows),
         f"Toplam: {confirmed} beğeni | Çapraz: {confirmed - self_likes} | "
         f"Kendi gönderisi: {self_likes}",
         "Yalnızca Graph API tarafından kabul edilmiş beğeniler listelenir.",
@@ -121,7 +128,7 @@ def main():
             names[("instagram", str(page["instagram_id"]))] = page["page_name"]
     groups = verified_batch(json.loads(LEDGER.read_text(encoding="utf-8")),
                             json.loads(PLAN.read_text(encoding="utf-8")), run_id, names)
-    body = message(groups, run_id)
+    body = message(groups, run_id, names)
     if body is None:
         print('{"status":"no_accepted_likes_no_message"}')
         return 0
