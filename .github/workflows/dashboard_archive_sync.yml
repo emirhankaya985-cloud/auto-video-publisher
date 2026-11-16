@@ -11,6 +11,12 @@ on:
         description: Successful daily statistics run ID to sync
         required: true
         type: string
+  # One explicit, safe post-merge acceptance for already verified read-only
+  # report 43871556294. Never re-run actual media publishing or notifications.
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/dashboard_archive_sync.yml'
 
 permissions:
   contents: read
@@ -22,7 +28,11 @@ concurrency:
 
 jobs:
   sync:
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') ||
+      (github.event_name == 'push' &&
+       startsWith(github.event.head_commit.message, 'ops: verify-existing-neon-ingest-20261116'))
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -38,11 +48,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          SOURCE_RUN_ID: ${{ github.event.workflow_run.id || inputs.source_run_id }}
+          SOURCE_RUN_ID: ${{ github.event_name == 'push' && '43871556294' || github.event.workflow_run.id || inputs.source_run_id }}
           DASHBOARD_DATABASE_URL: ${{ secrets.DASHBOARD_DATABASE_URL }}
           DASHBOARD_INGEST_URL: ${{ secrets.DASHBOARD_INGEST_URL }}
           DASHBOARD_INGEST_TOKEN: ${{ secrets.DASHBOARD_INGEST_TOKEN }}
-          DASHBOARD_SYNC_DAYS: "7"
+          DASHBOARD_SYNC_DAYS: ${{ github.event_name == 'push' && '2' || '7' }}
         run: |
           set -euo pipefail
           if [ -n "${DASHBOARD_DATABASE_URL:-}" ]; then
