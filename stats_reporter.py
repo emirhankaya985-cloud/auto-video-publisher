@@ -1093,6 +1093,25 @@ def report_delivery_health(comparison):
     return "partial_persisted" if known_meta else "blocked_no_meta_measurement"
 
 
+def notify_report_if_usable(report, *, send=None):
+    """Never turn notification transport failure into a failed metric report.
+
+    On truly failed collection the workflow's single failure-alert step owns
+    notification. This prevents a second, duplicate in-process alert.
+    """
+    verdict = report_delivery_health(report.comparison)
+    if verdict not in {"complete", "partial_persisted"}:
+        return "deferred_to_failure_alert"
+    try:
+        (send or notify)(report)
+    except Exception as exc:
+        # No provider body, token or secret URL in the job logs.
+        print("::warning::report_notification_delivery_failed error_type="
+              + type(exc).__name__, flush=True)
+        return "notification_transport_failed"
+    return "notification_checked"
+
+
 if __name__ == "__main__":
     report = build_report()
     comparison_path = Path("link-runtime/account_views_comparison.json")
@@ -1101,8 +1120,8 @@ if __name__ == "__main__":
     print("ACCOUNT_COMPARISON " + json.dumps(report.comparison, ensure_ascii=False), flush=True)
     print(report)
     write_step_summary(report)
-    notify(report)
     outcome = report_delivery_health(report.comparison)
+    notify_report_if_usable(report)
     if outcome == "partial_persisted":
         print("::warning::Rapor kısmi: platform hataları belirtildi, doğrulanmış veri arşivlendi; eksik metrikler sıfır değildir.", flush=True)
     elif outcome != "complete":
