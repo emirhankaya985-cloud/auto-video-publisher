@@ -141,7 +141,7 @@ class ThreadsAccountsTests(unittest.TestCase):
         result = safe_provider_failure(error)
         self.assertEqual(result["http_status"], 401)
         self.assertEqual(result["graph_code"], 190)
-        self.assertEqual(result["reason"], "threads_token_reauthorization_required")
+        self.assertEqual(result["reason"], "threads_token_expired_or_invalid")
         self.assertNotIn("PRIVATE", str(result))
         self.assertEqual(result["graph_subcode"], 463)
         response = Mock(status_code=503)
