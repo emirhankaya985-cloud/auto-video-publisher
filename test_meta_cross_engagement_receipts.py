@@ -15,11 +15,11 @@ class VerifiedReceiptsTests(unittest.TestCase):
         ledger = {"actions": {key(t): {**t, "status": "accepted", "api_ack": True, "run_id": "55"}}}
         names = {("facebook", "222"): "Penguen", ("facebook", "111"): "ToonZone"}
         groups = m.verified_batch(ledger, [t], "55", names)
-        self.assertIn("Penguen / facebook: 1 beğeni → ToonZone", m.message(groups, "55"))
-        self.assertIn("tüm hesapları", m.message(groups, "55"))
+        self.assertIn("Penguen / facebook: 1 beğeni → ToonZone", m.message(groups, "55", names))
+        self.assertIn("tüm hesapları", m.message(groups, "55", names))
         ledger["actions"][key(t)]["api_ack"] = False
         self.assertFalse(m.verified_batch(ledger, [t], "55", names))
-        self.assertIsNone(m.message({}, "55"))
+        self.assertIsNone(m.message({}, "55", names))
 
     def test_owner_likes_count_only_when_acknowledged(self):
         t = self.task()
@@ -29,7 +29,7 @@ class VerifiedReceiptsTests(unittest.TestCase):
                                       "api_ack": True, "run_id": "55"}}}
         groups = m.verified_batch(ledger, [t], "55", names)
         self.assertIn("ToonZone / facebook: 1 beğeni → ToonZone (kendi gönderisi: 1)",
-                      m.message(groups, "55"))
+                      m.message(groups, "55", names))
         ledger["actions"][key(t)]["api_ack"] = False
         self.assertFalse(m.verified_batch(ledger, [t], "55", names))
 
