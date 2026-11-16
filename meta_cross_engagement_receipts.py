@@ -21,7 +21,7 @@ def verified_batch(ledger, plan, run_id, names):
     if not isinstance(plan, list) or not run_id.isdecimal():
         raise RuntimeError("engagement_plan_unavailable")
     from meta_cross_engagement import key
-    groups = defaultdict(lambda: {"recipients": set(), "posts": set(), "count": 0, "self_count": 0})
+    groups = defaultdict(lambda: {"recipients": set(), "posts": set(), "count": 0, "self_count": 0, "rows": []})
     for task in plan:
         if not isinstance(task, dict) or task.get("operation") != "like":
             continue
@@ -44,6 +44,13 @@ def verified_batch(ledger, plan, run_id, names):
         group["recipients"].add(owner_name)
         group["posts"].add(str(task["post_id"]))
         group["count"] += 1
+        group["rows"].append({
+            "actor": actor_name,
+            "platform": platform,
+            "owner": owner_name,
+            "post_id": str(task["post_id"]),
+            "self_like": actor == owner,
+        })
         if actor == owner:
             group["self_count"] += 1
     return groups
@@ -52,14 +59,29 @@ def verified_batch(ledger, plan, run_id, names):
 def message(groups, run_id):
     if not groups:
         return None
-    lines = ["Doğrulanmış Meta beğenileri (Graph API başarı alındısı):"]
-    for (actor, platform), result in sorted(groups.items()):
-        owners = ", ".join(sorted(result["recipients"]))
-        lines.append(f"• {actor} / {platform}: {result['count']} beğeni → {owners}"
-                     f" (kendi gönderisi: {result['self_count']})")
-    lines.extend(["Kaydetme / yeniden paylaşım: API alındısı yoksa başarı sayılmaz.",
-                  "Bu özet 'tüm hesapları beğendi' anlamına gelmez.",
-                  f"https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/{run_id}"])
+    lines = [
+        "✅ Doğrulanmış Meta beğenileri (Graph API onayı)",
+        "Beğenen hesap | Platform | Beğenilen hesabın gönderisi | Gönderi ID | Tür",
+    ]
+    all_rows = []
+    for result in groups.values():
+        all_rows.extend(result["rows"])
+    for row in sorted(all_rows, key=lambda x: (
+            x["actor"].casefold(), x["platform"], x["owner"].casefold(), x["post_id"])):
+        kind = "KENDİ" if row["self_like"] else "ÇAPRAZ"
+        lines.append(
+            f"{row['actor']} | {row['platform']} | {row['owner']} | "
+            f"{row['post_id']} | {kind}"
+        )
+    confirmed = sum(result["count"] for result in groups.values())
+    self_likes = sum(result["self_count"] for result in groups.values())
+    lines.extend([
+        f"Toplam doğrulanmış beğeni: {confirmed} "
+        f"(çapraz hesap: {confirmed - self_likes}, kendi gönderisi: {self_likes})",
+        "Kaydetme / yeniden paylaşım: API onayı yoksa başarılı sayılmaz.",
+        "Bu liste yalnızca bu çalıştırmada API tarafından kabul edilmiş beğenileri gösterir.",
+        f"https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/{run_id}",
+    ])
     return "\n".join(lines)
 
 
