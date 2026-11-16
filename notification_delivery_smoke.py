@@ -1,5 +1,5 @@
 """One-run live Telegram + ntfy ACK smoke with no publisher or fake incident.
-
+Owner-authorized controlled test execution: 2026-11-17.\n
 Only the exact explicitly approved main commit may execute provider POSTs.
 This sends one clearly labelled TEST message per configured destination.
 No phone-delivery claim. Second same-key attempt is checked in memory/local
