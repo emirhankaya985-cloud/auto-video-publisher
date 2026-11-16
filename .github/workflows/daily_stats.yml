@@ -79,7 +79,16 @@ jobs:
         env:
           DASHBOARD_INGEST_URL: ${{ secrets.DASHBOARD_INGEST_URL }}
           DASHBOARD_INGEST_TOKEN: ${{ secrets.DASHBOARD_INGEST_TOKEN }}
-        run: python dashboard_archive_push.py
+        run: |
+          # The dashboard is optional. Never fail a successfully collected,
+          # archived and delivered nightly report due to missing dashboard secrets.
+          # Configured endpoints still fail loudly on an actual sync error.
+          if [ -z "$DASHBOARD_INGEST_URL" ] || [ -z "$DASHBOARD_INGEST_TOKEN" ]; then
+            echo "dashboard_sync=blocked_missing_ingest_configuration"
+            echo "⚠️ Dashboard senkronizasyonu yapılmadı: DASHBOARD_INGEST_URL/TOKEN tanımlı değil; günlük rapor bağımsız tamamlandı." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          python dashboard_archive_push.py
       - name: Recommend posting hours from verified historical IDs (no schedule changes)
         if: success()
         continue-on-error: true
