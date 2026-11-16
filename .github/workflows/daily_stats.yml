@@ -152,14 +152,3 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           DATABASE_URL: ${{ secrets.DASHBOARD_DATABASE_URL }}
         run: python ntfy_report_failure_alert.py
-"""Regression guard: daily status report targets 23:59 Turkey time.
-
-GitHub Actions cron can run late; the guard asserts the requested schedule,
-not an exact provider delivery-time SLA.
-"""
-from pathlib import Path
-import unittest
-
-ROOT = Path(__file__).resolve().parent
-
-
