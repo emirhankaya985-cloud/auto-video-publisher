@@ -676,3 +676,36 @@ class ArchivedLastGoodMetricsTests(unittest.TestCase):
         report["meta_collection"]["status"] = "complete"
         self.assertEqual(report_delivery_health(report), "complete")
 
+
+    def test_notice_outage_never_marks_archived_report_failed(self):
+        from stats_reporter import notify_report_if_usable
+        from views_comparison import ViewReport
+        report = ViewReport("stored", {"meta_collection": {"status": "complete"},
+                    "archive_saved": True, "accounts": []})
+        with patch("stats_reporter.notify", side_effect=RuntimeError("PRIVATE_TOKEN")) as send:
+            result = notify_report_if_usable(report)
+        self.assertEqual(result, "notification_transport_failed")
+        send.assert_called_once()
+
+    def test_incomplete_metrics_defer_to_single_failure_workflow_alert(self):
+        from stats_reporter import notify_report_if_usable
+        from views_comparison import ViewReport
+        report = ViewReport("incomplete", {"meta_collection": {"status": "unavailable"},
+                 "archive_saved": False, "accounts": []})
+        with patch("stats_reporter.notify") as send:
+            self.assertEqual(notify_report_if_usable(report),
+                             "deferred_to_failure_alert")
+        send.assert_not_called()
+
+    def test_partially_persisted_report_can_notify_without_restarting_publisher(self):
+        from stats_reporter import notify_report_if_usable
+        from views_comparison import ViewReport
+        report = ViewReport("partial", {"meta_collection": {"status": "partial"},
+                    "archive_saved": True, "accounts": [{"platforms": [
+                        {"platform": "Instagram", "total": 7},
+                        {"platform": "Facebook", "total": None},
+                    ]}]})
+        with patch("stats_reporter.notify") as send:
+            self.assertEqual(notify_report_if_usable(report), "notification_checked")
+        send.assert_called_once()
+
