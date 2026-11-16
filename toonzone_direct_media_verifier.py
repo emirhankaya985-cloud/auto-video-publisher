@@ -151,6 +151,28 @@ def inspect_post(candidate, *, owner_username, token, get=requests.get):
             "verified_timestamp": stamp.isoformat()}
 
 
+def episode_4_to_12_readonly_rollup(rows):
+    """Only verified live, exact owner/caption/ID matches count as completed."""
+    if not isinstance(rows, list):
+        raise ValueError("toonzone_verified_rows_required")
+    result = {}
+    for episode in range(4, 13):
+        prefix = f"S01E{episode:02d} Part"
+        pieces = [item for item in rows if isinstance(item, dict)
+                  and str(item.get("slot", "")).startswith(prefix)]
+        verified = [row for row in pieces if
+                    row.get("status") == "verified_live_exact_id_owner_caption_time"]
+        result[f"S01E{episode:02d}"] = {
+            "expected_parts": 4,
+            "live_verified_parts": len(verified),
+            "held_or_unverified_parts": 4 - len(verified),
+            "provider_post_ids": [row["post_id"] for row in verified],
+            "status": "all_four_live_verified" if len(verified) == 4
+                      else "held_no_reupload_without_exact_proof",
+        }
+    return result
+
+
 def audit(state, page, *, get=requests.get, secondary_token=None):
     rows = candidates(state)
     username, identity_error = identity_username(page, get=get)
@@ -210,6 +232,7 @@ def audit(state, page, *, get=requests.get, secondary_token=None):
             "episodes_1_to_3_verified": sum(x["status"].startswith("verified_live_exact") for x in prior),
             "episodes_4_to_12_verified": verified_current,
             "episodes_4_to_12_missing_or_unverified": 36 - verified_current,
+            "episodes_4_to_12": episode_4_to_12_readonly_rollup(output),
             "rows": output, "media_posts_created": 0, "state_mutations": 0,
             "owner_verified": True, "reenqueue_authorized": False,
             "secondary_token_query_enabled": bool(alt_ok),

@@ -189,6 +189,28 @@ class ToonZoneExactIdTests(unittest.TestCase):
         self.assertEqual(x["archive_issue"], "legacy_file_id_provenance_marker")
         self.assertFalse(x["eligible"])
 
+    def test_episode_4_to_12_rollup_counts_only_exact_live_media_ids(self):
+        rows = [
+            {"slot": "S01E04 Part1", "status": "verified_live_exact_id_owner_caption_time",
+             "post_id": "18100507712530539"},
+            {"slot": "S01E04 Part2", "status": "held",
+             "post_id": "18100507712530540", "reason": "provider_get_rejected"},
+            {"slot": "S01E04 Part3", "status": "held", "post_id": None},
+            {"slot": "S01E04 Part4", "status": "held", "post_id": None},
+            {"slot": "S01E12 Part1", "status": "verified_live_exact_id_owner_caption_time",
+             "post_id": "18100507712530548"},
+        ]
+        result = audit.episode_4_to_12_readonly_rollup(rows)
+        self.assertEqual(len(result), 9)
+        self.assertEqual(result["S01E04"]["live_verified_parts"], 1)
+        self.assertEqual(result["S01E04"]["held_or_unverified_parts"], 3)
+        self.assertEqual(result["S01E04"]["provider_post_ids"], ["18100507712530539"])
+        self.assertEqual(result["S01E05"]["held_or_unverified_parts"], 4)
+        self.assertEqual(result["S01E12"]["live_verified_parts"], 1)
+        self.assertTrue(all(v["status"] == "held_no_reupload_without_exact_proof"
+                            for v in result.values()))
+        self.assertNotIn("18100507712530540", str(result))
+
     def test_full_audit_preserves_missing_receipts_and_never_posts(self):
         state, caption = self.make_state()
         source = next(r for r in audit.candidates(state) if r["eligible"])
