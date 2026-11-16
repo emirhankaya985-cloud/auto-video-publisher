@@ -4,6 +4,7 @@ Never sends notifications for dry-run, reservations, unsupported saves, or
 unverified provider acknowledgements. No Meta writes are performed here.
 """
 from collections import defaultdict
+from html import escape
 import json
 import os
 from pathlib import Path
@@ -59,30 +60,34 @@ def verified_batch(ledger, plan, run_id, names):
 def message(groups, run_id):
     if not groups:
         return None
-    lines = [
-        "✅ Doğrulanmış Meta beğenileri (Graph API onayı)",
-        "Beğenen hesap | Platform | Beğenilen hesabın gönderisi | Gönderi ID | Tür",
-    ]
-    all_rows = []
+    counts = defaultdict(lambda: {"likes": 0, "self": 0})
     for result in groups.values():
-        all_rows.extend(result["rows"])
-    for row in sorted(all_rows, key=lambda x: (
-            x["actor"].casefold(), x["platform"], x["owner"].casefold(), x["post_id"])):
-        kind = "KENDİ" if row["self_like"] else "ÇAPRAZ"
-        lines.append(
-            f"{row['actor']} | {row['platform']} | {row['owner']} | "
-            f"{row['post_id']} | {kind}"
-        )
+        for row in result["rows"]:
+            item = counts[(row["actor"], row["platform"], row["owner"])]
+            item["likes"] += 1
+            item["self"] += int(row["self_like"])
+    rows = [
+        ("BEĞENEN HESAP", "PLATFORM", "BEĞENİLEN HESAP", "ADET", "KENDİ?"),
+    ]
+    for (actor, platform, owner), value in sorted(counts.items(), key=lambda item: (
+            item[0][0].casefold(), item[0][1], item[0][2].casefold())):
+        rows.append((actor, platform, owner, str(value["likes"]),
+                     "Evet" if value["self"] else "Hayır"))
+    widths = [20, 10, 20, 5, 6]
+    table = [" | ".join(cell.ljust(width) for cell, width in zip(row, widths))
+             for row in rows]
     confirmed = sum(result["count"] for result in groups.values())
     self_likes = sum(result["self_count"] for result in groups.values())
-    lines.extend([
-        f"Toplam doğrulanmış beğeni: {confirmed} "
-        f"(çapraz hesap: {confirmed - self_likes}, kendi gönderisi: {self_likes})",
-        "Kaydetme / yeniden paylaşım: API onayı yoksa başarılı sayılmaz.",
-        "Bu liste yalnızca bu çalıştırmada API tarafından kabul edilmiş beğenileri gösterir.",
+    body = "\n".join([
+        "Doğrulanmış Meta beğenileri — her satır beğenen hesabı ve hedef hesabı gösterir.",
+        "<pre>" + escape("\n".join(table)) + "</pre>",
+        f"Toplam: {confirmed} beğeni | Çapraz: {confirmed - self_likes} | "
+        f"Kendi gönderisi: {self_likes}",
+        "Yalnızca Graph API tarafından kabul edilmiş beğeniler listelenir.",
+        "Kaydetme / yeniden paylaşım API onayı yoksa başarılı sayılmaz.",
         f"https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/{run_id}",
     ])
-    return "\n".join(lines)
+    return body
 
 
 def main():
@@ -109,7 +114,7 @@ def main():
         print('{"status":"no_accepted_likes_no_message"}')
         return 0
     # Attempt only once. Telegram server ack is not phone delivery proof.
-    receipt = send_telegram("✅ Meta etkileşim alındısı", body)
+    receipt = send_telegram("✅ Meta beğeni tablosu", body, parse_mode="HTML")
     print(json.dumps({"status": "notified", "accepted_likes": sum(x["count"] for x in groups.values()),
                       "telegram_server_ack": receipt.get("server_ack") is True,
                       "phone_delivery_verified": False}))
