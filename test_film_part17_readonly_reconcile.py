@@ -72,6 +72,19 @@ class Film17ReadonlyTests(unittest.TestCase):
         self.assertEqual(repr(self.state), self.old)
         self.assertNotIn("PRIVATE_TOKEN", str(result))
 
+    def test_original_container_published_cannot_imply_original_film_bytes(self):
+        def published_status_get(url, **kwargs):
+            if url.endswith(FILM17_CONTAINER_ID):
+                return fake_json({"id": FILM17_CONTAINER_ID, "status_code": "PUBLISHED"})
+            return self.get(url, **kwargs)
+        report = a.reconcile(self.state, self.page,
+                             get=published_status_get, rows=[])
+        self.assertEqual(report["old_container_status"], "PUBLISHED")
+        self.assertEqual(report["status"], "uncertain_no_matching_live_caption")
+        self.assertFalse(report["original_source_binary_verified_by_meta"])
+        self.assertFalse(report["reupload_authorized"])
+        self.assertEqual(self.entry["status"], "uncertain")
+
     def test_no_caption_match_is_uncertain_not_missing_post(self):
         result = a.reconcile(self.state, self.page, get=self.get, rows=[self.row("other caption")])
         self.assertEqual(result["status"], "uncertain_no_matching_live_caption")
