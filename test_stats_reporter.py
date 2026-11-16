@@ -643,3 +643,36 @@ class ArchivedLastGoodMetricsTests(unittest.TestCase):
             metrics = _last_verified_account_metrics(Path(folder) / "not-there.jsonl")
         self.assertEqual(metrics, {})
         self.assertIsNone(_last_verified_text(metrics, "Penguen", "Threads", "lifetime_views"))
+
+    def test_partial_archived_meta_report_is_degraded_not_falsely_complete(self):
+        from stats_reporter import report_delivery_health
+        report = {
+            "meta_collection": {"status": "partial"},
+            "archive_saved": True,
+            "accounts": [{"platforms": [
+                {"platform": "Facebook", "total": 12},
+                {"platform": "Instagram", "total": None},
+                {"platform": "Threads", "total": None},
+            ]}],
+        }
+        self.assertEqual(report_delivery_health(report), "partial_persisted")
+        self.assertEqual(report["meta_collection"]["status"], "partial")
+
+    def test_all_meta_readings_missing_or_unarchived_is_still_failure(self):
+        from stats_reporter import report_delivery_health
+        report = {
+            "meta_collection": {"status": "unavailable"},
+            "archive_saved": True,
+            "accounts": [{"platforms": [
+                {"platform": "Facebook", "total": None},
+                {"platform": "Instagram", "total": None},
+            ]}],
+        }
+        self.assertEqual(report_delivery_health(report), "blocked_no_meta_measurement")
+        report["accounts"][0]["platforms"][0]["total"] = 12
+        report["archive_saved"] = False
+        self.assertEqual(report_delivery_health(report), "blocked_archive")
+        report["archive_saved"] = True
+        report["meta_collection"]["status"] = "complete"
+        self.assertEqual(report_delivery_health(report), "complete")
+
