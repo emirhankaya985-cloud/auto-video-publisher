@@ -15,6 +15,15 @@ class DailyStatsScheduleTest(unittest.TestCase):
         self.assertIn("    - cron: '59 20 * * *'", workflow)
         self.assertNotIn("    - cron: '15 20 * * *'", workflow)
 
+    def test_report_has_room_for_slow_read_only_collection(self):
+        workflow = (ROOT / ".github/workflows/daily_stats.yml").read_text(encoding="utf-8")
+        self.assertIn("    timeout-minutes: 35", workflow)
+        report_step = workflow.split("      - name: Istatistikleri Telefona Gonder", 1)[1].split(
+            "      - name: Sync private analytics archive to dashboard", 1
+        )[0]
+        self.assertIn("        timeout-minutes: 28", report_step)
+        self.assertIn("run: python -u stats_reporter.py", report_step)
+
     def test_missing_optional_dashboard_secrets_do_not_fail_daily_report(self):
         workflow = (ROOT / ".github/workflows/daily_stats.yml").read_text(encoding="utf-8")
         sync_step = workflow.split("      - name: Sync private analytics archive to dashboard", 1)[1].split(
