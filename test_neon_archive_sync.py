@@ -262,6 +262,38 @@ class NeonDirectArchiveSafetyTests(unittest.TestCase):
                 report=sample_report())
         self.assertFalse(any("INSERT INTO metric_snapshots" in sql for sql in conn.cur.sql))
 
+    def test_failures_expose_only_bounded_stage_and_exception_class(self):
+        import io
+        from contextlib import redirect_stdout
+        private = "postgresql://private:DO_NOT_PRINT_SECRET@ep-foo.neon.tech/neondb"
+        for failing_step, expected_stage in (
+            ("validate_neon_url", "connection_scope"),
+            ("verify_successful_main_run", "trusted_source_run"),
+            ("read_source_rows", "analytics_artifact"),
+        ):
+            with self.subTest(stage=failing_step):
+                output = io.StringIO()
+                with (
+                    patch.dict(os.environ, {
+                        "DASHBOARD_DATABASE_URL": private,
+                        "SOURCE_RUN_ID": "43961941936",
+                        "GITHUB_TOKEN": "PRIVATE_TOKEN",
+                    }),
+                    patch.object(sync, "_session", return_value=Mock()),
+                    patch.object(sync, "validate_neon_url"),
+                    patch.object(sync, "verify_successful_main_run"),
+                    patch.object(sync, "read_source_rows"),
+                    patch.object(sync, failing_step,
+                                 side_effect=ValueError("DO_NOT_PRINT_SECRET")),
+                    redirect_stdout(output),
+                ):
+                    self.assertEqual(sync.main(), 1)
+                log = output.getvalue()
+                self.assertIn("stage=" + expected_stage, log)
+                self.assertIn("error_type=ValueError", log)
+                self.assertNotIn("DO_NOT_PRINT_SECRET", log)
+                self.assertNotIn("PRIVATE_TOKEN", log)
+
     def test_no_new_secrets_means_explicit_blocked_without_network(self):
         with patch.dict(os.environ, {},clear=True), \
              patch.object(sync, "_session") as session:
