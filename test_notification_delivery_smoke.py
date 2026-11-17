@@ -64,6 +64,55 @@ class LiveNotificationSmokeSafetyTests(unittest.TestCase):
         self.assertNotIn("PASSWORD_LEAK", str(out))
         self.assertTrue(out["ntfy"]["server_ack"])
 
+    def test_injected_ntfy_outage_keeps_meta_receipt_and_prevents_duplicate_telegram(self):
+        # Deliberately inject an ntfy failure: NO real notifications or uploads.
+        from publisher_incident_report import build_incident_report
+
+        telegram = Mock(return_value={"server_ack": True, "http_status": 200,
+                                     "message_id": 123})
+        ntfy = Mock(side_effect=ConnectionError("SECRET_NEVER_LOG"))
+        first = p.smoke(strict=False, telegram_sender=telegram, ntfy_sender=ntfy)
+        self.assertEqual(first["status"], "incomplete")
+        self.assertTrue(first["telegram"]["server_ack"])
+        self.assertEqual(first["telegram"]["message_id"], 123)
+        self.assertFalse(first["ntfy"]["server_ack"])
+        self.assertEqual(first["ntfy"]["status"], "delivery_failed")
+        self.assertEqual(first["ntfy"]["error_class"], "ConnectionError")
+        self.assertNotIn("SECRET_NEVER_LOG", str(first))
+        self.assertEqual(first["publisher_post_requests"], 0)
+        self.assertEqual(first["real_incidents_created"], 0)
+
+        # A confirmed publication keeps its ID when a notification fails;
+        # incident report preserves the separate provider outcome.
+        state = {"entries": {"ig": {"run_id": "777", "status": "done",
+                "route": "film", "platform": "instagram", "post_id": "18000000000000"}}}
+        record = build_incident_report(state, "777", step_outcomes={
+            "publish": "success", "post_verification": "success", "notify": "failure",
+        })
+        self.assertEqual(record["confirmed_new_posts"], 1)
+        self.assertEqual(record["step_outcomes"]["notify"], "failure")
+        self.assertEqual(record["step_outcomes"]["publish"], "success")
+
+        second = p.smoke(strict=False, telegram_sender=telegram, ntfy_sender=ntfy)
+        self.assertEqual(second["telegram"]["status"], "duplicate_suppressed")
+        self.assertEqual(telegram.call_count, 1)
+        # A failed ntfy attempt can retry; it is not a duplicate delivered alert.
+        self.assertEqual(ntfy.call_count, 2)
+        self.assertEqual(second["publisher_post_requests"], 0)
+
+        workflow = (Path(__file__).resolve().parent /
+                    ".github/workflows/public_link_schedule.yml").read_text()
+        publish_step = workflow.split(
+            "      - name: Publish explicitly planned Meta videos", 1
+        )[1].split("      - name:", 1)[0]
+        notify_step = workflow.split(
+            "      - name: Send reserved notifications once (no video uploads)", 1
+        )[1].split("      - name:", 1)[0]
+        self.assertNotIn("continue-on-error: true", publish_step)
+        self.assertIn("continue-on-error: true", notify_step)
+        self.assertIn("steps.notify.outcome == 'failure'", workflow)
+        self.assertIn("OUTCOME_NOTIFY:", workflow)
+
     def test_http_success_without_proper_ack_is_failure(self):
         t = Mock(return_value={"server_ack": False, "http_status": 200})
         n = Mock(return_value={"server_ack": True, "http_status": 302})
