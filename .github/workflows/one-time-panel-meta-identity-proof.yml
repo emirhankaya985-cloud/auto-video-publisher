@@ -4,6 +4,11 @@ on:
     branches: [main]
     paths:
       - '.github/ops/one-time-panel-identity-proof-20261117.txt'
+  pull_request:
+    paths:
+      - 'meta_identity_panel_proof.py'
+      - 'test_meta_identity_panel_proof.py'
+      - '.github/workflows/one-time-panel-meta-identity-proof.yml'
 permissions:
   contents: read
 concurrency:
@@ -25,4 +30,5 @@ jobs:
       - name: Test no-publish identity-only reconciliation
         run: python -m unittest -v test_meta_identity_panel_proof.py
       - name: Verify page IDs with existing saved Meta owner token
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: python meta_identity_panel_proof.py
