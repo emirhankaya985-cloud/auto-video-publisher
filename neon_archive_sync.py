@@ -228,6 +228,18 @@ RETURNING report_date
 """
 
 
+def connect_existing_neon(url, *, connector=None):
+    """Require client TLS to Neon; PgBouncer can terminate SSL before Postgres.
+
+    pg_stat_ssl is backend-side and can report false even for a TLS-encrypted
+    client-to-Neon connection. Enforce sslmode=require in libpq instead.
+    """
+    if connector is None:
+        import psycopg
+        connector = psycopg.connect
+    return connector(url, connect_timeout=10, sslmode="require")
+
+
 def ingest(conn, rows, review, *, source_run_id, archive_sha, latest_period,
            rows_seen, deduplicated, days, started, report):
     """Atomically persist measurements, their report, and the import receipt."""
@@ -237,10 +249,13 @@ def ingest(conn, rows, review, *, source_run_id, archive_sha, latest_period,
         raise ValueError("no_valid_archive_measurements")
     with conn.transaction():
         with conn.cursor() as cur:
-            cur.execute("SELECT current_database(), EXISTS(SELECT 1 FROM pg_stat_ssl WHERE pid=pg_backend_pid() AND ssl)")
-            dbname, tls = cur.fetchone()
-            if dbname != "neondb" or tls is not True:
-                raise ValueError("wrong_neon_database_or_tls")
+            # Neon ends client TLS at its proxy/PgBouncer. The backend
+            # pg_stat_ssl flag is not a valid client-transport TLS oracle.
+            # connect_existing_neon() already forces sslmode=require via libpq.
+            cur.execute("SELECT current_database()")
+            (dbname,) = cur.fetchone()
+            if dbname != "neondb":
+                raise ValueError("wrong_neon_database")
             cur.execute("SELECT pg_advisory_xact_lock(%s)", (SYNC_LOCK,))
             # Repair the report row even when this archive was ingested before
             # daily_reports was wired into the sync. The upsert is monotonic,
@@ -339,8 +354,7 @@ def main():
         stage = "measurement_validation"
         good, review = normalize_for_neon(deduped)
         stage = "existing_neon_connection"
-        import psycopg
-        with psycopg.connect(url, connect_timeout=10) as conn:
+        with connect_existing_neon(url) as conn:
             stage = "atomic_neon_ingest"
             result = ingest(conn, good, review,source_run_id=run_id,
                 archive_sha=digest,latest_period=latest, rows_seen=len(rows)+len(invalid),
