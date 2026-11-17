@@ -1,0 +1,28 @@
+name: One-time Meta Provider Identity Proof for 985 Panel (Read Only)
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/ops/one-time-panel-identity-proof-20261117.txt'
+permissions:
+  contents: read
+concurrency:
+  group: meta-owner-dashboard-identity-read-only
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install pinned zero-cost project dependencies
+        run: pip install --require-hashes -r requirements.txt
+      - name: Test no-publish identity-only reconciliation
+        run: python -m unittest -v test_meta_identity_panel_proof.py
+      - name: Verify page IDs with existing saved Meta owner token
+        run: python meta_identity_panel_proof.py
