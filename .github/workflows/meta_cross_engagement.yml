@@ -29,6 +29,8 @@ on:
     paths:
       - 'meta_cross_engagement.py'
       - 'test_meta_cross_engagement.py'
+      - 'meta_cross_engagement_receipts.py'
+      - 'test_meta_cross_engagement_receipts.py'
       - '.github/workflows/meta_cross_engagement.yml'
 permissions:
   contents: read
@@ -47,7 +49,7 @@ jobs:
           python-version: '3.12'
       - run: pip install --require-hashes -r requirements.txt
       - name: Verify identities, unsupported actions, dedupe and crash safety with mocks
-        run: python -m unittest -v test_meta_cross_engagement.py
+        run: python -m unittest -v test_meta_cross_engagement.py test_meta_cross_engagement_receipts.py
   engage:
     needs: tests
     if: >-
