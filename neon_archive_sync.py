@@ -317,22 +317,31 @@ def main():
     if not url:
         print("neon_direct=blocked_missing_dashboard_database_url", flush=True)
         return 2
+    stage = "connection_scope"
     try:
         validate_neon_url(url)
+        stage = "trusted_source_run"
         session = _session()
         verify_successful_main_run(session,run_id=run_id,github_token=token)
+        stage = "analytics_artifact"
         rows, invalid, digest = read_source_rows(session)
+        stage = "comparison_artifact"
         comparison, report_digest = read_report_comparison(
             session, run_id=run_id, github_token=token)
+        stage = "comparison_validation"
         report = daily_report_record(comparison, source_run_id=run_id,
                                      artifact_sha256=report_digest)
+        stage = "recent_measurements"
         days = max(1, min(30, int(os.getenv("DASHBOARD_SYNC_DAYS", "7"))))
         filtered, latest = recent_rows(rows,days=days)
         filtered.extend(invalid)
         deduped, duplicates = deduplicate_rows(filtered)
+        stage = "measurement_validation"
         good, review = normalize_for_neon(deduped)
+        stage = "existing_neon_connection"
         import psycopg
         with psycopg.connect(url, connect_timeout=10) as conn:
+            stage = "atomic_neon_ingest"
             result = ingest(conn, good, review,source_run_id=run_id,
                 archive_sha=digest,latest_period=latest, rows_seen=len(rows)+len(invalid),
                 deduplicated=duplicates,days=days,started=datetime.now(timezone.utc),
@@ -342,8 +351,10 @@ def main():
               " audit_id=" + str(result["audit_id"]),flush=True)
         return 0
     except Exception as exc:
-        # Never echo psycopg connection errors (they may contain passwords).
-        print("neon_direct=failed error_type=" + type(exc).__name__, flush=True)
+        # Explicit allowlisted stage + class ONLY. Never include raw exception,
+        # URI host/name, query, password, tokens or provider error response.
+        print("neon_direct=failed stage=" + stage +
+              " error_type=" + type(exc).__name__, flush=True)
         return 1
 
 
