@@ -21,6 +21,20 @@ class VerifiedReceiptsTests(unittest.TestCase):
         self.assertFalse(m.verified_batch(ledger, [t], "55", names))
         self.assertIsNone(m.message({}, "55", names))
 
+
+    def test_accepted_like_report_includes_other_verified_accounts_with_zero(self):
+        t = self.task()
+        ledger = {"actions": {key(t): {**t, "status": "accepted", "api_ack": True, "run_id": "55"}}}
+        names = {("facebook", "222"): "Penguen",
+                 ("facebook", "111"): "ToonZone",
+                 ("instagram", "444"): "Gönle Düşen"}
+        groups = m.verified_batch(ledger, [t], "55", names)
+        body = m.message(groups, "55", names)
+        self.assertIn("Gönle Düşen", body)
+        self.assertIn("Henüz doğrulanmış beğeni yok", body)
+        self.assertIn("Toplam: 1 beğeni", body)
+        self.assertEqual(body.count("Toplam:"), 1)
+
     def test_owner_likes_count_only_when_acknowledged(self):
         t = self.task()
         t["actor"] = t["owner"]
