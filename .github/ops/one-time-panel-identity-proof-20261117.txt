@@ -1,0 +1,6 @@
+Single user-authorized read-only Meta Graph account identity evidence
+for the 985 AI Control Center. Output public page/IG IDs and their live provider
+matching status only; no Graph writes, post publishing, engagement, follower
+changes, API token disclosures, Telegram, CRM mutation or YouTube OAuth.
+The existing Meta reporting workflow and any other agent's work are untouched.
+Do not edit this marker again.
