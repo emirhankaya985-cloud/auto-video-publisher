@@ -120,6 +120,59 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python meta_cross_engagement_receipts.py
+      - name: Publish verified like acceptance summary
+        if: always()
+        env:
+          ENGAGEMENT_MODE_ACTUAL: ${{ env.ENGAGEMENT_MODE }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          ledger_path = Path("cross-engagement/engagement.json")
+          report_path = Path("cross-engagement/report.json")
+          accepted = {"instagram": 0, "facebook": 0}
+          state = "NO_LEDGER"
+          if ledger_path.is_file():
+              try:
+                  ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+                  actions = ledger.get("actions", {})
+                  if not isinstance(actions, dict):
+                      raise ValueError("invalid actions")
+                  for record in actions.values():
+                      if not isinstance(record, dict):
+                          continue
+                      platform = record.get("platform")
+                      if (platform in accepted and record.get("operation") == "like"
+                              and record.get("status") == "accepted"
+                              and record.get("api_ack") is True):
+                          accepted[platform] += 1
+                  state = "GRAPH_ACK_PRESENT" if sum(accepted.values()) else "NO_ACCEPTED_GRAPH_ACK"
+              except (OSError, ValueError, TypeError):
+                  state = "INVALID_LEDGER"
+          planned = "unknown"
+          if report_path.is_file():
+              try:
+                  report = json.loads(report_path.read_text(encoding="utf-8"))
+                  planned = str(report.get("planned", "unknown"))
+              except (OSError, ValueError, TypeError, AttributeError):
+                  planned = "unreadable"
+          summary = [
+              "## Meta cross-account like verification",
+              "",
+              f"- Mode: `{os.environ.get('ENGAGEMENT_MODE_ACTUAL', 'unknown')}`",
+              f"- Verification: **{state}**",
+              f"- Instagram accepted Graph ACK records in retained ledger: **{accepted['instagram']}**",
+              f"- Facebook accepted Graph ACK records in retained ledger: **{accepted['facebook']}**",
+              f"- Planned operations: **{planned}**",
+              "",
+              "A green workflow alone is not proof of a like. Only accepted, API-acknowledged ledger entries count.",
+              "Counts describe the retained ledger, not necessarily likes created by this run.",
+          ]
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as output:
+              output.write("\n".join(summary) + "\n")
+          PY
       - name: Preserve operation support and permission report
         if: always()
         uses: actions/upload-artifact@v4
