@@ -71,6 +71,25 @@ class InterventionOnlyNotificationTests(unittest.TestCase):
         prep = self.prepare([], publish="failure")
         self.assertEqual(len(prep.call_args.args[0]), 1)
 
+    def test_failed_delivery_does_not_reclassify_media_publish(self):
+        workflow = (Path(__file__).resolve().parent /
+                    ".github/workflows/public_link_schedule.yml").read_text()
+        transport = workflow.split(
+            "      - name: Send reserved notifications once (no video uploads)", 1
+        )[1].split("      - name: Preserve notification results", 1)[0]
+        self.assertIn("continue-on-error: true", transport)
+        self.assertIn("steps.notify.outcome == 'failure'", transport)
+        self.assertIn("link-alert-result", workflow)
+        self.assertIn("OUTCOME_NOTIFY:", workflow)
+        self.assertIn("steps.notify.outcome == 'failure'", workflow)
+        self.assertIn("link-incident-report-", workflow)
+        # Only notification transport is optional; an actual Meta upload
+        # failure must still fail its run and preserve ambiguous intents.
+        publish = workflow.split(
+            "      - name: Publish explicitly planned Meta videos", 1
+        )[1].split("      - name: ", 1)[0]
+        self.assertNotIn("continue-on-error: true", publish)
+
     def test_workflow_enables_alerts_only_and_preserves_archived_intents(self):
         text = (Path(__file__).resolve().parent / ".github/workflows/public_link_schedule.yml").read_text()
         self.assertIn("PUBLISH_ALERTS_ONLY: 'true'", text)

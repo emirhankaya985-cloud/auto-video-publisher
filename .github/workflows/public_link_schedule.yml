@@ -330,6 +330,9 @@ jobs:
           retention-days: 7
       - name: Send reserved notifications once (no video uploads)
         id: notify
+        # Delivery failure is not a Meta publication failure. Keep the failed
+        # step outcome for the incident artifact; do not change publish status.
+        continue-on-error: true
         if: ${{ always() && steps.release_gate.outputs.publish_allowed == 'true' && steps.notify_plan.outcome == 'success' && (steps.notify_plan.outputs.alert_archive_needed != 'true' || steps.notify_intent.outcome == 'success') }}
         env:
           PUBLISH_ALERT_MODE: send
@@ -339,6 +342,11 @@ jobs:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           NTFY_TOPIC_URL: ${{ secrets.NTFY_TOPIC_URL }}
         run: python telegram_publish_report.py
+      - name: Record notification transport failure without marking upload failed
+        if: ${{ always() && steps.notify.outcome == 'failure' }}
+        run: |
+          echo "::warning::Notification transport failed; inspect link-alert-result and incidents artifacts. No media retry authorized."
+          echo "⚠️ Bildirim teslimi başarısız. Gönderi sonucu değişmez; kanıt için incident/alert artifacts kontrol edilmeli." >> "$GITHUB_STEP_SUMMARY"
       - name: Preserve notification results and server acknowledgements
         if: ${{ always() && steps.notify_plan.outputs.alert_archive_needed == 'true' }}
         uses: actions/upload-artifact@v4
