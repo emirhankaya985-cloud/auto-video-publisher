@@ -66,9 +66,12 @@ def message(groups, run_id, names):
             item = counts[(row["actor"], row["platform"], row["owner"])]
             item["likes"] += 1
             item["self"] += int(row["self_like"])
+    # The verified-actor map is authoritative for the complete account list.
+    # A zero-like account must not disappear merely because another account
+    # received the only accepted Graph ACK in this batch.
     all_accounts = sorted({
-        row[field] for result in groups.values() for row in result["rows"]
-        for field in ("actor", "owner")
+        name for (platform, _provider_id), name in names.items()
+        if platform in ("facebook", "instagram")
     }, key=str.casefold)
     rows = [
         ("BEĞENEN HESAP", "PLATFORM", "BEĞENDİĞİ HESAP", "ADET", "KENDİ?"),
