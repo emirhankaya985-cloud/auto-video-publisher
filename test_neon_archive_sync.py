@@ -60,7 +60,7 @@ class FakeCursor:
         self.sql.append(sql)
         self.rows.append(params)
         if "current_database()" in sql:
-            self.next = ("neondb", self.tls)
+            self.next = ("neondb",)
         elif "SELECT id FROM archive_import_runs" in sql:
             self.next = (7,) if self.existing else None
         elif "INSERT INTO daily_reports" in sql:
@@ -251,13 +251,38 @@ class NeonDirectArchiveSafetyTests(unittest.TestCase):
         self.assertTrue(any("INSERT INTO daily_reports" in sql for sql in conn.cur.sql))
         self.assertFalse(any("INSERT INTO metric_snapshots" in sql for sql in conn.cur.sql))
 
-    def test_without_neon_tls_transaction_fails_closed(self):
+    def test_neon_pooled_backend_ssl_false_does_not_block_forced_client_tls(self):
         prepared, review = sync.normalize_for_neon([sample()])
-        conn = FakeConn(tls=False)
-        with self.assertRaisesRegex(ValueError,"wrong_neon_database_or_tls"):
-            sync.ingest(conn, prepared, review,source_run_id="123",
-                archive_sha="a"*64,latest_period="2026-11-16",
-                rows_seen=1,deduplicated=0,days=7,
+        conn = FakeConn(tls=False)  # Neon proxy terminates client TLS.
+        secret = "postgresql://private:NEVER_PRINT@ep-test.neon.tech/neondb"
+        connector = Mock(return_value=conn)
+        self.assertIs(sync.connect_existing_neon(secret, connector=connector), conn)
+        connector.assert_called_once_with(
+            secret, connect_timeout=10, sslmode="require")
+        outcome = sync.ingest(conn, prepared, review, source_run_id="123",
+            archive_sha="a"*64, latest_period="2026-11-16",
+            rows_seen=1, deduplicated=0, days=7,
+            started=datetime(2026,11,16,tzinfo=timezone.utc),
+            report=sample_report())
+        self.assertEqual(outcome["status"], "synced")
+        self.assertEqual(outcome["inserted"], 1)
+        self.assertFalse(any("pg_stat_ssl" in query for query in conn.cur.sql))
+        self.assertTrue(any("INSERT INTO metric_snapshots" in sql for sql in conn.cur.sql))
+
+    def test_wrong_database_still_fails_closed_before_insert(self):
+        prepared, review = sync.normalize_for_neon([sample()])
+        conn = FakeConn()
+        original = conn.cur.execute
+        def redirect_database(query, params=None):
+            result = original(query, params)
+            if "current_database()" in query:
+                conn.cur.next = ("careerhunter_live",)
+            return result
+        conn.cur.execute = redirect_database
+        with self.assertRaisesRegex(ValueError, "wrong_neon_database"):
+            sync.ingest(conn, prepared, review, source_run_id="123",
+                archive_sha="a"*64, latest_period="2026-11-16",
+                rows_seen=1, deduplicated=0, days=7,
                 started=datetime(2026,11,16,tzinfo=timezone.utc),
                 report=sample_report())
         self.assertFalse(any("INSERT INTO metric_snapshots" in sql for sql in conn.cur.sql))
