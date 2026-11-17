@@ -73,6 +73,20 @@ class IncidentReportTests(unittest.TestCase):
         self.assertTrue(result["state_available"])
         self.assertEqual(result["incidents"], [])
 
+    def test_delivery_failure_is_explicitly_separate_from_verified_publish(self):
+        state = {"entries": {"ig": {
+            "run_id": "777", "status": "done", "route": "film",
+            "platform": "instagram", "post_id": "18000000000000",
+        }}}
+        r = build_incident_report(state, "777", step_outcomes={
+            "publish": "success", "post_verification": "success", "notify": "failure",
+        })
+        self.assertEqual(r["confirmed_new_posts"], 1)
+        self.assertEqual(r["unverified_done_entries"], 0)
+        self.assertEqual(r["step_outcomes"]["publish"], "success")
+        self.assertEqual(r["step_outcomes"]["notify"], "failure")
+        self.assertEqual(r["uncertain_pending_reconciliation"], 0)
+
     def test_invalid_runid_never_attributes_old_upload_to_new_run(self):
         with self.assertRaises(ValueError):
             build_incident_report({"entries": {}}, "../../oops")
