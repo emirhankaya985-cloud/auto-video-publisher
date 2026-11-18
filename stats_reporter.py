@@ -304,6 +304,15 @@ def facebook_video_snapshot(page):
             "views": views,
             "published_at": item.get("created_time", ""),
         }
+    # Graph's /videos `views` field can return near-zero values for a large
+    # library of Reels even when the Page has a meaningful audience. Treat an
+    # implausibly empty collection as unavailable, never as a real collapse.
+    if len(videos) >= 50:
+        nonzero = sum(item["views"] > 0 for item in videos.values())
+        if nonzero <= max(2, len(videos) // 20) and sum(
+            item["views"] for item in videos.values()
+        ) < len(videos) // 10:
+            raise RuntimeError("Facebook video views metriği tutarsız: çoğu video sıfır")
     return videos
 
 
