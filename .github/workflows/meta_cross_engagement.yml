@@ -112,7 +112,8 @@ jobs:
           path: cross-engagement/engagement.json
           if-no-files-found: ignore
           retention-days: 90
-      - name: Send a verified Telegram batch receipt only for genuinely accepted likes
+      - name: Send verified like receipt or daily zero-like alert
+        id: engagement_receipt
         if: >-
           always() &&
           steps.verified_ledger.outcome == 'success' &&
@@ -122,6 +123,14 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python meta_cross_engagement_receipts.py
+      - name: Archive daily zero-like alert marker after Telegram server ACK
+        if: always() && steps.engagement_receipt.outputs.alert_artifact_name != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.engagement_receipt.outputs.alert_artifact_name }}
+          path: cross-engagement/no-like-alert.json
+          if-no-files-found: error
+          retention-days: 30
       - name: Preserve operation support and permission report
         if: always()
         uses: actions/upload-artifact@v4
