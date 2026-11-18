@@ -27,6 +27,19 @@ def compare(records=None, current=None, platforms=None, delayed=False, account="
 
 
 class ViewComparisonTests(unittest.TestCase):
+    def test_implausibly_empty_facebook_library_is_unavailable(self):
+        videos = [{"id": str(i), "views": 0, "created_time": "2026-10-01T00:00:00Z"}
+                  for i in range(75)]
+        with patch.object(stats_reporter, "graph_pages", return_value=videos):
+            with self.assertRaisesRegex(RuntimeError, "tutarsız"):
+                stats_reporter.facebook_video_snapshot({"page_id": "1", "page_token": "test"})
+
+    def test_small_new_facebook_library_can_have_zero_views(self):
+        videos = [{"id": str(i), "views": 0} for i in range(4)]
+        with patch.object(stats_reporter, "graph_pages", return_value=videos):
+            self.assertEqual(len(stats_reporter.facebook_video_snapshot(
+                {"page_id": "1", "page_token": "test"})), 4)
+
     def test_actual_day_and_week_percentages_use_their_own_cumulative_baseline(self):
         data = compare()
         row = data["accounts"][0]
