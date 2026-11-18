@@ -5,6 +5,24 @@ from publisher_incident_report import build_incident_report
 
 
 class IncidentReportTests(unittest.TestCase):
+    def test_zero_post_reasons_stay_distinct_in_artifact(self):
+        text = ("QUARANTINE: exact source failed local MP4 preparation in a prior run; no blind media retry.\n"
+                "QUARANTINE: proven local-only visual duplicate; look for next unique clip.\n"
+                "HELD: 326.mp4 instagram has an uncertain previous intent.\n"
+                "No eligible unpublished item below the daily target.\n")
+        result = build_incident_report({'entries': {}}, '300', plan_text=text)
+        self.assertEqual(result['confirmed_new_posts'], 0)
+        self.assertEqual(result['no_post_signals'], {
+            'no_eligible_content': 1, 'local_quality_quarantine': 1,
+            'visual_duplicate_hold': 1, 'uncertain_previous_intent': 1,
+        })
+
+    def test_confirmed_post_does_not_claim_no_post_signals(self):
+        state = {'entries': {'x': {'run_id': '300', 'status': 'done',
+                                  'post_id': '123', 'route': 'film', 'platform': 'facebook'}}}
+        result = build_incident_report(state, '300', plan_text='No eligible unpublished item below the daily target.')
+        self.assertEqual(result['no_post_signals'], {})
+
     def test_visual_hold_remains_visible_without_breaking_incident_writer(self):
         result = build_incident_report({'entries': {'x': {
             'run_id': '300', 'status': 'held', 'route': 'film', 'platform': 'facebook',

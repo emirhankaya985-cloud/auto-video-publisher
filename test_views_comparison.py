@@ -131,6 +131,22 @@ class ViewComparisonTests(unittest.TestCase):
         self.assertIsNone(compare(rows)["accounts"][0]["daily"]["percent"])
         self.assertIsNone(compare(delayed=True)["accounts"][0]["daily"]["percent"])
 
+    def test_delayed_measurement_reports_only_real_sample_interval(self):
+        data = compare(delayed=True)
+        part = data["accounts"][0]["platforms"][0]
+        self.assertIsNone(part["daily"]["delta"])
+        self.assertEqual(part["sample_window"], {"baseline": 100, "delta": 25, "hours": 19.2})
+        self.assertIn("Ölçüm arası fark (takvim günü değil)", telegram_tables(data)[1][1])
+        self.assertIn("+25 (19,2 saat)", telegram_tables(data)[1][1])
+
+    def test_delayed_measurement_rejects_stale_or_unverified_window(self):
+        data = build_comparison(
+            {("account", "Facebook"): {"123": {"views": 125}}},
+            history("2026-10-26", 100), {"account": ["Facebook"]},
+            date(2026, 10, 27), "2026-10-29T18:30:00+03:00", delayed=True)
+        self.assertNotIn("sample_window", data["accounts"][0]["platforms"][0])
+        self.assertIsNone(data["accounts"][0]["daily"]["delta"])
+
     def test_html_escapes_labels_and_keeps_three_bounded_parts_for_six_accounts(self):
         names = list(stats_reporter.ACCOUNT_TARGETS)
         names[0] += " <tag>&"
