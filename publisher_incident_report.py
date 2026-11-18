@@ -71,6 +71,21 @@ def build_incident_report(state, run_id, *, plan_text="", errors=None, step_outc
     }
     blockers = {name: sum(line.startswith(marker) for line in plan_text.splitlines())
                 for name, marker in markers.items()}
+    # A successful Actions job can still publish nothing. Keep the reasons
+    # separate: an empty queue, a known-bad local source, and an ambiguous
+    # earlier POST require different follow-up actions.
+    no_post_signals = {
+        "no_eligible_content": blockers["no_eligible_content"],
+        "local_quality_quarantine": sum(
+            line.startswith("QUARANTINE: exact source failed local MP4 preparation")
+            for line in plan_text.splitlines()),
+        "visual_duplicate_hold": sum(
+            line.startswith("QUARANTINE: proven local-only visual duplicate")
+            for line in plan_text.splitlines()),
+        "uncertain_previous_intent": sum(
+            line.startswith("HELD:") and "uncertain previous intent" in line
+            for line in plan_text.splitlines()),
+    }
     # Journal events are emitted at each individual exception/hold, even if
     # the state is later reconciled or a different account publishes.
     # Never persist raw provider responses or secret-bearing tracebacks.
@@ -187,6 +202,7 @@ def build_incident_report(state, run_id, *, plan_text="", errors=None, step_outc
         )),
         "previous_unreconciled_details": previous_details,
         "incidents": incidents, "planning_blocker_counts": blockers,
+        "no_post_signals": no_post_signals if not counts["done"] else {},
         "all_error_events": events, "error_event_count": len(events),
         "step_outcomes": outcomes,
         "run_url": f"https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/{run_id}",
@@ -218,7 +234,7 @@ def main():
                       "previous_remote_reconciliation_required",
                       "previous_known_nonposted_visual_holds", "previous_other_review_holds",
                       "previous_ambiguous_by_route",
-                      "planning_blocker_counts", "error_event_count", "step_outcomes",
+                      "planning_blocker_counts", "no_post_signals", "error_event_count", "step_outcomes",
                       "state_available")},
                      ensure_ascii=False), flush=True)
     # Do not let an apparently green workflow conceal a completed entry with
