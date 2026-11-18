@@ -15,6 +15,7 @@ from ntfy_notifications import send_ntfy
 from publisher_error_journal import read_errors, record_error
 import publisher_alert_history as alert_history
 from datetime import timedelta
+from datetime import datetime, timezone
 
 STATE_PATH = Path("link-runtime/state.json")
 ALLOWED_STEP_RESULTS = {"success", "failure", "skipped", "cancelled", ""}
@@ -76,6 +77,34 @@ ROUTE_LABELS = {
     "toonzone": "📺 ToonZone",
 }
 PLATFORM_LABELS = {"facebook": "Facebook", "instagram": "Instagram"}
+
+
+def stock_context_for_routes(routes, *, path=None, now=None):
+    """Explain a queue alert using a fresh candidate inventory, never a promise to publish."""
+    path = path or STATE_PATH.with_name("content-stock.json")
+    now = now or datetime.now(timezone.utc)
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        measured = datetime.fromisoformat(payload["measured_at"].replace("Z", "+00:00"))
+        if measured.tzinfo is None or not 0 <= (now - measured).total_seconds() <= 7200:
+            return []
+        accounts = payload["accounts"]
+        if not isinstance(accounts, list):
+            return []
+    except (OSError, ValueError, TypeError, KeyError):
+        return []
+    lines = []
+    for row in accounts:
+        if not isinstance(row, dict) or row.get("route") not in routes:
+            continue
+        route, platform = row.get("route"), row.get("platform")
+        remaining, held = row.get("remaining"), row.get("held")
+        if (platform not in PLATFORM_LABELS or type(remaining) is not int or remaining < 0
+                or type(held) is not int or held < 0):
+            continue
+        lines.append(f"• {ROUTE_LABELS.get(route, route)} / {PLATFORM_LABELS[platform]}: "
+                     f"{remaining} aday, {held} bekleyen. Adaylar hak, kalite ve platform kontrolünden geçmelidir.")
+    return lines[:8]
 
 
 def confirmed_posts(state, run_id):
@@ -279,6 +308,11 @@ def main():
                     + "\n".join(details[:16])
                     + (f"\nDiğer {len(details) - 16} kayıt arşivde." if len(details) > 16 else "")
                     + f"\nhttps://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/{run_id}")
+            queue_routes = {route for route, _platform, reason in grouped
+                            if reason == "no_eligible_content"}
+            stock_lines = stock_context_for_routes(queue_routes) if queue_routes else []
+            if stock_lines:
+                body += "\n📦 İçerik durumu (yalnız aday sayısı):\n" + "\n".join(stock_lines)
             messages = [("🚨 Müdahale gerektiren Meta hataları", body)]
     else:
         messages = [post_message(row, run_id) for row in posts]

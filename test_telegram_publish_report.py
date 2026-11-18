@@ -3,6 +3,7 @@ import json
 import os
 import tempfile
 import unittest
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from unittest.mock import patch, Mock
 
@@ -14,6 +15,31 @@ report.record_error = Mock()
 
 
 class TelegramPublishReportTests(unittest.TestCase):
+    def test_fresh_stock_context_is_candidate_only_and_route_scoped(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "content-stock.json"
+            now = datetime(2026, 11, 18, 12, tzinfo=timezone.utc)
+            path.write_text(json.dumps({"measured_at": now.isoformat(), "accounts": [
+                {"route": "daily_laugh", "platform": "facebook", "remaining": 0, "held": 9},
+                {"route": "penguen", "platform": "instagram", "remaining": 20, "held": 1},
+            ]}), encoding="utf-8")
+            lines = report.stock_context_for_routes({"daily_laugh"}, path=path, now=now)
+            self.assertEqual(len(lines), 1)
+            self.assertIn("0 aday, 9 bekleyen", lines[0])
+            self.assertIn("kontrolünden geçmelidir", lines[0])
+            self.assertNotIn("Penguen", lines[0])
+
+    def test_stale_or_bad_stock_cannot_appear_in_alert(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "content-stock.json"
+            now = datetime(2026, 11, 18, 12, tzinfo=timezone.utc)
+            path.write_text(json.dumps({"measured_at": (now - timedelta(hours=3)).isoformat(),
+                                         "accounts": [{"route": "daily_laugh", "platform": "facebook",
+                                                       "remaining": 0, "held": 9}]}), encoding="utf-8")
+            self.assertEqual(report.stock_context_for_routes({"daily_laugh"}, path=path, now=now), [])
+            path.write_text("not json", encoding="utf-8")
+            self.assertEqual(report.stock_context_for_routes({"daily_laugh"}, path=path, now=now), [])
+
     def test_empty_scheduled_poll_is_silent(self):
         self.assertEqual(
             report.publication_summary({"entries": {}}, "12345"), (None, "nothing_to_report")
