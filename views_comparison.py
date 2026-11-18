@@ -98,6 +98,16 @@ def _baseline(history, account, platform, day, current):
     return value, "ok"
 
 
+def _baseline_stamp(history, account, platform, day):
+    """Actual sample time of the verified account snapshot, not its report day."""
+    for row in reversed(history):
+        if (row.get("account") == account and row.get("platform") == platform
+                and row.get("period") == day and row.get("entity_type") == "account"
+                and row.get("metric") == "snapshot_status" and row.get("status") == "ok"):
+            return _stamp(row.get("measured_at"))
+    return None
+
+
 def build_comparison(snapshot, history, accounts, report_day, measured_at, *, delayed=False):
     """Percentages compare accessible cumulative video totals on exact dates.
 
@@ -121,6 +131,16 @@ def build_comparison(snapshot, history, accounts, report_day, measured_at, *, de
                     "videos": len(current) if valid else None}
             for period, date in dates.items():
                 old, reason = _baseline(history, account, platform, date, current) if valid else (None, "API verisi yok")
+                if delayed and period == "daily" and old is not None:
+                    start, end = _baseline_stamp(history, account, platform, date), _stamp(measured_at)
+                    hours = (end - start).total_seconds() / 3600 if start and end else None
+                    # A delayed scheduled run can still provide a useful
+                    # sample-to-sample difference. Never label it calendar-day
+                    # growth, and refuse long/short or reversed windows.
+                    if hours is not None and 18 <= hours <= 30:
+                        part["sample_window"] = {"baseline": old,
+                                                 "delta": part["total"] - old,
+                                                 "hours": round(hours, 1)}
                 if delayed:
                     old, reason = None, "gecikmeli ölçüm"
                 delta = part["total"] - old if old is not None else None
@@ -189,6 +209,13 @@ def telegram_tables(data):
     second += "\n\n<b>Toplam 7g artış:</b> " + number(data["weekly"]["delta"]) + " (" + percentage(data["weekly"]["percent"]) + ")"
     if unavailable:
         second += "\n\n<b>Haftalık veri durumu:</b>\n" + "\n".join(unavailable)
+    windows = [(row["account"], part["platform"], part["sample_window"])
+               for row in rows for part in row["platforms"] if "sample_window" in part]
+    if windows:
+        second += "\n\n<b>Ölçüm arası fark (takvim günü değil):</b>\n" + "\n".join(
+            f"{html.escape(account)} / {html.escape(platform)}: +{number(window['delta'])}"
+            f" ({str(window['hours']).replace('.', ',')} saat)"
+            for account, platform, window in windows)
     second += "\nArşivde ilk tarih: " + (data.get("archive_first_day") or "N/A")
     leaders = sorted((r for r in rows if r["daily"]["delta"] is not None),
                      key=lambda r: r["daily"]["delta"], reverse=True)
