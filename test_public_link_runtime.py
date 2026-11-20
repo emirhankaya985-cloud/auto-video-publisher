@@ -966,7 +966,8 @@ class LinkRuntimeSafety(unittest.TestCase):
                 # half-hourly runs must not send duplicate phone alerts.
                 runtime.record_error.reset_mock()
                 runtime.plan()
-                runtime.record_error.assert_not_called()
+                runtime.record_error.assert_called_once_with(
+                    "planning_queue", "no_eligible_content", route="toonzone", safe_to_retry=True)
                 self.assertEqual(json.loads((root / "plan.json").read_text()), [])
 
     def test_old_film_binary_http400_is_safely_reconciled_before_one_alternate_retry(self):
@@ -1053,6 +1054,7 @@ class LinkRuntimeSafety(unittest.TestCase):
             self.assertEqual(old["entries"]["film:instagram:vid"]["status"], "uncertain")
             self.assertEqual([c.args[:2] for c in runtime.record_error.call_args_list], [
                 ("previous_intent_hold", "unreconciled_previous_intent"),
+                ("planning_queue", "no_eligible_content"),
                 ("planning_queue", "no_eligible_content"),
             ])
 

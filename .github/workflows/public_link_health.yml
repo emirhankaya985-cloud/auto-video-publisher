@@ -1,6 +1,12 @@
 name: Meta publisher health watchdog
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'public_link_health.py'
+      - 'public_link_runtime.py'
+      - '.github/workflows/public_link_health.yml'
   # At 11:40 TRT, verify real scheduled jobs from the preceding 3 hours.
   # Once daily to avoid repeated phone alerts for the same outage.
   schedule:

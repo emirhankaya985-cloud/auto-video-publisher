@@ -108,7 +108,7 @@ class PublicationResilienceTests(unittest.TestCase):
                              "pending": dict(base, status="uncertain", post_id="222")}}
         self.assertEqual(runtime.ledger_daily_count(state, "gonle", "facebook", "2026-10-27"), 1)
 
-    def test_due_empty_queue_warns_once_per_day_but_not_before_slot_or_during_audit(self):
+    def test_due_empty_queue_journals_every_tick_but_not_before_slot_or_during_audit(self):
         for due, audit, held in ((1, False, False), (1, False, True),
                                  (0, False, True), (1, True, True)):
             with self.subTest(due=due, audit=audit, held=held), tempfile.TemporaryDirectory() as tmp:
@@ -136,8 +136,10 @@ class PublicationResilienceTests(unittest.TestCase):
                     runtime.plan(audit=audit)
                     runtime.plan(audit=audit)
                 if due and not audit:
-                    journal.assert_called_once_with("planning_queue", "no_eligible_content",
-                                                    route="gonle", safe_to_retry=True)
+                    self.assertEqual(journal.call_count, 2)
+                    for event in journal.call_args_list:
+                        self.assertEqual(event.args, ("planning_queue", "no_eligible_content"))
+                        self.assertEqual(event.kwargs, {"route": "gonle", "safe_to_retry": True})
                 else:
                     journal.assert_not_called()
                 self.assertEqual(state["entries"], original_entries)

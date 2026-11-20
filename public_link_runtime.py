@@ -1908,14 +1908,15 @@ def plan(audit=False):
         if selected is None:
             report.append("No eligible unpublished item below the daily target.")
             # An empty/blocked queue below a due target is an operational
-            # deficit, not a successful no-op. Warn once per route/local day;
-            # ordinary NOT DUE and already-complete ticks never reach here.
+            # deficit, not a successful no-op. Journal every due tick;
+            # delivery is deduplicated separately after notification ACK.
+            # Ordinary NOT DUE and already-complete ticks never reach here.
             alert_days = state.setdefault("queue_alert_days", {})
             local_day = clock.date().isoformat()
             # Old publication holds can persist for days and their original
             # notification may already be deduplicated. They must not hide
             # today's missing publications; keep the held records untouched.
-            if not audit and alert_days.get(route) != local_day:
+            if not audit:
                 record_error("planning_queue", "no_eligible_content", route=route,
                              safe_to_retry=True)
                 alert_days[route] = local_day
