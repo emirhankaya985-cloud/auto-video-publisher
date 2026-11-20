@@ -965,7 +965,8 @@ class LinkRuntimeSafety(unittest.TestCase):
                 # The same unresolved old intent must remain blocked, but
                 # half-hourly runs must not send duplicate phone alerts.
                 runtime.record_error.reset_mock()
-                runtime.plan()
+                with patch.object(runtime, "target_count", return_value=4):
+                    runtime.plan()
                 runtime.record_error.assert_called_once_with(
                     "planning_queue", "no_eligible_content", route="toonzone", safe_to_retry=True)
                 self.assertEqual(json.loads((root / "plan.json").read_text()), [])
