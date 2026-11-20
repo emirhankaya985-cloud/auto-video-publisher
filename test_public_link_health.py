@@ -61,7 +61,7 @@ class PublicLinkHealthTests(unittest.TestCase):
             run("2026-10-24T08:07:00Z", event="workflow_dispatch"),
             run("2026-10-24T08:07:00Z", branch="test"),
             run("2026-10-24T08:07:00Z", path=".github/workflows/migration_ci.yml"),
-            run("2026-10-24T04:00:00Z")])
+            run("2026-10-24T03:00:00Z")])
         result = health.check_publisher(now=NOW, token="test", get=get)
         self.assertEqual(result["reason"], "no_recent_scheduled_runs")
 
@@ -124,6 +124,45 @@ class PublicLinkHealthTests(unittest.TestCase):
         self.assertNotIn("BOT-TOKEN-SHOULD-NOT-LEAK", output.getvalue())
         self.assertIn("telegram_failed", output.getvalue())
 
+    def test_repeating_outage_sends_both_channels_each_run_despite_prior_ack(self):
+        for verdict in ({"status": "unhealthy", "reason": "publication_blocked", "blocked_routes": ["penguen"]},
+                        {"status": "unhealthy", "reason": "consecutive_failures", "failed_run_ids": ["100"]}):
+            with patch.object(health, "check_publisher", return_value=verdict), \
+                    patch.object(health, "blocked_route_alerts_acknowledged", return_value=True) as daily, \
+                    patch.object(health.alert_history, "restore") as restore, \
+                    patch.object(health, "telegram_configured", return_value=True), \
+                    patch.object(health, "send_telegram", return_value={"server_ack": True}) as telegram, \
+                    patch.object(health, "send_ntfy", return_value={"server_ack": True}) as ntfy, \
+                    patch.dict(os.environ, {"META_OUTAGE_REPEAT_ALERTS": "true", "CORRELATE_PUBLISHER_ALERTS": "true",
+                                            "NTFY_TOPIC": "mock-topic", "GITHUB_STEP_SUMMARY": ""}), \
+                    redirect_stdout(io.StringIO()):
+                for _ in range(2):
+                    self.assertEqual(health.main(), 1)
+                self.assertEqual(telegram.call_count, 2)
+                self.assertEqual(ntfy.call_count, 2)
+                daily.assert_not_called()
+                restore.assert_not_called()
+
+    def test_repeating_mode_stays_silent_once_healthy(self):
+        with patch.object(health, "check_publisher", return_value={"status": "healthy"}), \
+                patch.object(health, "send_ntfy") as ntfy, \
+                patch.object(health, "send_telegram") as telegram, \
+                patch.dict(os.environ, {"META_OUTAGE_REPEAT_ALERTS": "true", "GITHUB_STEP_SUMMARY": ""}), \
+                redirect_stdout(io.StringIO()):
+            self.assertEqual(health.main(), 0)
+            telegram.assert_not_called()
+            ntfy.assert_not_called()
+
+    def test_overnight_three_hour_gap_is_not_a_missing_schedule_outage(self):
+        verdict = health.check_publisher(now=NOW, token="test", get=fake_get([run("2026-10-24T05:07:00Z")]))
+        self.assertEqual(verdict["status"], "healthy")
+
+    def test_receipt_evidence_keeps_daily_account_blockers_beyond_scheduler_window(self):
+        rows = [run(), run("2026-10-23T12:07:00Z")]
+        with patch.object(health, "check_publication_receipts", return_value={"status": "healthy"}) as receipts:
+            health.check_publisher(now=NOW, token="test", get=fake_get(rows))
+        self.assertEqual(len(receipts.call_args.args[0]), 2)
+
     def test_scoped_daily_ack_correlation_requires_every_blocked_account(self):
         def history(route, day="2026-10-24", ack=True):
             return {"schema": 1, "records": {"a" * 64: {
@@ -178,6 +217,13 @@ class PublicationReceiptTests(unittest.TestCase):
             get=self.receipt_get({"gonle": okay, "penguen": blocked}), headers={})
         self.assertEqual(verdict["status"], "unhealthy")
         self.assertEqual(verdict["confirmed_new_posts_in_latest_receipts"], 2)
+
+    def test_youtube_step_failure_does_not_raise_meta_outage(self):
+        receipt = {"run_id": "123", "confirmed_new_posts": 0,
+                   "planning_blocker_counts": {}, "step_outcomes": {"publish": "success", "youtube_publish": "failure"}}
+        verdict = health.check_publication_receipts([(NOW, {"id": 123, "status": "completed"})],
+            get=self.receipt_get({"penguen": receipt}), headers={})
+        self.assertEqual(verdict["status"], "healthy")
 
     def test_missing_receipts_are_unknown_not_healthy(self):
         verdict = health.check_publication_receipts([(NOW, {"id": 123, "status": "completed"})],

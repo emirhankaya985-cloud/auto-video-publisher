@@ -809,3 +809,10 @@ Run 42103999147: full exact Drive cover plus compact profile created 13739862-by
 
 - Canlı yeniden denetim (20 Kasım14:07TRT): Film44724859643/job136249659379 eski konteynerEXPIRED ve0caption adayı doğruladı; yeni POST0. ToonZone44724859608/job136249737701 S01E04–12 Instagram5/36,31belirsiz; ikinci token dahil38doğrudan GET reddi sürdü. YouTube44724859598/job136249793951 dört kanalın tamamında oauth_refresh_rejected; yükleme0. Bunlar kodla çözülmüş sayılmaz.
 - Aynı gün eski queue_alert_days işaretinin yeni bildirim filtresini atlamaması için her due boşluk ayrı olay kaydına yazılır; mesaj tekilleştirmesi yalnız kalıcı hesap/gün bildirim katmanında kalır. Böylece bugünün eski, hiç gönderilmemiş uyarısı ertesi güne ertelenmez.
+
+
+## 20 Kasım 2026 — Kullanıcının Meta önceliği ve10dakika arıza uyarısı
+
+- Kullanıcı YouTube yetkilerini kendisi üstlendi; Facebook/Instagram yayınları önceliklidir. Kalıcı Meta arızalarında Telegram ve ntfy uyarısı10dakika kontrol aralığında tekrarlanır; günlük ACK bastırması bu açık repeat modunda uygulanmaz. Sağlıklı koşum sessizdir. GitHub cron gecikebilir; kesin dakika garantisi yoktur.
+- Son hesap makbuzları26saat penceresinde denetlenir, YouTube aşamalarının sonucu Meta alarmına karıştırılmaz. API/ölçüm belirsizliği başarı sayılmaz. Bildirim kanallarının gerçek ACK değeri doğrulanır.
+- Kullanıcının acil çalıştırma talebi için yalnız20Kasım ilk denemede yeni eklenen docs/owner-authorized-meta-repair-2026-11-20.md ve ops: authorized-once-meta-repair-2026-11-20 ana dal commit başlığı tek kontrollü due-slot çalıştırmasına izin verir. Mevcut kaynak, kalite, sıra, hash, kimlik ve bilinmeyen POST kilitleri aynıdır;7Meta hesap işçisi bağımsızdır. Marker yeniden çalıştırılamaz; sonraki tarihte audit olur. Sezon2gibi önceki özel kapsam kapıları açılmaz.

@@ -7,10 +7,10 @@ on:
       - 'public_link_health.py'
       - 'public_link_runtime.py'
       - '.github/workflows/public_link_health.yml'
-  # At 11:40 TRT, verify real scheduled jobs from the preceding 3 hours.
-  # Once daily to avoid repeated phone alerts for the same outage.
+  # Owner 20 Nov: repeat unresolved Meta outage alerts every ten minutes.
+  # GitHub may delay cron starts; this is not a hard real-time SLA.
   schedule:
-    - cron: '40 8 * * *'
+    - cron: '*/10 * * * *'
   workflow_dispatch:
 
 permissions:
@@ -37,6 +37,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           CORRELATE_PUBLISHER_ALERTS: true
+          META_OUTAGE_REPEAT_ALERTS: 'true'
           NTFY_TOPIC_URL: ${{ secrets.NTFY_TOPIC_URL }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}

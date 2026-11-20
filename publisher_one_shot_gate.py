@@ -32,6 +32,13 @@ NOV9_CATCHUP_MARKER = "docs/owner-authorized-catchup-2026-11-09.md"
 NOV9_CATCHUP_SUBJECT = "ops: owner-authorized-once-meta-catchup-2026-11-09"
 NOV9_CATCHUP_DATE = "2026-11-09"
 
+# Owner 20 Nov urgent repair: one ordinary due-slot pass across verified routes.
+# This does not override daily targets, serial order, rights or POST dedupe.
+NOV20_REPAIR_MARKER = "docs/owner-authorized-meta-repair-2026-11-20.md"
+NOV20_REPAIR_SUBJECT = "ops: authorized-once-meta-repair-2026-11-20"
+NOV20_REPAIR_DATE = "2026-11-20"
+
+
 # Owner-requested urgent Film Mağarası original Bıçkın 8 recovery.
 # Only an ADDED unique marker commit on 10 November can launch real Meta
 # publishing; failed rechecks may not be rerun as another authorization.
@@ -160,6 +167,18 @@ def is_nov7_catchup_push(event, ref, subject, added_paths, *, today=None, run_at
             and today == NOV7_CATCHUP_DATE and str(run_attempt) == "1")
 
 
+def is_nov20_repair_push(event, ref, subject, added_paths, *, today=None, run_attempt=None):
+    """One newly added owner marker; no recurring or full-day quota release."""
+    if today is None:
+        today = datetime.now(timezone(timedelta(hours=3))).date().isoformat()
+    if run_attempt is None:
+        run_attempt = os.getenv("GITHUB_RUN_ATTEMPT", "1")
+    return (event == "push" and ref == "refs/heads/main"
+            and subject == NOV20_REPAIR_SUBJECT
+            and NOV20_REPAIR_MARKER in added_paths
+            and today == NOV20_REPAIR_DATE and str(run_attempt) == "1")
+
+
 def is_v4_recovery_push(event, ref, subject, added_paths):
     return (event == "push" and ref == "refs/heads/main"
             and subject == IG_V4_SUBJECT
@@ -186,6 +205,7 @@ def determine_mode(event, ref, subject="", added_paths=(), requested_mode="audit
                    or is_today_catchup_push(event, ref, subject, added_paths)
                    or is_nov7_catchup_push(event, ref, subject, added_paths)
                    or is_nov9_catchup_push(event, ref, subject, added_paths)
+                   or is_nov20_repair_push(event, ref, subject, added_paths)
                    or is_film_part8_once(event, ref, subject, added_paths)
                    or is_any_film_ten_once(event, ref, subject, added_paths)
                    or is_film_gap_once(event, ref, subject, added_paths))
