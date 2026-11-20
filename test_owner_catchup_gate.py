@@ -12,6 +12,44 @@ from publisher_one_shot_gate import (
 
 
 class OwnerCatchupGateTests(unittest.TestCase):
+    def test_nov20_repair_requires_exact_new_marker_date_main_and_first_attempt(self):
+        from publisher_one_shot_gate import (
+            NOV20_REPAIR_MARKER, NOV20_REPAIR_SUBJECT, is_nov20_repair_push)
+        good = ("push", "refs/heads/main", NOV20_REPAIR_SUBJECT, [NOV20_REPAIR_MARKER])
+        self.assertTrue(is_nov20_repair_push(*good, today="2026-11-20", run_attempt="1"))
+        for day, attempt in (("2026-11-19", "1"), ("2026-11-21", "1"), ("2026-11-20", "2")):
+            self.assertFalse(is_nov20_repair_push(*good, today=day, run_attempt=attempt))
+        for event, ref, subject, paths in (
+            ("pull_request", good[1], good[2], good[3]),
+            ("push", "refs/heads/other", good[2], good[3]),
+            ("push", good[1], "unrelated commit", good[3]),
+            ("push", good[1], good[2], []),
+        ):
+            self.assertFalse(is_nov20_repair_push(
+                event, ref, subject, paths, today="2026-11-20", run_attempt="1"))
+
+    def test_nov20_added_marker_publishes_but_modified_marker_and_rerun_audit(self):
+        from publisher_one_shot_gate import NOV20_REPAIR_MARKER, NOV20_REPAIR_SUBJECT, main
+        for added, modified, attempt, day, allowed in (
+            (NOV20_REPAIR_MARKER, "", "1", "2026-11-20", "true"),
+            ("", NOV20_REPAIR_MARKER, "1", "2026-11-20", "false"),
+            (NOV20_REPAIR_MARKER, "", "2", "2026-11-20", "false"),
+            (NOV20_REPAIR_MARKER, "", "1", "2026-11-21", "false"),
+        ):
+            with self.subTest(added=added, attempt=attempt, day=day), tempfile.TemporaryDirectory() as tmp:
+                output = Path(tmp) / "output"
+                with patch.dict(os.environ, {"GITHUB_EVENT_NAME": "push", "GITHUB_REF": "refs/heads/main",
+                        "GITHUB_RUN_ATTEMPT": attempt, "GITHUB_OUTPUT": str(output)}, clear=True), \
+                     patch("publisher_one_shot_gate._git", side_effect=[NOV20_REPAIR_SUBJECT, added, modified]), \
+                     patch("publisher_one_shot_gate.datetime") as clock:
+                    clock.now.return_value.date.return_value.isoformat.return_value = day
+                    self.assertEqual(main(), 0)
+                text = output.read_text()
+                self.assertIn("publish_allowed=" + allowed + "\n", text)
+                self.assertIn("recovery_only=false\n", text)
+                self.assertIn("film_ten_parts_once=false\n", text)
+                self.assertIn("film_gap_once=false\n", text)
+
     def test_only_dated_catchup_modified_marker_can_authorize_another_commit(self):
         from publisher_one_shot_gate import main, MARKER
         for modified, subject, attempt, expected in (

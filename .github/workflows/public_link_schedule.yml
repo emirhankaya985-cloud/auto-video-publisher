@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - 'docs/publisher-safe-audit-2026-10-25.md'
+      - 'docs/owner-authorized-meta-repair-2026-11-20.md'
       - 'docs/publisher-one-shot-v2-2026-10-25.md'
       - 'docs/ig-v3-rescue-once-2026-10-26.md'
       - 'docs/ig-v4-compact-publish-once-2026-10-26.md'
@@ -55,6 +56,7 @@ jobs:
         # Scheduled ticks instantiate ONLY route workers for that cron.
         account_scope: >-
           ${{ fromJSON(
+            github.event_name == 'push' && github.event.head_commit.message == 'ops: authorized-once-meta-repair-2026-11-20' && '["tarladaki","penguen","gonle","daily_laugh","film","film_second","toonzone"]' ||
             github.event_name == 'push' && github.event.head_commit.message == 'ops: authorized-once-film-bickin8-2026-11-10' && '["film"]' ||
             github.event_name == 'push' && github.event.head_commit.message == 'ops: authorized-once-en-buyuk-saban-10parts-2026-11-10' && '["film"]' ||
             github.event_name == 'push' && github.event.head_commit.message == 'ops: authorized-once-en-buyuk-saban-10parts-ci-repair-2026-11-10' && '["film"]' ||
