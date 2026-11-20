@@ -15,6 +15,7 @@ from ntfy_notifications import send_ntfy
 from publisher_error_journal import read_errors, record_error
 import publisher_alert_history as alert_history
 from datetime import timedelta
+from zoneinfo import ZoneInfo
 from datetime import datetime, timezone
 
 STATE_PATH = Path("link-runtime/state.json")
@@ -149,9 +150,26 @@ def post_message(row, run_id):
 
 def _prepare_durable(messages, posts, events, state, run_id, *, telegram_on, ntfy_on, base_failures, category):
     now=alert_history.now_utc()
-    history=alert_history.restore()
+    scope = os.getenv("PUBLISH_ACCOUNT_SCOPE", "").strip()
+    if scope in ROUTE_LABELS:
+        history = alert_history.restore(names=(f"link-alert-intent-{scope}", f"link-alert-result-{scope}"))
+    else:
+        history = alert_history.restore()
     before=json.dumps(history,sort_keys=True)
     descriptors=alert_history.incident_descriptors(events)
+    # A persistent account outage remains actionable once per local day.
+    # Retry safety describes whether another POST is safe, not whether the
+    # operator needs to hear about a due slot that published nothing.
+    queue_routes = {ev.get("route") for ev in events
+                    if ev.get("reason") == "no_eligible_content" and ev.get("route") in ROUTE_LABELS}
+    if queue_routes:
+        local_day = now.astimezone(ZoneInfo("Europe/Istanbul")).date().isoformat()
+        descriptors = alert_history.incident_descriptors(
+            [event for event in events if event.get("reason") != "no_eligible_content"])
+        descriptors.update({alert_history.identity("incident", route, extra="queue:" + local_day):
+                            {"kind": "incident", "route": route, "platform": "unknown", "video": "",
+                             "family": "publication_deficit", "local_day": local_day}
+                            for route in sorted(queue_routes)})
     if not descriptors:
         k=alert_history.identity("incident",extra="workflow")
         descriptors={k:{"kind":"incident","route":"workflow","platform":"unknown","video":"","family":"workflow"}}
@@ -290,11 +308,14 @@ def main():
             "intent_validation_failed", "source_content_changed",
             "existing_container_reconciliation_failed", "cover_missing",
             "no_eligible_content", "notification_delivery_failed",
-            "film_part8_source_visually_duplicate",
+            "media_preparation_failed", "source_or_cover_preparation_failed",
+            "visual_duplicate_review", "film_part8_source_visually_duplicate",
         }
         actionable = [ev for ev in events
                       if ev.get("reason") in manual_reasons
-                      and ev.get("retry_policy") != "pre_upload_only"]
+                      and (ev.get("retry_policy") != "pre_upload_only"
+                           or ev.get("reason") in {"no_eligible_content", "media_preparation_failed",
+                               "source_or_cover_preparation_failed", "visual_duplicate_review", "cover_missing"})]
         messages = []
         if actionable or (category == "alert" and not events):
             grouped = Counter((ev.get("route") or "workflow",

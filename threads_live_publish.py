@@ -290,7 +290,7 @@ def prepare(run_id):
         except Exception as exc:
             status[route] = error_label(exc)
     archive.save(HISTORY, archive.validate(history))
-    archive.save(PLAN, {"run_id": run_id, "plans": plans})
+    archive.save(PLAN, {"run_id": run_id, "plans": plans, "routes": status})
     print(json.dumps({"routes": status, "reserved": len(plans), "threads_posts_sent": 0}), flush=True)
 
 
@@ -337,7 +337,11 @@ def execute(run_id):
     data, history = archive.read(PLAN), archive.validate(archive.read(HISTORY))
     if data["run_id"] != run_id:
         raise RuntimeError("threads_intent_run_mismatch")
-    failed = False
+    # Preparation errors belong to their account. Publish healthy reservations
+    # first, then fail the overall result so a revoked token cannot look green.
+    route_errors = {route: status for route, status in data.get("routes", {}).items()
+                    if status not in {"reserved", "no_new_eligible_video", "route_or_rights_disabled"}}
+    failed = bool(route_errors)
     for plan in data["plans"]:
         record = history["records"][plan["key"]]
         if (record["route"] != plan["route"] or record["intent_run_id"] != run_id
@@ -355,6 +359,8 @@ def execute(run_id):
             print(json.dumps({"route": plan["route"], "status": "held",
                               "reason": record["failure"]}), flush=True)
         archive.save(HISTORY, history)
+    if route_errors:
+        print(json.dumps({"status": "account_preparation_failed", "routes": route_errors}), flush=True)
     return int(failed)
 
 

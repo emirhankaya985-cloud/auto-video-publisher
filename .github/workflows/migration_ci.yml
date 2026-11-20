@@ -81,6 +81,14 @@ jobs:
           python -m pip install PyYAML==6.0.2 gdown==6.4.2 pillow==13.0.0
       - name: Python regression tests without production credentials
         run: python migration_985_tests.py
+      - name: Publication outage and recovery regressions without credentials
+        run: >-
+          python -m unittest -v test_public_link_health.py test_telegram_publish_report.py
+          test_publisher_incident_report.py test_publication_resilience.py
+          test_public_link_runtime.py test_film_part17_expired_recovery.py
+          test_film_part17_readonly_reconcile.py test_toonzone_direct_media_verifier.py
+          test_youtube_authorize_channel.py test_youtube_readonly_connection.py
+          test_youtube_account_inventory.py test_threads_live_publish.py
       - name: Daily 23:59 TRT schedule and backup-order regression
         run: python -m unittest -v test_daily_stats_schedule.py
       - name: Scheduler regression tests with mocked APIs

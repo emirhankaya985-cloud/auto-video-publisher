@@ -38,7 +38,10 @@ class YoutubeOauthSetupTests(unittest.TestCase):
                 self.assertEqual(token.read_text(encoding="utf-8"),
                                  '{"refresh_token":"NEW_OFFLINE_REFRESH"}')
                 verify.assert_called_once_with(credentials, "channel1")
-                factory.assert_called_once()
+                factory.assert_called_once_with(str(folder / "client_secrets.json"), scopes=[
+                    "https://www.googleapis.com/auth/youtube.upload",
+                    "https://www.googleapis.com/auth/youtube.readonly",
+                ])
                 self.assertEqual(list(folder.glob(".youtube-token-renew-*")), [])
 
     def test_wrong_channel_renew_keeps_prior_token_and_no_partial_file(self):

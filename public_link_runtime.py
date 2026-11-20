@@ -1556,6 +1556,16 @@ def plan(audit=False):
                 key = f"{route}:{p}:{item['id']}"
                 existing = state["entries"].get(key, {})
                 cap_hash = caption_key(captions[p])
+                if (existing.get("route") == route
+                        and existing.get("platform") == p
+                        and existing.get("file") == item["name"]
+                        and can_advance_past_local_visual_hold(route, existing)):
+                    # A source rejected locally before any Meta POST stays
+                    # quarantined even if its caption also matches old posts.
+                    # Check this before caption ambiguity can stop the queue.
+                    skip_unproven_candidate = True
+                    report.append("QUARANTINE: proven local-only visual duplicate; look for next unique clip.")
+                    continue
                 if (route == "film" and p == "instagram" and existing
                         and existing.get("status") == "uncertain"
                         and existing.get("reconciliation_conflict") == "post_id_belongs_to_other_source"):
@@ -1902,11 +1912,10 @@ def plan(audit=False):
             # ordinary NOT DUE and already-complete ticks never reach here.
             alert_days = state.setdefault("queue_alert_days", {})
             local_day = clock.date().isoformat()
-            unresolved = any(e.get("route") == route and e.get("status") in {"intent", "uncertain"}
-                             for e in state["entries"].values())
-            # Existing unresolved intents have their own daily notification;
-            # do not turn that known hold into a second urgent queue alert.
-            if not audit and not unresolved and alert_days.get(route) != local_day:
+            # Old publication holds can persist for days and their original
+            # notification may already be deduplicated. They must not hide
+            # today's missing publications; keep the held records untouched.
+            if not audit and alert_days.get(route) != local_day:
                 record_error("planning_queue", "no_eligible_content", route=route,
                              safe_to_retry=True)
                 alert_days[route] = local_day

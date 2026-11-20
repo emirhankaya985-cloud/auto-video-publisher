@@ -109,10 +109,16 @@ class PublicationResilienceTests(unittest.TestCase):
         self.assertEqual(runtime.ledger_daily_count(state, "gonle", "facebook", "2026-10-27"), 1)
 
     def test_due_empty_queue_warns_once_per_day_but_not_before_slot_or_during_audit(self):
-        for due, audit in ((1, False), (0, False), (1, True)):
-            with self.subTest(due=due, audit=audit), tempfile.TemporaryDirectory() as tmp:
+        for due, audit, held in ((1, False, False), (1, False, True),
+                                 (0, False, True), (1, True, True)):
+            with self.subTest(due=due, audit=audit, held=held), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
-                state = {"schema": 1, "entries": {}, "episode_days": {}}
+                entries = {"gonle:facebook:old": {
+                    "route": "gonle", "platform": "facebook", "status": "uncertain",
+                    "file": "old.mp4", "caption_hash": "old",
+                }} if held else {}
+                original_entries = json.loads(json.dumps(entries))
+                state = {"schema": 1, "entries": entries, "episode_days": {}}
                 with patch.dict(os.environ, {"GITHUB_RUN_ID": "999", "GITHUB_STEP_SUMMARY": str(root / "summary.md")}), \
                         patch.object(runtime, "ROOT", root), \
                         patch.object(runtime, "STATE", root / "state.json"), \
@@ -134,7 +140,7 @@ class PublicationResilienceTests(unittest.TestCase):
                                                     route="gonle", safe_to_retry=True)
                 else:
                     journal.assert_not_called()
-                self.assertEqual(state["entries"], {})
+                self.assertEqual(state["entries"], original_entries)
 
     def test_account_discovery_recovers_transient_reads_without_posting(self):
         for first in (OSError("private-url"), response({}, 503),

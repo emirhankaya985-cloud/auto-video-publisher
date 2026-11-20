@@ -125,6 +125,47 @@ class LinkRuntimeSafety(unittest.TestCase):
                 self.assertEqual(state["entries"][f"{route}:instagram:old"], old)
                 self.assertNotIn(f"{route}:facebook:old", state["entries"])
 
+    def test_local_visual_hold_with_ambiguous_caption_does_not_starve_fresh_humor(self):
+        from contextlib import ExitStack
+        with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
+            root = Path(tmp)
+            state = {"schema": 1, "episode_days": {}, "entries": {}}
+            for p in ("facebook", "instagram"):
+                state["entries"][f"penguen:{p}:old"] = {
+                    "route": "penguen", "platform": p, "file": "404.mp4",
+                    "caption_hash": runtime.caption_key("reused"), "status": "held",
+                    "failure": {"reason": "visual_duplicate_review", "external_post_attempted": False,
+                                "safe_to_repost": False, "conflicting_platforms": ["facebook", "instagram"]}}
+            old_entries = json.loads(json.dumps(state["entries"]))
+            files = {n: {"id": i, "name": n} for n, i in (("404.mp4", "old"), ("405.mp4", "new"))}
+            replacements = {"ROOT": root, "STATE": root / "state.json", "PLAN": root / "plan.json",
+                            "ROUTES": {"penguen": ("humor", "Beyinsiz Penguen"),
+                                       "tarladaki": ("humor", "Tarladaki Fasulye")},
+                            "FOLDERS": {"humor": "folder"}}
+            for k, v in replacements.items(): stack.enter_context(patch.object(runtime, k, v))
+            stack.enter_context(patch.dict(os.environ, {"PUBLISH_ACCOUNT_SCOPE": "penguen",
+                "GITHUB_RUN_ID": "456", "GITHUB_STEP_SUMMARY": str(root / "summary.md")}))
+            stack.enter_context(patch.object(runtime, "owned_humor_source", return_value=True))
+            stack.enter_context(patch.object(runtime, "restore", return_value=state))
+            stack.enter_context(patch.object(runtime, "apply_verified_migration"))
+            stack.enter_context(patch.object(runtime, "load_meta_auth", return_value={"pages": [
+                {"page_name": "Beyinsiz Penguen", "instagram_id": "ig"},
+                {"page_name": "Tarladaki Fasulye", "instagram_id": "other"}]}))
+            stack.enter_context(patch.object(runtime, "inventory", return_value=files))
+            history = [{"id": str(i), "description": "reused", "caption": "reused",
+                        "created_time": "2026-01-01T12:00:00Z"} for i in (101, 102)]
+            stack.enter_context(patch.object(runtime, "graph_rows", side_effect=lambda page, p:
+                history if page["page_name"] == "Beyinsiz Penguen" else []))
+            stack.enter_context(patch.object(runtime, "target_count", return_value=5))
+            stack.enter_context(patch.object(runtime, "seed_done", return_value=False))
+            stack.enter_context(patch.object(runtime, "copies", side_effect=lambda r, item, f, t:
+                ({"facebook": "reused" if item["id"] == "old" else "fresh",
+                  "instagram": "reused" if item["id"] == "old" else "fresh"}, "matching-txt")))
+            runtime.plan()
+            self.assertEqual([p["id"] for p in json.loads((root / "plan.json").read_text())], ["new"])
+            for key, row in old_entries.items():
+                self.assertEqual(state["entries"][key], row)
+
     def test_film_second_batch_holds_same_caption_from_different_drive_ids(self):
         # Production evidence: Bickin_Part_1.mp4 and Bickin_Part_1 (1).mp4
         # received separate Facebook IDs despite the same caption hash.
@@ -915,9 +956,10 @@ class LinkRuntimeSafety(unittest.TestCase):
                     runtime.plan()
                 self.assertEqual(json.loads((root / "plan.json").read_text()), [])
                 self.assertEqual(caption_mock.call_count, 1)
-                self.assertEqual(runtime.record_error.call_count, 1)
-                self.assertEqual(runtime.record_error.call_args.args[:2],
-                                 ("previous_intent_hold", "unreconciled_previous_intent"))
+                self.assertEqual([c.args[:2] for c in runtime.record_error.call_args_list], [
+                    ("previous_intent_hold", "unreconciled_previous_intent"),
+                    ("planning_queue", "no_eligible_content"),
+                ])
                 state = json.loads((root / "state.json").read_text())
                 self.assertTrue(state["entries"]["toonzone:facebook:a"].get("hold_alerted_at"))
                 # The same unresolved old intent must remain blocked, but
@@ -1009,9 +1051,10 @@ class LinkRuntimeSafety(unittest.TestCase):
                 runtime.plan()
             self.assertEqual(json.loads((root / "plan.json").read_text()), [])
             self.assertEqual(old["entries"]["film:instagram:vid"]["status"], "uncertain")
-            self.assertEqual(runtime.record_error.call_count, 1)
-            self.assertEqual(runtime.record_error.call_args.args[:2],
-                             ("previous_intent_hold", "unreconciled_previous_intent"))
+            self.assertEqual([c.args[:2] for c in runtime.record_error.call_args_list], [
+                ("previous_intent_hold", "unreconciled_previous_intent"),
+                ("planning_queue", "no_eligible_content"),
+            ])
 
     def test_invalid_mp4_codec_metadata_blocks_upload_before_meta(self):
         with patch.object(runtime, "probe", return_value={"streams": [], "format": {"duration": "10"}}):

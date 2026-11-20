@@ -130,6 +130,16 @@ class YouTubeReadOnlyCheckTests(unittest.TestCase):
         self.assertNotIn(AUTH_DATA["refresh_token"], json.dumps(verdict))
         self.assertEqual(verdict["http_status"], 403)
 
+    def test_rejection_retains_only_known_api_reason(self):
+        factory, session = session_for("unused", http_status=403)
+        session.get.return_value.json = lambda: {"error": {"message": "private_token",
+            "errors": [{"reason": "insufficientPermissions"}, {"reason": "private_token"}]}}
+        with patch("youtube_readonly_connection.Credentials.from_authorized_user_info"):
+            verdict = check_channel("channel2", environ={"TOKEN_CHANNEL2_JSON": json.dumps(AUTH_DATA)},
+                                    session_factory=factory)
+        self.assertEqual(verdict["api_reasons"], ["insufficientPermissions"])
+        self.assertNotIn("private_token", json.dumps(verdict))
+
     def test_auth_failure_redacts_private_data(self):
         factory=Mock(side_effect=RuntimeError("private_refresh_token"))
         with patch("youtube_readonly_connection.Credentials.from_authorized_user_info"):

@@ -12,7 +12,7 @@ import tempfile
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import AuthorizedSession
 
-from youtube_readonly_connection import CHANNELS_URL, TARGETS, YOUTUBE_UPLOAD_SCOPE
+from youtube_readonly_connection import CHANNELS_URL, TARGETS, YOUTUBE_AUTH_SCOPES
 
 TOKEN_PATHS = {
     "channel1": "token_channel1.json",
@@ -57,7 +57,7 @@ def authorize(target, *, base_dir=ROOT, renew=False):
         raise FileExistsError("Bu kanalın OAuth token dosyası zaten mevcut; --renew gerekli.")
     if not client_path.is_file():
         raise FileNotFoundError("client_secrets.json yerel OAuth istemcisi bulunamadı.")
-    flow = InstalledAppFlow.from_client_secrets_file(str(client_path), scopes=[YOUTUBE_UPLOAD_SCOPE])
+    flow = InstalledAppFlow.from_client_secrets_file(str(client_path), scopes=list(YOUTUBE_AUTH_SCOPES))
     credentials = flow.run_local_server(host="localhost", port=0, open_browser=True,
                                         access_type="offline", prompt="consent")
     if not credentials.refresh_token:

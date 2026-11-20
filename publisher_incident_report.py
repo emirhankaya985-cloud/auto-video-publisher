@@ -210,6 +210,12 @@ def build_incident_report(state, run_id, *, plan_text="", errors=None, step_outc
     }
 
 
+def blocked_due_publication(summary, *, publishing_allowed=False):
+    """Only a due, exhausted planning pass fails; audit/off-slot no-ops stay valid."""
+    return bool(publishing_allowed and summary.get("confirmed_new_posts", 0) == 0
+                and summary.get("planning_blocker_counts", {}).get("no_eligible_content", 0))
+
+
 def main():
     run_id = os.environ.get("GITHUB_RUN_ID", "")
     state_path = ROOT / "state.json"
@@ -239,6 +245,8 @@ def main():
                      ensure_ascii=False), flush=True)
     # Do not let an apparently green workflow conceal a completed entry with
     # no verifiable platform post ID. Artifact upload steps use always().
+    if blocked_due_publication(summary, publishing_allowed=os.getenv("PUBLISH_ALLOWED") == "true"):
+        raise SystemExit("Due publication blocked: no confirmed new posts; inspect preserved incidents and account alert")
     if summary["unverified_done_entries"]:
         raise SystemExit("Publication evidence anomaly: done entry without post_id")
 
