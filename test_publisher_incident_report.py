@@ -1,10 +1,21 @@
 """Old mistakes stay covered by tests, without exposing private API responses."""
 import unittest
 
-from publisher_incident_report import build_incident_report
+from publisher_incident_report import build_incident_report, blocked_due_publication
 
 
 class IncidentReportTests(unittest.TestCase):
+    def test_due_empty_queue_fails_only_live_publish(self):
+        summary = build_incident_report({'entries': {}}, '300',
+            plan_text='No eligible unpublished item below the daily target.')
+        self.assertTrue(blocked_due_publication(summary, publishing_allowed=True))
+        self.assertFalse(blocked_due_publication(summary, publishing_allowed=False))
+        self.assertFalse(blocked_due_publication(
+            build_incident_report({'entries': {}}, '300', plan_text='NOT DUE'),
+            publishing_allowed=True))
+        summary['confirmed_new_posts'] = 1
+        self.assertFalse(blocked_due_publication(summary, publishing_allowed=True))
+
     def test_zero_post_reasons_stay_distinct_in_artifact(self):
         text = ("QUARANTINE: exact source failed local MP4 preparation in a prior run; no blind media retry.\n"
                 "QUARANTINE: proven local-only visual duplicate; look for next unique clip.\n"

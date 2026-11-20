@@ -19,6 +19,9 @@ TARGETS = {
     "gonle_dusen": ("TOKEN_GONLE_DUSEN_JSON", "Gönle Düşen", "UCvSvo5WghuXqsjwLRmIz22g"),
 }
 YOUTUBE_UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
+YOUTUBE_READONLY_SCOPE = "https://www.googleapis.com/auth/youtube.readonly"
+# channels.list(mine=true) does not accept youtube.upload alone.
+YOUTUBE_AUTH_SCOPES = (YOUTUBE_UPLOAD_SCOPE, YOUTUBE_READONLY_SCOPE)
 CHANNELS_URL = "https://www.googleapis.com/youtube/v3/channels"
 
 
@@ -56,8 +59,19 @@ def check_channel(target, *, environ=None, session_factory=AuthorizedSession):
                                timeout=20, allow_redirects=False)
         if response.status_code != 200:
             code = response.status_code
-            return {"status": "youtube_api_rejected",
-                    "http_status": code if isinstance(code, int) else "unknown"}
+            result = {"status": "youtube_api_rejected",
+                      "http_status": code if isinstance(code, int) else "unknown"}
+            # Fixed allowlist only: provider messages may contain private data.
+            try:
+                error = response.json().get("error", {})
+                reasons = {item.get("reason") for item in error.get("errors", [])
+                           if isinstance(item, dict)}
+                allowed = {"insufficientPermissions", "forbidden", "quotaExceeded",
+                           "dailyLimitExceeded", "authError", "accessNotConfigured"}
+                result["api_reasons"] = sorted(reasons & allowed)
+            except (TypeError, ValueError, AttributeError):
+                pass
+            return result
         payload = response.json()
         items = payload.get("items") if isinstance(payload, dict) else None
         if not isinstance(items, list) or len(items) != 1 or not isinstance(items[0], dict):

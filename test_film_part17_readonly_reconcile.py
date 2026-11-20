@@ -90,6 +90,8 @@ class Film17ReadonlyTests(unittest.TestCase):
         self.assertEqual(result["status"], "uncertain_no_matching_live_caption")
         self.assertFalse(result["reupload_authorized"])
         self.assertIsNone(result["instagram_candidate_post_id"])
+        self.assertEqual(result["next_action"], "normal_publisher_exact_expired_container_gate")
+        self.assertTrue(result["next_action_requires_fresh_live_checks"])
 
     def test_two_caption_matches_remain_ambiguous(self):
         rows = [self.row(), self.row(mid="18198712345670002")]

@@ -60,6 +60,12 @@ def probe_all(*, checker=check_channel):
             code = evidence.get("http_status")
             if type(code) is int and 400 <= code <= 599:
                 item["http_status"] = code
+            reasons = evidence.get("api_reasons")
+            if isinstance(reasons, list):
+                allowed = {"insufficientPermissions", "forbidden", "quotaExceeded",
+                           "dailyLimitExceeded", "authError", "accessNotConfigured"}
+                item["api_reasons"] = sorted(set(r for r in reasons
+                                                if isinstance(r, str)) & allowed)
             failure_kind = safe_failure_kind(evidence)
             if failure_kind is not None:
                 item["failure_kind"] = failure_kind

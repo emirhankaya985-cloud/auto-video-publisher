@@ -118,6 +118,9 @@ jobs:
       # Owner 10 Nov transition: Bickin 8 source duplicates archived Part 3.
       # Preserve all old intents/IDs; select only the complete next film.
       FILM_HANDOFF_TO_EN_BUYUK_SABAN: 'true'
+      # Owner 20 Nov repair: exact expired pre-publish container only; live GET,
+      # source hash, original intent and one-attempt guards remain mandatory.
+      FILM_PART17_EXPIRED_RECOVERY_ENABLED: 'true'
       ENABLE_TOONZONE_ROUTES: ${{ vars.ENABLE_TOONZONE_ROUTES }}
       # Historical env kept for compatibility; owner-approved original PNG
       # is mandatory regardless of this value. Synthetic fallback is disabled.
@@ -361,6 +364,7 @@ jobs:
         # still preserve incident/error artifacts for forensic review.
         env:
           GITHUB_RUN_ID: ${{ github.run_id }}
+          PUBLISH_ALLOWED: ${{ steps.release_gate.outputs.publish_allowed }}
           OUTCOME_PREFLIGHT: ${{ steps.meta_preflight.outcome }}
           OUTCOME_VERIFY: ${{ steps.verify.outcome }}
           OUTCOME_POST_VERIFICATION: ${{ steps.post_verification.outcome }}

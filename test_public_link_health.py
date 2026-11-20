@@ -24,6 +24,12 @@ def fake_get(rows, *, status=200):
 
 
 class PublicLinkHealthTests(unittest.TestCase):
+    def setUp(self):
+        # These tests isolate scheduler checks; receipt parsing has separate tests.
+        patcher = patch.object(health, "check_publication_receipts", return_value={"status": "healthy"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_one_recent_success_is_healthy(self):
         get = fake_get([run()])
         result = health.check_publisher(now=NOW, token="test-token", get=get)
@@ -117,6 +123,73 @@ class PublicLinkHealthTests(unittest.TestCase):
             self.assertEqual(health.main(), 1)
         self.assertNotIn("BOT-TOKEN-SHOULD-NOT-LEAK", output.getvalue())
         self.assertIn("telegram_failed", output.getvalue())
+
+    def test_scoped_daily_ack_correlation_requires_every_blocked_account(self):
+        def history(route, day="2026-10-24", ack=True):
+            return {"schema": 1, "records": {"a" * 64: {
+                "kind": "incident", "route": route, "family": "publication_deficit",
+                "local_day": day, "last_seen": NOW.isoformat(), "resolved": False,
+                "server_acks": ["telegram"] if ack else []}}}
+        with patch.object(health.alert_history, "restore", side_effect=[history("penguen"), history("tarladaki")]) as restore:
+            self.assertTrue(health.blocked_route_alerts_acknowledged(["penguen", "tarladaki"], now=NOW))
+            self.assertEqual(restore.call_args.kwargs["names"], ("link-alert-intent-tarladaki", "link-alert-result-tarladaki"))
+        for stale in (history("penguen", day="2026-10-23"), history("penguen", ack=False)):
+            with patch.object(health.alert_history, "restore", return_value=stale):
+                self.assertFalse(health.blocked_route_alerts_acknowledged(["penguen"], now=NOW))
+        with patch.object(health.alert_history, "restore", side_effect=ValueError("archive unavailable")):
+            self.assertFalse(health.blocked_route_alerts_acknowledged(["penguen"], now=NOW))
+
+
+class PublicationReceiptTests(unittest.TestCase):
+    def receipt_get(self, reports):
+        import zipfile
+        archives = {}
+        artifacts = []
+        for number, (route, receipt) in enumerate(reports.items(), 1):
+            stream = io.BytesIO()
+            with zipfile.ZipFile(stream, "w") as archive:
+                archive.writestr("incidents.json", __import__("json").dumps(receipt))
+            archives[str(number)] = stream.getvalue()
+            artifacts.append({"id": number, "name": "link-incident-report-" + route,
+                              "workflow_run": {"id": 123}, "expired": False})
+        def get(url, **kwargs):
+            result = Mock(status_code=200)
+            if url.endswith("/artifacts"):
+                result.json.return_value = {"artifacts": artifacts}
+            else:
+                result.content = archives[url.split("/")[-2]]
+            return result
+        return get
+
+    def test_green_runs_with_zero_post_blocked_receipt_are_unhealthy(self):
+        receipt = {"run_id": "123", "confirmed_new_posts": 0,
+                   "planning_blocker_counts": {"no_eligible_content": 1},
+                   "step_outcomes": {"publish": "success"}}
+        verdict = health.check_publication_receipts([(NOW, {"id": 123, "status": "completed"})],
+            get=self.receipt_get({"penguen": receipt}), headers={})
+        self.assertEqual(verdict["status"], "unhealthy")
+        self.assertEqual(verdict["blocked_routes"], ["penguen"])
+
+    def test_one_successful_account_cannot_mask_another_blocked_account(self):
+        okay = {"run_id": "123", "confirmed_new_posts": 2,
+                "planning_blocker_counts": {}, "step_outcomes": {"publish": "success"}}
+        blocked = dict(okay, confirmed_new_posts=0, planning_blocker_counts={"no_eligible_content": 1})
+        verdict = health.check_publication_receipts([(NOW, {"id": 123, "status": "completed"})],
+            get=self.receipt_get({"gonle": okay, "penguen": blocked}), headers={})
+        self.assertEqual(verdict["status"], "unhealthy")
+        self.assertEqual(verdict["confirmed_new_posts_in_latest_receipts"], 2)
+
+    def test_missing_receipts_are_unknown_not_healthy(self):
+        verdict = health.check_publication_receipts([(NOW, {"id": 123, "status": "completed"})],
+            get=self.receipt_get({}), headers={})
+        self.assertEqual(verdict["status"], "unknown")
+
+    def test_receipt_from_wrong_run_is_rejected(self):
+        receipt = {"run_id": "999", "confirmed_new_posts": 5,
+                   "planning_blocker_counts": {}, "step_outcomes": {}}
+        verdict = health.check_publication_receipts([(NOW, {"id": 123, "status": "completed"})],
+            get=self.receipt_get({"gonle": receipt}), headers={})
+        self.assertEqual(verdict["status"], "unknown")
 
 
 if __name__ == "__main__":

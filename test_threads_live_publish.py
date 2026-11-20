@@ -7,6 +7,31 @@ import threads_live_publish as live
 
 
 class ThreadsNativeVideoTest(unittest.TestCase):
+    def test_account_prepare_error_fails_after_healthy_reservation_is_published(self):
+        plan = {"key": "healthy", "route": "gonle", "url": "https://a.fbcdn.net/v",
+                "text": "Instagram: verified-source"}
+        history = {"schema": 1, "records": {"healthy": {
+            "route": "gonle", "intent_run_id": "77", "status": "reserved",
+            "marker": "Instagram: verified-source"}}}
+        data = {"run_id": "77", "plans": [plan], "routes": {
+            "gonle": "reserved", "penguen": "read_http_401_code_190",
+            "film": "no_new_eligible_video", "toonzone": "route_or_rights_disabled"}}
+        with patch.dict(live.os.environ, {"THREADS_INTENT_ARCHIVED": "true"}), \
+             patch.object(live.archive, "read", side_effect=[data, history]), \
+             patch.object(live.archive, "validate", side_effect=lambda value: value), \
+             patch.object(live.archive, "save"), patch.object(live, "account_config"), \
+             patch.object(live, "publish", return_value={"post_id": "44", "permalink": "safe"}) as publish:
+            self.assertEqual(live.execute("77"), 1)
+        publish.assert_called_once()
+        self.assertEqual(history["records"]["healthy"]["post_id"], "44")
+
+    def test_no_new_source_is_a_valid_threads_noop(self):
+        data = {"run_id": "77", "plans": [], "routes": {"film": "no_new_eligible_video"}}
+        with patch.dict(live.os.environ, {"THREADS_INTENT_ARCHIVED": "true"}), \
+             patch.object(live.archive, "read", side_effect=[data, {}]), \
+             patch.object(live.archive, "validate", return_value={"records": {}}):
+            self.assertEqual(live.execute("77"), 0)
+
     def setUp(self):
         self.now = datetime(2026, 11, 4, 16, tzinfo=timezone.utc)
         self.account = SimpleNamespace(username="film_magrasi", token="test")

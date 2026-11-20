@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import re
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
@@ -234,6 +235,9 @@ def audit(state, page, *, get=requests.get, secondary_token=None):
             "episodes_4_to_12_missing_or_unverified": 36 - verified_current,
             "episodes_4_to_12": episode_4_to_12_readonly_rollup(output),
             "rows": output, "media_posts_created": 0, "state_mutations": 0,
+            "hold_reason_counts": dict(Counter(
+                row.get("reason", "unknown") for row in output
+                if row.get("status") == "held")),
             "owner_verified": True, "reenqueue_authorized": False,
             "secondary_token_query_enabled": bool(alt_ok),
             "secondary_queries": sum(bool(x.get("secondary_attempted") or x.get("verified_via")) for x in output)}

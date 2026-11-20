@@ -122,6 +122,12 @@ def reconcile(state, page, *, get=None, rows=None):
         "direct_read_failure": direct_failure,
         "old_container_status": container_status,
         "container_read_error": (err or {}).get("reason"),
+        "next_action": (
+            "normal_publisher_exact_expired_container_gate"
+            if container_status == "EXPIRED" and not matches
+            else "preserve_hold_and_reconcile_original_source"
+        ),
+        "next_action_requires_fresh_live_checks": True,
         "original_source_binary_verified_by_meta": False,
         "reupload_authorized": False,
         "recovery_switch_enabled": False,
