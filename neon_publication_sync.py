@@ -14,6 +14,7 @@ import re
 import urllib.error
 import urllib.request
 import zipfile
+from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from urllib.parse import urlsplit
@@ -202,28 +203,41 @@ def artifact_rows(run_id: str, token: str, run: dict) -> list[dict]:
     return list(unique.values())
 
 
-def ingest(conn, rows: list[dict]) -> int:
+def map_account_rows(rows: list[dict], account_pairs: list[tuple]) -> tuple[list[tuple], int]:
+    by_key = defaultdict(list)
+    for account_id, source_key in account_pairs:
+        by_key[source_key].append(account_id)
+    mapped, skipped = [], 0
+    for row in rows:
+        ids = by_key.get(row["source_key"], [])
+        if len(ids) != 1:
+            skipped += 1
+            continue
+        mapped.append((ids[0], row))
+    return mapped, skipped
+
+
+def ingest(conn, rows: list[dict]) -> tuple[int, int]:
     inserted = 0
+    mapping_skipped = 0
     with conn.transaction(), conn.cursor() as cur:
         cur.execute("SELECT current_database()")
         if cur.fetchone()[0] != "neondb":
             raise ValueError("wrong_neon_database")
-        for row in rows:
-            cur.execute("""SELECT id FROM social_accounts
-                WHERE source_key=%s AND status='ok'
-                  AND platform_account_id IS NOT NULL""", (row["source_key"],))
-            matches = cur.fetchall()
-            if len(matches) != 1:
-                raise ValueError("publication_account_mapping_unavailable")
+        source_keys = sorted({row["source_key"] for row in rows})
+        cur.execute("SELECT id,source_key FROM social_accounts WHERE source_key=ANY(%s)",
+                    (source_keys,))
+        mapped, mapping_skipped = map_account_rows(rows, cur.fetchall())
+        for account_id, row in mapped:
             cur.execute("""INSERT INTO publication_events(
                     account_id, platform_post_id, content_ref, status, occurred_at, details)
                 VALUES (%s,%s,%s,'published',%s,%s::jsonb)
                 ON CONFLICT (account_id, platform_post_id) DO NOTHING""", (
-                matches[0][0], row["platform_post_id"], row["content_ref"],
+                account_id, row["platform_post_id"], row["content_ref"],
                 row["occurred_at"], json.dumps(row["details"], sort_keys=True),
             ))
             inserted += cur.rowcount
-    return inserted
+    return inserted, mapping_skipped
 
 
 def main() -> int:
@@ -245,16 +259,18 @@ def main() -> int:
         if not rows:
             print(json.dumps({"status": "synced", "source_run_id": run_id,
                               "verified_receipts": 0, "inserted": 0,
+                              "mapping_skipped": 0,
                               "timestamp_missing_historical_rows_imported": 0}, sort_keys=True))
             return 0
         import psycopg
         conn = psycopg.connect(db_url, connect_timeout=10, sslmode="require")
         try:
-            inserted = ingest(conn, rows)
+            inserted, mapping_skipped = ingest(conn, rows)
         finally:
             conn.close()
         print(json.dumps({"status": "synced", "source_run_id": run_id,
                           "verified_receipts": len(rows), "inserted": inserted,
+                          "mapping_skipped": mapping_skipped,
                           "timestamp_missing_historical_rows_imported": 0}, sort_keys=True))
         return 0
     except Exception as exc:

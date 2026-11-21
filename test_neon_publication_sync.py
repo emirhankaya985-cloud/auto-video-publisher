@@ -1,6 +1,6 @@
 import unittest
 
-from neon_publication_sync import SOURCE_KEYS, receipt_rows
+from neon_publication_sync import SOURCE_KEYS, map_account_rows, receipt_rows
 
 
 class PublicationReceiptTests(unittest.TestCase):
@@ -36,6 +36,16 @@ class PublicationReceiptTests(unittest.TestCase):
         self.assertNotEqual(SOURCE_KEYS[("film", "facebook")],
                             SOURCE_KEYS[("film_second", "facebook")])
         self.assertNotIn(("film_second", "instagram"), SOURCE_KEYS)
+
+    def test_missing_account_mapping_skips_only_that_account(self):
+        rows = [
+            {"source_key": SOURCE_KEYS[("gonle", "instagram")], "platform_post_id": "11"},
+            {"source_key": SOURCE_KEYS[("penguen", "facebook")], "platform_post_id": "22"},
+        ]
+        mapped, skipped = map_account_rows(rows, [(7, rows[0]["source_key"])])
+        self.assertEqual([(account_id, row["platform_post_id"]) for account_id, row in mapped],
+                         [(7, "11")])
+        self.assertEqual(skipped, 1)
 
 
 if __name__ == "__main__":
