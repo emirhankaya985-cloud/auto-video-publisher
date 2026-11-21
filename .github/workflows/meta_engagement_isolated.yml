@@ -40,6 +40,10 @@ jobs:
       SOURCE_RUN_ID: latest
       ENGAGEMENT_SCOPE: recent_window
       ENGAGEMENT_MODE: dry_run
+      # A scheduled diagnostic may race a publisher run. Missing source
+      # evidence is a read-only no-op here; the live engagement workflow
+      # remains fail-closed and no action plan or POST is created.
+      ENGAGEMENT_SOURCE_NOT_READY_IS_OK: 'true'
       GITHUB_EVENT_NAME: workflow_dispatch
       META_AUDIT_FOCUS: ${{ matrix.focus }}
       META_CROSS_ENGAGEMENT_ENABLED: 'false'
