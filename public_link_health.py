@@ -110,6 +110,8 @@ def check_publication_receipts(recent, *, get, headers):
                 platform = item.get("platform")
                 if platform in {"facebook", "instagram"}:
                     affected_platforms.add(platform)
+                elif platform == "unknown":
+                    affected_platforms.add("unknown")
             posts += count
             if (receipt.get("state_available") is False
                     or any(type(value) is int and value > 0 for value in blockers.values())
@@ -117,6 +119,8 @@ def check_publication_receipts(recent, *, get, headers):
                            if key in {"preflight", "verify", "plan", "publish", "post_verification", "notify"})
                     or receipt.get("unverified_done_entries", 0)):
                 blocked.append(route)
+                if any(type(value) is int and value > 0 for value in blockers.values()):
+                    affected_platforms.add("unknown")
                 platform_evidence[route] = sorted(affected_platforms) or ["unknown"]
         return {"status": "unhealthy" if blocked else "healthy",
                 "reason": "publication_blocked" if blocked else "publication_receipts_checked",
