@@ -1014,6 +1014,31 @@ def safe_hold_reason(exc):
     return "read_or_runtime_failure"
 
 
+def readonly_source_not_ready(exc):
+    """Whether a dry-run health scan merely raced the publisher schedule.
+
+    This is safe to treat as a no-op only in the dedicated read-only
+    diagnostics workflow. The live engagement workflow remains fail-closed.
+    """
+    return (type(exc) is ValueError
+            and str(exc) in {"no recent completed publisher run",
+                             "source result unavailable"})
+
+
+def mark_source_not_ready_report():
+    """Label a read-only schedule race as unavailable evidence, not a hold."""
+    report = {}
+    try:
+        prior = json.loads(REPORT.read_text(encoding="utf-8"))
+        if isinstance(prior, dict):
+            report = prior
+    except (OSError, ValueError):
+        pass
+    report.update(runtime_status="source_not_ready", writes_retried=False,
+                  engagement_posts_sent=0)
+    save(REPORT, report)
+
+
 def preserve_failed_audit(exc):
     """Keep an actionable, redacted report even when planning fails early.
 
@@ -1041,6 +1066,13 @@ if __name__ == "__main__":
     except Exception as exc:
         # Keep a redacted audit artifact; do not convert any failure to success.
         reason = preserve_failed_audit(exc)
+        if (os.getenv("ENGAGEMENT_SOURCE_NOT_READY_IS_OK") == "true"
+                and os.getenv("ENGAGEMENT_MODE") == "dry_run"
+                and readonly_source_not_ready(exc)):
+            mark_source_not_ready_report()
+            print(json.dumps({"status": "source_not_ready", "reason_code": reason,
+                              "writes_retried": False, "engagement_posts_sent": 0}))
+            raise SystemExit(0) from None
         print(json.dumps({"status": "held", "reason_code": reason,
                           "error_type": type(exc).__name__, "writes_retried": False}))
         raise SystemExit(1) from None

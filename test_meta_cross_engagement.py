@@ -66,6 +66,28 @@ class EngagementTests(unittest.TestCase):
                 self.assertNotIn("private access token", report_text)
                 self.assertEqual(json.loads(report_text)["planned"], 0)
 
+    def test_only_readonly_source_race_is_eligible_for_nonfatal_diagnostic(self):
+        self.assertTrue(m.readonly_source_not_ready(
+            ValueError("source result unavailable")))
+        self.assertTrue(m.readonly_source_not_ready(
+            ValueError("no recent completed publisher run")))
+        self.assertFalse(m.readonly_source_not_ready(
+            ValueError("invalid or stale source run")))
+        self.assertFalse(m.readonly_source_not_ready(
+            RuntimeError("Meta account access denied")))
+
+    def test_source_not_ready_marker_preserves_report_without_claiming_success(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            destination = Path(tmp) / "report.json"
+            destination.write_text('{"planned": 0}', encoding="utf-8")
+            with patch.object(m, "REPORT", destination):
+                m.mark_source_not_ready_report()
+            report = json.loads(destination.read_text(encoding="utf-8"))
+        self.assertEqual(report["runtime_status"], "source_not_ready")
+        self.assertFalse(report["writes_retried"])
+        self.assertEqual(report["engagement_posts_sent"], 0)
+        self.assertEqual(report["planned"], 0)
+
     def setUp(self):
         p = patch.object(m, "account_enabled", return_value=True)
         p.start()
