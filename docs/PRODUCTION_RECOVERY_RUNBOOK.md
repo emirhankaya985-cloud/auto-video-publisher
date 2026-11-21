@@ -841,3 +841,9 @@ Run 42103999147: full exact Drive cover plus compact profile created 13739862-by
 - **Kanıt:** Post-merge watchdog [44941176392](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/44941176392) gerçek `publication_blocked` durumunu ve beş engelli route'u buldu; dört yeni post makbuzu vardı. JSON, route'ları listelese de mevcut incidents/error events içindeki Facebook/Instagram kanıtını alarma taşımıyordu. Bu, yanlış sağlık sonucu değil, platform ayrıntısı eksikliğiydi.
 - **Güvenli aksiyon:** Yalnız izinli `facebook`/`instagram` etiketlerini o route'un doğrulanmış incident/error event kayıtlarından ekle; kanıt yoksa `unknown` göster. YouTube/Threads hatalarını Meta sonucu gibi sınıflandırma. `healthy` eşiğini değiştirme.
 - **Test:** Makbuzdaki aynı route'un iki izinli platformunu listele; diğer route'u ve desteklenmeyen platform adını dışla; platform kanıtı eksikse `unknown`. Bu raporlama değişikliği paylaşım, secret veya DB yazımı yapmaz.
+
+## 21 Kasım 2026 — hesap genelindeki kuyruk engeli platform atfetmemeli
+
+- **Kanıt:** Post-merge watchdog [44943156727](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/44943156727) platform detayını ekledi. Güncel makbuzdaki `no_eligible_content` route/account kapsamındaydı; bu nedenle platformlara özgü bir hata olarak yorumlanamaz.
+- **Güvenli aksiyon:** Platform bazlı ve hesap-genel nedenleri birlikte göster. Hesap-genel blocker varsa `unknown` platform etiketini koru; bilinen Facebook/Instagram olaylarını da ayrıca listele. Sağlık eşiği ve alarm durumu değişmez.
+- **Test:** Route'a ait platform incident'leri yanında account-level blocker geldiğinde bilinmeyen kapsam da gösterilmeli. Yeni kod sosyal yazım veya durum sıfırlama yapmaz.

@@ -246,7 +246,8 @@ class PublicationReceiptTests(unittest.TestCase):
                    ]}
         verdict = health.check_publication_receipts([(NOW, {"id": 123, "status": "completed"})],
             get=self.receipt_get({"penguen": blocked}), headers={})
-        self.assertEqual(verdict["blocked_platforms"], {"penguen": ["facebook", "instagram"]})
+        self.assertEqual(verdict["blocked_platforms"], {
+            "penguen": ["facebook", "instagram", "unknown"]})
 
     def test_blocked_account_without_platform_evidence_is_unknown(self):
         receipt = {"run_id": "123", "confirmed_new_posts": 0,
