@@ -1,1 +1,2430 @@
-"""Meta-only publishing from the owner's shared links, without Drive OAuth.\n\nThe workflow persists its complete intent before uploading any media. An\nuncertain publication is held for reconciliation, never blindly retried.\n"""\nfrom __future__ import annotations\n\nimport argparse\nimport hashlib\nimport io\nimport json\nimport os\nimport re\nimport time\nimport tempfile\nimport zipfile\nfrom types import SimpleNamespace\nfrom datetime import datetime, timezone\nfrom pathlib import Path\nfrom zoneinfo import ZoneInfo\n\nimport gdown\nimport requests\n\nfrom cloud_omnichannel_publisher import (\n    GRAPH_API_VERSION, MetaAPIError, create_instagram_cover_video,\n    upload_facebook_reel, upload_instagram_reel, _sanitize_meta_text,\n)\nfrom instagram_media_compat import prepare_instagram_upload, probe\nfrom toonzone_cover_fallback import generate_part_cover\nfrom content_hashtags import prepare_caption\nfrom account_fixed_txt import selected_txt, verify_text\nfrom instagram_tagging import enhance_instagram_caption\nfrom publisher_error_journal import record_error\nfrom expired_ig_container_recovery import (\n    authorize_exact_expired_recovery, authorize_film_part17_expired_recovery,\n    terminal_recovery_reserved,\n)\nfrom meta_auth_loader import load_meta_auth\nfrom ordered_channels import TOONZONE_ETSY_LINK, parse_order, toonzone_metadata\nfrom publication_safety import route_paused\nfrom publisher_recovery import (\n    read_with_retry, classify_meta_failure, known_pre_publish_media_rejection,\n)\nfrom scheduled_multi_publisher import (\n    platform_content_from_txt, TARLADAKI_HOURS, PENGUEN_HOURS,\n    GONLE_HOURS, FILM_HOURS, daily_laugh_hours_for_date,\n)\n\nTR = ZoneInfo("Europe/Istanbul")\nROOT = Path("link-runtime")\nSTATE = ROOT / "state.json"\nPLAN = ROOT / "plan.json"\nFOLDERS = {\n    "humor": "11zbrunHoiTZyJ8JDsj99ascO66mmCj-M",\n    "gonle": "1OA-qvfBEcCKBCTSMj4dCz8rg2p6t0aKt",\n    "daily_laugh": "137--TeBht1yikZpMfV9VSEADbKuXZtLT",\n    "film": "1NvEuGQ83BmCMrzdK6ziI1nC_0zzshqJW",\n    "toonzone": "14ee4AnUdf03dYUAdtfpHa-E9Zxyh4UZF",\n    "covers": "1YlGz6rKfW_S2eMW82zOs09flCGtwYWMO",\n}\nROUTES = {\n    "tarladaki": ("humor", "Tarladaki Fasulye"),\n    "penguen": ("humor", "Beyinsiz Penguen"),\n    "gonle": ("gonle", "Gönle Düşen"),\n    "daily_laugh": ("daily_laugh", "Daily Laugh Lab"),\n    "film": ("film", "Film Mağarası"),\n    "film_second": ("film", "Filmmagrasi"),\n    "toonzone": ("toonzone", "ToonZone"),\n}\n\n\n\nACCOUNT_SCOPES = frozenset(ROUTES)\n\n\ndef account_scope():\n    """Explicit account identity for isolated jobs; unknown values fail closed."""\n    scope = os.getenv("PUBLISH_ACCOUNT_SCOPE", "").strip()\n    if scope and scope not in ACCOUNT_SCOPES:\n        raise RuntimeError("Unrecognized isolated publisher account")\n    return scope\n\n\ndef owned_humor_source(route, file_id):\n    """Stable disjoint ownership of shared humor Drive sources across workers."""\n    if route not in {"tarladaki", "penguen"}:\n        raise ValueError("Only humor routes have shared source ownership")\n    bucket = int(hashlib.sha256(str(file_id).encode()).hexdigest(), 16) % 2\n    return bucket == (0 if route == "tarladaki" else 1)\n\n\ndef save(path, value):\n    path.parent.mkdir(parents=True, exist_ok=True)\n    if path == STATE and isinstance(value, dict) and isinstance(value.get("entries"), dict):\n        # Rebuild on every state write, including after a successful Meta POST.\n        # Persist in the SAME link-state-result/intent artifact so subsequent\n        # GitHub runners resume from verified IDs, not an in-memory counter.\n        # Unordered Daily Laugh is deliberately excluded from serial cursor.\n        from serial_publication_cursor import derive_serial_cursor\n        value["serial_cursor"] = derive_serial_cursor(value)\n    path.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")\n\n\ndef preflight_verified_pages():\n    """Read the preflight identity allowlist; never infer permission from absence."""\n    if os.getenv("META_PREFLIGHT_PARTIAL_OK", "false").lower() != "true":\n        return None\n    path = Path(os.getenv("META_PREFLIGHT_REPORT_PATH",\n                          "link-runtime/meta-preflight.json"))\n    try:\n        payload = json.loads(path.read_text(encoding="utf-8"))\n        names = payload["verified_pages"]\n        if (payload.get("schema") != 1\n                or payload.get("status") not in {"identity_verified", "partial_identity_verified"}\n                or not isinstance(names, list) or not names\n                or any(not isinstance(n, str) or n not in ROUTES_PAGE_NAMES for n in names)\n                or len(set(names)) != len(names)):\n            raise ValueError("invalid account allowlist")\n        return set(names)\n    except (OSError, KeyError, TypeError, ValueError) as exc:\n        raise RuntimeError("Meta preflight evidence is unavailable or invalid") from None\n\n\nROUTES_PAGE_NAMES = frozenset(page for _, page in ROUTES.values())\n\n\ndef caption_key(value):\n    value = re.sub(r"https://www\.etsy\.com/\S+", "", value or "")\n    value = re.sub(r"\bEtsy:\s*", "", value, flags=re.I)\n    return hashlib.sha256(" ".join(value.split()).encode()).hexdigest()\n\n\n# Proven in production job logs and the 30 Oct GET-only diagnostic. Binding\n# includes the exact old intent, source and text hash; no heuristic association.\n_LEGACY_IG_CONTAINERS = {\n    ("film", "1Zn8kYmexuUe3z1EKLtCrKFCwj4qVnIa2"): (\n        "Avanak_Apti_Part_10 (1).mp4", "41036563337", "17904577569599675",\n        "d7bfd2238b0de47372e0536e61c79545049346aa56a7a75b0d5e707a342d1417",\n        "1239298989276639", "17841477990224124"),\n    ("toonzone", "1rdn35OLH8Sh4IAxSMTkErVxHLb2MX9Ic"): (\n        "S01E07_Grilled_Cheese_Deluxe_Part3.mp4", "41049898379", "17910279864580142",\n        "15e8f8d4715275c7ecaa8797b261a8ab4346853414f60aa6a54bf1385ff9e46e",\n        "1298191963387372", "17841477404255851"),\n}\n\n\ndef bind_legacy_ig_container(route, platform, item, entry, page, *, allow_reserved=False):\n    if terminal_recovery_reserved(route, platform, item, entry):\n        return None\n    proof = _LEGACY_IG_CONTAINERS.get((route, item["id"]))\n    if platform != "instagram" or not proof or entry.get("status") == "done":\n        return None\n    name, origin, container, cap_hash, page_id, ig_id = proof\n    binding = {"container_id": container, "origin_run_id": origin,\n               "caption_hash": cap_hash, "source_id": item["id"]}\n    prior = entry.get("failure", {})\n    valid = (item["name"] == name and entry.get("file") == name\n             and entry.get("route") == route and entry.get("platform") == platform\n             and entry.get("caption_hash") == cap_hash\n             and caption_key(entry.get("publish_caption")) == cap_hash\n             and str(page.get("page_id")) == page_id\n             and str(page.get("instagram_id")) == ig_id\n             and not entry.get("container_publish_attempted")\n             and ((entry.get("run_id") == origin\n                   and prior.get("stage") == "Instagram ikili video aktarımı"\n                   and prior.get("http_status") == 400)\n                  or (entry.get("container_resume") == binding\n                      and (entry.get("resume_no_publish_confirmed") is True\n                           or (allow_reserved and entry.get("status") == "intent"\n                               and entry.get("run_id") == os.getenv("GITHUB_RUN_ID"))))))\n    # Known containers can never fall back to another binary upload, even if\n    # the source/text proof becomes unavailable or a publish became ambiguous.\n    entry["status"] = "uncertain"\n    entry["failure"] = dict(prior, container_id=container, container_status="UNVERIFIED")\n    if not valid:\n        return None\n    entry["container_resume"] = binding\n    entry["failure"] = dict(prior, container_id=container, container_status="UNVERIFIED")\n    entry["status"] = "ready"\n    return container\n\n\ndef publish_existing_ig_intent(item, page, state):\n    from cloud_omnichannel_publisher import resume_instagram_container\n    if item["platforms"] != ["instagram"]:\n        raise RuntimeError("Existing container recovery requires Instagram-only intent")\n    key = f"{item['route']}:instagram:{item['id']}"\n    entry = state["entries"][key]\n    container = item["resume_container_id"]\n    if entry.get("container_resume", {}).get("container_id") != container:\n        raise RuntimeError("Existing container intent mismatch")\n    # Re-check the complete immutable binding after the persisted plan.\n    check = dict(entry)\n    if bind_legacy_ig_container(item["route"], "instagram", item, check, page, allow_reserved=True) != container:\n        raise RuntimeError("Existing container proof changed")\n    entry["status"] = "uncertain"\n    save(STATE, state)\n    def reserve_publish():\n        entry["container_publish_attempted"] = True\n        entry.pop("resume_no_publish_confirmed", None)\n        save(STATE, state)\n    post = resume_instagram_container(page, container, reserve_publish)\n    if not post:\n        entry["resume_no_publish_confirmed"] = True\n        record_error("previous_intent_hold", "unreconciled_previous_intent",\n                     route=item["route"], platform="instagram", video=item["name"], status="uncertain")\n        save(STATE, state)\n        return False\n    entry.update(status="done", post_id=str(post),\n                 published_at_utc=datetime.now(timezone.utc).isoformat(),\n                 publication_run_id=os.getenv("GITHUB_RUN_ID", ""))\n    entry.pop("failure", None)\n    save(STATE, state)\n    print(json.dumps({"page": item["page"], "file": item["name"], "platform": "instagram",\n                      "post_id": str(post), "reused_container": container}, ensure_ascii=False), flush=True)\n    return True\n\n\ndef github_get(path):\n    repo = os.environ["GITHUB_REPOSITORY"]\n    response = read_with_retry(\n        requests.get, f"https://api.github.com/repos/{repo}/{path}",\n        headers={"Authorization": f"Bearer {os.environ['GH_TOKEN']}"}, timeout=30,\n    )\n    if response.status_code != 200:\n        raise RuntimeError(f"GitHub durum kaydı okunamadı: HTTP {response.status_code}")\n    return response\n\n\ndef restore():\n    """Newest run's result wins; otherwise its pre-upload intent is authoritative."""\n    def artifact_list(name):\n        payload = github_get(f"actions/artifacts?per_page=100&name={name}").json()\n        if not isinstance(payload, dict) or not isinstance(payload.get("artifacts"), list):\n            raise RuntimeError("GitHub durum listesi geçersiz; otomatik sıfırlama yapılmadı")\n        return payload["artifacts"]\n    scope = account_scope()\n    # A worker reads ONLY its own last result/intent. The legacy global\n    # archive is consulted once during migration, never after scoped evidence\n    # exists. A sibling's newer job cannot erase this account's pending intent.\n    suffix = "-" + scope if scope else ""\n    artifacts = artifact_list("link-state-result" + suffix)\n    intents = artifact_list("link-state-intent" + suffix)\n    if scope and not (artifacts or intents):\n        artifacts = artifact_list("link-state-result")\n        intents = artifact_list("link-state-intent")\n    rows = [x for x in artifacts + intents if not x.get("expired")]\n    if not rows:\n        if artifacts or intents:\n            raise RuntimeError("Önceki durum kaydının süresi dolmuş; otomatik sıfırlama yapılmadı")\n        return {"schema": 1, "entries": {}, "episode_days": {}}\n    rows.sort(key=lambda x: (int(x["workflow_run"]["id"]), x["name"] == "link-state-result"), reverse=True)\n    response = github_get(f"actions/artifacts/{rows[0]['id']}/zip")\n    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:\n        names = [name for name in archive.namelist() if name.endswith("state.json")]\n        if len(names) != 1:\n            raise RuntimeError("Önceki durum arşivi geçersiz; otomatik sıfırlama yapılmadı")\n        state = json.loads(archive.read(names[0]))\n    if state.get("schema") != 1 or not isinstance(state.get("entries"), dict):\n        raise RuntimeError("Önceki yayın durumu geçersiz")\n    return state\n\n\ndef inventory(folder):\n    # Drive folder metadata is a read-only operation; retry transient failures.\n    files = None\n    for attempt in range(3):\n        try:\n            files = gdown.download_folder(id=folder, skip_download=True, quiet=True,\n                                         use_cookies=False, timeout=40)\n            if files is not None:\n                break\n        except Exception:\n            if attempt == 2:\n                raise\n        if attempt < 2:\n            time.sleep(2 ** attempt)\n    if files is None:\n        raise RuntimeError("Paylaşılan Drive klasör listesi 3 denemede alınamadı")\n    result, ambiguous = {}, set()\n    for item in files:\n        if len(Path(item.path).parts) != 1:\n            continue\n        name = Path(item.path).name\n        # Exclude recursive child folders: they must use their own approved source.\n        if name in result and result[name]["id"] != item.id:\n            if folder != FOLDERS["daily_laugh"]:\n                raise RuntimeError("Aynı adlı birden çok Drive dosyası bulundu")\n            ambiguous.add(name)\n        result[name] = {"id": item.id, "name": name}\n    for name in ambiguous:\n        result.pop(name, None)\n    if not result:\n        raise RuntimeError("Paylaşılan klasör boş veya erişilemiyor")\n    return result\n\n\ndef direct_public_drive(file_id, path, *, get=None):\n    """Read-only alternate path for gdown FileURLRetrievalError; fail closed.\n\n    Downloads only files identified by the existing, verified Drive inventory.\n    Never follows a non-Google final URL, accepts an HTML confirmation page,\n    writes credentials, or touches a Meta upload/publish endpoint.\n    """\n    from urllib.parse import urlsplit\n\n    if (not isinstance(file_id, str)\n            or not re.fullmatch(r"[A-Za-z0-9_-]{20,128}", file_id)\n            or path.suffix.lower() not in {".mp4", ".png", ".txt"}):\n        return None\n    get = get or requests.get\n    partial = path.with_name(path.name + ".partial")\n    response = None\n    try:\n        response = get(\n            "https://drive.usercontent.google.com/download",\n            params={"id": file_id, "export": "download", "confirm": "t"},\n            timeout=(10, 60), allow_redirects=True, stream=True,\n            headers={"Accept": "application/octet-stream"},\n        )\n        final = urlsplit(str(getattr(response, "url", "")))\n        host = (final.hostname or "").lower()\n        if (final.scheme != "https" or\n                host not in {"drive.usercontent.google.com", "drive.google.com"}\n                and not host.endswith(".googleusercontent.com")):\n            raise ValueError("Untrusted Drive redirect")\n        if response.status_code != 200:\n            raise ValueError("Drive response not downloadable")\n        content_type = str(response.headers.get("Content-Type", "")).lower()\n        if any(t in content_type for t in ("text/html", "application/json", "text/xml", "application/xml")):\n            raise ValueError("Drive confirmation or error page")\n        length = response.headers.get("Content-Length")\n        expected = int(length) if length is not None else None\n        if expected is not None and (expected <= 0 or expected > 600_000_000):\n            raise ValueError("Unsafe Drive download length")\n        size = 0\n        head = b""\n        with partial.open("wb") as out:\n            for chunk in response.iter_content(chunk_size=65536):\n                if not chunk:\n                    continue\n                size += len(chunk)\n                if size > 600_000_000:\n                    raise ValueError("Drive download size exceeded")\n                if len(head) < 128:\n                    head = (head + chunk)[:128]\n                out.write(chunk)\n        if not size or (expected is not None and size != expected):\n            raise ValueError("Empty or incomplete Drive download")\n        if head.lstrip().lower().startswith((b"<!doctype html", b"<html", b"<?xml")):\n            raise ValueError("Drive returned an HTML page")\n        if path.suffix.lower() == ".mp4" and head[4:8] != b"ftyp":\n            raise ValueError("Downloaded file is not MP4")\n        if path.suffix.lower() == ".png" and not head.startswith(b"\x89PNG\r\n\x1a\n"):\n            raise ValueError("Downloaded file is not PNG")\n        partial.replace(path)\n        return path\n    except Exception:\n        # No untrusted provider URLs, exception bodies or file IDs in logs.\n        return None\n    finally:\n        if response is not None:\n            try:\n                response.close()\n            except Exception:\n                pass\n        if partial.exists():\n            partial.unlink()\n\n\ndef download(file_id, path):\n    """Retry transient read-only Drive transfers before touching Meta.\n\n    Never return partial files; exhaust retries rather than reusing corrupted\n    content. The publication intent ledger still controls all Meta retries.\n    """\n    failures = []\n    for attempt in range(3):\n        try:\n            # A stale Drive confirmation cookie can poison every retry in the\n            # same runner. Keep the first established path, then use a clean\n            # public-link session instead of repeating the identical request.\n            result = gdown.download(id=file_id, output=str(path), quiet=True,\n                                    use_cookies=(attempt == 0), timeout=40)\n            if result and path.is_file() and path.stat().st_size > 0:\n                return path\n            failures.append("empty_or_missing")\n        except Exception as exc:\n            # The Drive provider can raise FileURLRetrievalError on a transient\n            # shared-link fetch. Do not log untrusted exception URLs/tokens.\n            failures.append(type(exc).__name__)\n        if path.exists():\n            path.unlink()\n        if attempt < 2:\n            time.sleep((2, 8)[attempt])\n    if "FileURLRetrievalError" in failures:\n        # One separate, uncookied public GET; this is a source read only.\n        # A quota response, redirect, HTML page or partial file is rejected.\n        recovered = direct_public_drive(file_id, path)\n        if recovered is not None:\n            return recovered\n        failures.append("direct_public_get_blocked")\n    raise RuntimeError(\n        "Paylaşılan Drive dosyası 3 denemede indirilemedi "\n        f"({','.join(failures)})"\n    ) from None\n\n\ndef graph_rows(page, platform):\n    object_id = page["page_id"] if platform == "facebook" else page.get("instagram_id")\n    if not object_id:\n        return []\n    fields = "id,description,created_time" if platform == "facebook" else "id,caption,timestamp,permalink,media_type"\n    edge = "videos" if platform == "facebook" else "media"\n    params = {"fields": fields, "limit": 100}\n    rows, seen, media_ids = [], set(), set()\n    for _ in range(40):\n        try:\n            response = read_with_retry(\n                requests.get, f"https://graph.facebook.com/{GRAPH_API_VERSION}/{object_id}/{edge}",\n                headers={"Authorization": f"Bearer {page['page_token']}"},\n                params=dict(params), timeout=30, graph_read=True,\n            )\n        except OSError:\n            raise RuntimeError("Meta geçmiş bağlantısı tamamlanamadı; bu hesap bekletildi") from None\n        try:\n            payload = response.json()\n        except ValueError:\n            raise RuntimeError("Meta geçmiş yanıtı geçersiz") from None\n        if not isinstance(payload, dict):\n            raise RuntimeError("Meta geçmiş yanıtı geçersiz; yayın durduruldu")\n        if response.status_code != 200 or "error" in payload or not isinstance(payload.get("data"), list):\n            error = payload.get("error")\n            code = error.get("code") if isinstance(error, dict) else None\n            safe_code = code if type(code) is int else "unknown"\n            raise RuntimeError(f"Meta geçmişi okunamadı: HTTP {response.status_code}, kod {safe_code}")\n        for media in payload["data"]:\n            if not isinstance(media, dict):\n                raise RuntimeError("Meta geçmişinde geçersiz medya kaydı")\n            if platform == "instagram":\n                media_type = media.get("media_type")\n                if not isinstance(media_type, str):\n                    raise RuntimeError("Instagram medya türü alınamadı; güvenli sayım mümkün değil")\n                # Only video/reel media count toward the video publication target.\n                # Instagram photos must never satisfy a missing Reels slot.\n                if media_type != "VIDEO":\n                    continue\n            media_id = str(media.get("id") or "")\n            if not media_id.isdecimal():\n                raise RuntimeError("Meta geçmişinde doğrulanabilir gönderi kimliği yok")\n            # A moving paginated history can repeat the same video across pages.\n            # Count the platform ID once, or a route can falsely reach its quota.\n            if media_id in media_ids:\n                continue\n            timestamp(media)\n            media_ids.add(media_id)\n            rows.append(media)\n        paging = payload.get("paging") or {}\n        if not isinstance(paging, dict):\n            raise RuntimeError("Meta geçmiş sayfalaması geçersiz; yayın durduruldu")\n        if not paging.get("next"):\n            return rows\n        cursors = paging.get("cursors") or {}\n        after = cursors.get("after") if isinstance(cursors, dict) else None\n        if not isinstance(after, str) or not after or after in seen:\n            raise RuntimeError("Meta geçmişi eksik; yayın durduruldu")\n        seen.add(after)\n        params["after"] = after\n    raise RuntimeError("Meta geçmiş sınırı aşıldı; yayın durduruldu")\n\n\ndef index_history_captions(rows):\n    """Return only unique, nonempty caption matches; ambiguous posts are blocked.\n\n    A description hash is a weak proxy for video identity. Never choose an\n    arbitrary post when multiple videos share the same description.\n    """\n    unique, ambiguous = {}, set()\n    for row in rows:\n        caption = row.get("description") or row.get("caption")\n        if not isinstance(caption, str) or not caption.strip():\n            continue\n        key = caption_key(caption)\n        if key in unique:\n            del unique[key]\n            ambiguous.add(key)\n        elif key not in ambiguous:\n            unique[key] = row\n    return unique, ambiguous\n\n\ndef history_publication_match(route, row):\n    """Require a real numeric platform post ID and valid publication timestamp."""\n    if not isinstance(row, dict) or not str(row.get("id") or "").isdecimal():\n        raise RuntimeError("Meta geçmişinde doğrulanabilir gönderi kimliği yok")\n    day = publication_day(route, row)  # timezone-aware or fail closed\n    return str(row["id"]), day\n\n\ndef timestamp(row):\n    value = row.get("created_time") or row.get("timestamp")\n    if not value:\n        raise RuntimeError("Meta geçmişinde yayın zamanı eksik")\n    try:\n        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))\n    except (ValueError, TypeError, AttributeError):\n        raise RuntimeError("Meta geçmişinde yayın zamanı geçersiz") from None\n    if parsed.tzinfo is None:\n        raise RuntimeError("Meta geçmişinde yayın zaman dilimi eksik")\n    return parsed.astimezone(TR)\n\n\ndef exact_txt_coverage(files):\n    """Audit exact case-sensitive MP4/TXT stem pairs (the publish-time rule)."""\n    videos = {name[:-4] for name in files if name.lower().endswith(".mp4")}\n    txts = {name[:-4] for name in files if name.endswith(".txt")}\n    missing = sorted(videos - txts)\n    return {"mp4": len(videos), "matched": len(videos) - len(missing),\n            "missing": len(missing), "missing_examples": missing[:12]}\n\n\ndef toonzone_txt_text(stem):\n    """Publish a short sourced Turkish episode plot, season/part and hashtags."""\n    from toonzone_episode_summaries import episode_summary\n\n    metadata = toonzone_metadata(stem)\n    season = metadata["season"]\n    episode = metadata["episode"]\n    part = metadata["part"]\n    short_plot = episode_summary(season, episode)\n    display_title = metadata["title"].split(" — Part ", 1)[0]\n    if display_title.endswith(" Tr"):\n        display_title = display_title[:-3].strip()\n    episode_tag = f"S{season:02d}E{episode:02d}"\n    return (\n        f"🎬 Regular Show | {display_title}\n"\n        f"📺 Sezon {season} • Bölüm {episode} • Part {part}/4\n\n"\n        f"📖 {short_plot}\n\n"\n        f"💬 Bu bölüm hakkındaki düşünceni yorumlara yaz!\n\n"\n        f"🛍️ Etsy: {TOONZONE_ETSY_LINK}\n\n"\n        f"#RegularShow #ToonZone #Mordecai #Rigby "\n        f"#ÇizgiFilm #CartoonNetwork #{episode_tag} #Part{part}"\n    )\n\n\ndef generate_toonzone_txts(files, output_dir):\n    """Create one stable UTF-8 TXT for each validated ToonZone MP4 part."""\n    output_dir.mkdir(parents=True, exist_ok=True)\n    generated, invalid = 0, 0\n    for name in sorted(files):\n        if not name.lower().endswith(".mp4"):\n            continue\n        stem = Path(name).stem\n        try:\n            content = toonzone_txt_text(stem)\n        except ValueError:\n            invalid += 1\n            continue\n        (output_dir / (stem + ".txt")).write_text(content + "\n", encoding="utf-8")\n        generated += 1\n    return generated, invalid\n\n\ndef daily_laugh_txt_text(stem):\n    """A unique English caption without guessing what happens in a video."""\n    if not re.fullmatch(r"[1-9][0-9]{0,5}", stem):\n        raise ValueError("Daily Laugh video filename is not a positive numeric ID")\n    return (\n        "😂 Take a quick laugh break!\\n\\n"\n        "What made you smile today? Tag a friend who needs a laugh! 😄\\n\\n"\n        "#DailyLaughLab #FunnyVideos #Comedy #DailyLaughs #Reels"\n    ).replace("\\n", "\n")\n\n\ndef generate_daily_laugh_txts(files, output_dir):\n    """Create exact-stem TXT only for missing Daily Laugh source captions."""\n    output_dir.mkdir(parents=True, exist_ok=True)\n    generated, invalid = 0, 0\n    for name in sorted(files):\n        if not name.lower().endswith(".mp4"):\n            continue\n        stem = Path(name).stem\n        if stem + ".txt" in files:\n            continue\n        try:\n            content = daily_laugh_txt_text(stem)\n        except ValueError:\n            invalid += 1\n            continue\n        (output_dir / (stem + ".txt")).write_text(content + "\n", encoding="utf-8")\n        generated += 1\n    return generated, invalid\n\n\ndef clean_caption_ui(raw):\n    """Remove only a recognized standalone UI line; never invent video copy."""\n    pattern = r"(?im)^[ \t]*view[ \t]+all[ \t]+[\d,]+[ \t]+comments?[ \t]*$"\n    cleaned = re.sub(pattern, "", raw).strip()\n    if cleaned != raw.strip() and not re.search(r"[^\W\d_]", cleaned, re.UNICODE):\n        raise RuntimeError("TXT yalnızca sosyal medya arayüz metni içeriyor")\n    return cleaned\n\n\ndef copies(route, item, files, temp, use_txt=True):\n    stem = Path(item["name"]).stem\n    fixed = selected_txt(route, files) if use_txt else None\n    text = fixed if fixed else (files.get(stem + ".txt") if use_txt else None)\n    raw = None\n    origin = "account-fixed-txt" if fixed else "matching-txt"\n    if text:\n        try:\n            raw = download(text["id"], temp / "caption.txt").read_text(encoding="utf-8-sig").strip()\n            if fixed:\n                raw = verify_text(raw, fixed["sha256"])\n        except Exception as exc:\n            if route != "toonzone":\n                raise RuntimeError(f"Eşleşen TXT indirilemedi: {route}/{item['name']} ({type(exc).__name__})") from None\n            # A future optional ToonZone TXT must not stop validated metadata copy.\n    elif route == "daily_laugh":\n        # The source archive has clips without matching TXT. Materialize a\n        # deterministic caption before planning a publication; never invent\n        # dialogue or specific events in the video.\n        generated = ROOT / "daily_laugh_txt" / (stem + ".txt")\n        content = daily_laugh_txt_text(stem)\n        generated.parent.mkdir(parents=True, exist_ok=True)\n        generated.write_text(content + "\n", encoding="utf-8")\n        raw = content\n        origin = "generated-daily-laugh-txt"\n    elif route != "toonzone":\n        raise RuntimeError(f"Eşleşen TXT bulunamadı: {route}/{item['name']}")\n    if text and not raw and route != "toonzone":\n        raise RuntimeError(f"Eşleşen TXT boş: {route}/{item['name']}")\n    if route == "toonzone":\n        # Enforce a canonical Turkish title AND the exact episode/part marker.\n        # Historical Drive TXT or a stale generated TXT must never silently\n        # replace the source-derived copy with a wrong episode title.\n        # This is strictly a future-publish safety check; old IDs/intents\n        # retain their archived captions and are never edited or re-posted.\n        canonical = toonzone_txt_text(stem)\n        fb = ig = canonical\n        if text:\n            origin = ("validated-toonzone-txt" if raw == canonical\n                      else "corrected-toonzone-txt")\n        else:\n            origin = "generated-toonzone-txt"\n    elif raw:\n        # Preserve actual source copy and remove only a recognized standalone\n        # comment-count UI line. UI-only sources remain blocked before intent.\n        raw = clean_caption_ui(raw)\n        _, _, fb, ig, _ = platform_content_from_txt(raw, stem, route.removesuffix("_second"))\n    else:\n        # Other routes must never upload with generic filename-only captions.\n        raise RuntimeError(f"Eşleşen TXT gerekli: {route}/{item['name']}")\n    if route == "daily_laugh" and not fixed:\n        # Reused TXT bodies are paired to specific videos to avoid ambiguous reconciliation.\n        reference = f"Daily Laugh Lab · Video {stem}\n\n"\n        fb, ig = reference + fb, reference + ig\n    # IG-only tagging, applied before caption hash/remote reconciliation.\n    # FB caption remains unchanged; non-approved videos are bit-for-bit unchanged.\n    if not fixed:\n        ig, _tags = enhance_instagram_caption(ig, route, stem)\n    if not fb.strip() or not ig.strip() or len(ig) > 2200 or "<html" in fb.lower():\n        raise RuntimeError("Platform açıklaması geçersiz")\n    return {"facebook": fb, "instagram": ig}, origin\n\n\ndef seed_done(route, platform, name):\n    """Only publications already verified in the AFK/985 production logs."""\n    if route == "toonzone":\n        order = parse_order(Path(name).stem, "cartoon")\n        return bool(order and (order[:2] < (1, 2) or order[:3] == (1, 2, 1)))\n    if route in {"film", "film_second"}:\n        match = re.fullmatch(r"Yoksul_1986_Part_(\d+)\.mp4", name, re.I)\n        return bool(match and int(match[1]) <= (6 if route == "film" else 5))\n    return False\n\n\ndef verified_film_duplicate(item, route, platform, files, entries, history, fingerprints):\n    """Prove a Drive export copy belongs to an already confirmed film post.\n\n    A same-part filename or caption alone never proves identity. Require the\n    old file ID in the current catalog, a confirmed ledger result, that exact\n    remote post/caption/date, and equal full source bytes. No Meta write here.\n    """\n    if route not in {"film", "film_second"}:\n        return None\n    def canonical(name):\n        return re.sub(r" \([0-9]+\)$", "", Path(name).stem).casefold()\n    name = canonical(item["name"])\n    matches = []\n    for key, prior in entries.items():\n        if (prior.get("route") != route or prior.get("platform") != platform\n                or prior.get("status") != "done" or not prior.get("post_id")\n                or canonical(prior.get("file", "")) != name):\n            continue\n        prior_file = files.get(prior["file"])\n        if (not prior_file or prior_file.get("id") == item["id"]\n                or key != f"{route}:{platform}:{prior_file['id']}"):\n            continue\n        remote = [r for r in history if str(r.get("id")) == str(prior["post_id"])]\n        if len(remote) != 1:\n            continue\n        row = remote[0]\n        remote_caption = row.get("description") or row.get("caption")\n        if not isinstance(remote_caption, str):\n            continue\n        post_id, day = history_publication_match(route, row)\n        if (day != prior.get("day") or not prior.get("caption_hash")\n                or caption_key(remote_caption) != prior["caption_hash"]):\n            continue\n        matches.append((prior_file, prior))\n    # Multiple old confirmed sources for one part require explicit review.\n    if len(matches) != 1:\n        return None\n    prior_file, prior = matches[0]\n    with tempfile.TemporaryDirectory(prefix="film-duplicate-") as tmp:\n        for source in (item, prior_file):\n            if source["id"] not in fingerprints:\n                path = download(source["id"], Path(tmp) / (source["id"] + ".mp4"))\n                verify_source_video(path)\n                digest = hashlib.sha256()\n                with path.open("rb") as stream:\n                    for block in iter(lambda: stream.read(1024 * 1024), b""):\n                        digest.update(block)\n                fingerprints[source["id"]] = digest.hexdigest()\n    if fingerprints[item["id"]] != fingerprints[prior_file["id"]]:\n        raise RuntimeError("Aynı film/part dosyalarının içerikleri farklı; sıra bekletildi")\n    return dict(prior, file=item["name"], duplicate_of_file_id=prior_file["id"],\n                source_sha256=fingerprints[item["id"]],\n                reconciliation_proof="identical_source_bytes_and_exact_remote_post",\n                duplicate_verified_in_run_id=os.getenv("GITHUB_RUN_ID", ""))\n\n\ndef proven_film_ig_source_alias(item, entry, route, platform,\n                                files, entries, history, fingerprints):\n    """A source collision can be skipped only with exact bytes AND a real post.\n\n    Never turn the stale/uncertain intent into a second done result; a distinct\n    Drive ID with the same video bytes is not a new published Instagram post.\n    """\n    if not (\n        route == "film" and platform == "instagram"\n        and entry.get("route") == route and entry.get("platform") == platform\n        and entry.get("status") == "uncertain"\n        and entry.get("file") == item["name"]\n        and entry.get("reconciliation_conflict") == "post_id_belongs_to_other_source"\n        and entry.get("source_collision_post_id")\n        and entry.get("resume_no_publish_confirmed") is True\n        and not entry.get("container_publish_attempted")\n    ):\n        return False\n    proof = verified_film_duplicate(\n        item, route, platform, files, entries, history, fingerprints)\n    return bool(\n        proof and proof.get("reconciliation_proof") ==\n        "identical_source_bytes_and_exact_remote_post"\n        and str(proof.get("post_id")) == str(entry["source_collision_post_id"])\n        and proof.get("duplicate_of_file_id") != item["id"]\n    )\n\n\ndef confirmed_existing_film_post_amid_caption_reuse(entry, route, platform, history):\n    """The exact already-done ID outranks a non-unique description.\n\n    This protects a real post during planning, NOT an unverified new source.\n    Previous weak caption-only reconciliations never gain this privilege.\n    """\n    if not (\n        route == "film" and platform in {"facebook", "instagram"}\n        and entry.get("status") == "done" and entry.get("post_id")\n        and entry.get("day") and entry.get("caption_hash")\n        and entry.get("reconciliation_proof") != "unique_platform_history_caption"\n    ):\n        return False\n    matches = [row for row in history\n               if str(row.get("id") or "") == str(entry["post_id"])]\n    if len(matches) != 1:\n        return False\n    row = matches[0]\n    caption = row.get("description") or row.get("caption")\n    if not isinstance(caption, str):\n        return False\n    try:\n        actual_id, actual_day = history_publication_match(route, row)\n    except RuntimeError:\n        return False\n    return (str(actual_id) == str(entry["post_id"]) and\n            actual_day == entry["day"] and\n            caption_key(caption) == entry["caption_hash"])\n\n\ndef film_canonical_part(name):\n    return re.sub(r" \([0-9]+\)$", "", Path(name).stem).casefold()\n\n\ndef film_part8_local_only_export_hold(route, files, entries):\n    """Allow the separate original Part 8 source to be examined, never the held copy.\n\n    The exported "(1)" video was held by the visual gate before any Meta POST.\n    Preserve its original ledger evidence. This does NOT prove the original is\n    correct: caption, identity, serial order, and visual checks still apply.\n    """\n    if route not in {"film", "film_second"}:\n        return False\n    original = files.get("Bickin_Part_8.mp4")\n    exported = files.get("Bickin_Part_8 (1).mp4")\n    if not isinstance(original, dict) or not isinstance(exported, dict):\n        return False\n    if (not original.get("id") or not exported.get("id")\n            or original["id"] == exported["id"]):\n        return False\n    row = entries.get(f"{route}:facebook:{exported['id']}", {})\n    failure = row.get("failure") if isinstance(row, dict) else None\n    return (\n        row.get("route") == route\n        and row.get("platform") == "facebook"\n        and row.get("file") == exported["name"] == "Bickin_Part_8 (1).mp4"\n        and row.get("status") == "held"\n        and not row.get("post_id")\n        and isinstance(failure, dict)\n        and failure.get("reason") == "visual_duplicate_review"\n        and failure.get("external_post_attempted") is False\n        and failure.get("safe_to_repost") is False\n        and isinstance(failure.get("conflicting_platforms"), list)\n        and "facebook" in failure["conflicting_platforms"]\n    )\n\n\ndef route_enabled(route):\n    return not route_paused("film" if route == "film_second" else route)\n\n\ndef route_clock(route, now):\n    return now.astimezone(ZoneInfo("America/New_York")) if route == "daily_laugh" else now\n\n\ndef previous_intent_alert_due(entry, now):\n    """One warning per unresolved entry per Istanbul calendar day.\n\n    An invalid or missing saved timestamp triggers one warning, but never\n    changes the publishing intent or authorizes a Meta POST.\n    """\n    previous = entry.get("hold_alerted_at")\n    if not isinstance(previous, str) or not previous.strip():\n        return True\n    try:\n        seen = datetime.fromisoformat(previous)\n    except ValueError:\n        return True\n    if seen.tzinfo is None:\n        return True\n    return seen.astimezone(TR).date() < now.astimezone(TR).date()\n\n\n# Only these audited files are authorized for ONE additional recovery using\n# a materially different low-bandwidth media profile. No other route/video can\n# opt in, and previous media_publish uncertainty never qualifies.\n_AUDITED_IG_V3_FILES = {\n    "film": "Yoksul_1986_Part_16.mp4",\n    "toonzone": "S01E03_Caffeinated_Concert_Tickets_Part3.mp4",\n}\n\n\ndef audited_ig_v3_eligible(route, platform, name, entry):\n    if route not in _AUDITED_IG_V3_FILES or platform != "instagram":\n        return False\n    if name != _AUDITED_IG_V3_FILES[route]:\n        return False\n    if not isinstance(entry, dict):\n        return False\n    if (entry.get("status") != "uncertain" or\n            entry.get("prepublish_retry_count") != 1 or\n            str(entry.get("run_id", "")) != "40224351466"):\n        return False\n    failure = entry.get("failure")\n    if not isinstance(failure, dict):\n        return False\n    return (failure.get("stage") == "Instagram ikili video aktarımı"\n            and failure.get("http_status") == 400\n            and failure.get("graph_code") in (None, 100))\n\n\ndef audited_ig_v4_eligible(route, platform, name, entry):\n    """Only two exact prior failed IG binaries after verified 180s upload-only."""\n    if route not in _AUDITED_IG_V3_FILES or platform != "instagram":\n        return False\n    if name != _AUDITED_IG_V3_FILES[route] or not isinstance(entry, dict):\n        return False\n    if (entry.get("status") != "uncertain" or\n            entry.get("prepublish_retry_count") != 2 or\n            str(entry.get("run_id", "")) != "40281812561"):\n        return False\n    fail = entry.get("failure")\n    return (isinstance(fail, dict)\n            and fail.get("stage") == "Instagram ikili video aktarımı"\n            and fail.get("http_status") == 400\n            and fail.get("graph_code") in (None, 100))\n\n\ndef audited_avanak_part10_recovery_eligible(route, platform, item, entry):\n    """One 720p recovery for the audited 30 Oct rejected 1080p upload.\n\n    The planner must also reconcile remote history and the saved caption.\n    This exact binary-stage rejection never reached media_publish.\n    """\n    if (route != "film" or platform != "instagram"\n            or item.get("id") != "1Zn8kYmexuUe3z1EKLtCrKFCwj4qVnIa2"\n            or item.get("name") != "Avanak_Apti_Part_10 (1).mp4"\n            or not isinstance(entry, dict)):\n        return False\n    failure = entry.get("failure")\n    return (entry.get("status") == "uncertain"\n            and type(entry.get("prepublish_retry_count")) is int\n            and entry["prepublish_retry_count"] == 1\n            and str(entry.get("run_id", "")) == "41029613650"\n            and isinstance(failure, dict)\n            and failure.get("stage") == "Instagram ikili video aktarımı"\n            and type(failure.get("http_status")) is int\n            and failure["http_status"] == 400\n            and failure.get("graph_code") is None\n            and failure.get("graph_subcode") is None)\n\n\ndef quarantine_unordered_ig_source(route, platform, item, entry, cap_hash):\n    """Skip a proven pre-publish source, never retry it or erase its intent."""\n    failure = entry.get("failure")\n    if not isinstance(failure, dict):\n        return False\n    return (route in {"tarladaki", "penguen", "gonle", "daily_laugh"} and platform == "instagram"\n            and entry.get("route") == route and entry.get("platform") == platform\n            and entry.get("file") == item["name"]\n            and entry.get("caption_hash") == cap_hash\n            and entry.get("status") == "uncertain"\n            and not entry.get("container_publish_attempted")\n            and failure.get("stage") == "Instagram ikili video aktarımı"\n            and failure.get("http_status") == 400)\n\n\ndef facebook_can_continue_past_ig_rejection(route, platform, entry):\n    """Hold IG independently while preserving its source and dedupe ledger.\n\n    This does not clear the uncertain intent, grant an Instagram retry, or skip\n    Film/ToonZone parts on Instagram. Facebook has a separate dedupe ledger.\n    """\n    if platform != "instagram":\n        return False\n    if route in {"tarladaki", "penguen"}:\n        # Humor routes are unordered and Facebook has an independent intent.\n        # Keep the exact uncertain IG source and all later IG uploads held;\n        # allow only independently deduped Facebook work to continue.\n        return entry.get("status") in {"intent", "uncertain"}\n    if route not in {"film", "toonzone"}:\n        return False\n    if entry.get("status") != "uncertain" or entry.get("prepublish_retry_count") not in (1, 2, 3):\n        return False\n    prior = entry.get("failure")\n    if not isinstance(prior, dict):\n        return False\n    marker = SimpleNamespace(stage=prior.get("stage"),\n                             http_status=prior.get("http_status"),\n                             code=prior.get("graph_code"),\n                             subcode=prior.get("graph_subcode"),\n                             container_status=prior.get("container_status"))\n    return known_pre_publish_media_rejection(marker, route, previous_retries=0)\n\n\ndef publication_day(route, row):\n    """Use the account scheduling timezone for confirmed Meta history entries."""\n    return route_clock(route, timestamp(row)).date().isoformat()\n\n\ndef ledger_daily_count(state, route, platform, day):\n    """One confirmed platform post is one quota unit, even with ledger aliases."""\n    return len({str(e["post_id"]) for e in state["entries"].values()\n                if e.get("route") == route and e.get("platform") == platform\n                and e.get("status") == "done" and e.get("day") == day\n                and str(e.get("post_id") or "").strip()})\n\n\ndef target_count(route, now):\n    if (os.getenv("IG_AUDITED_RESCUE_ONLY") == "true"\n            and route in _AUDITED_IG_V3_FILES):\n        return 1\n    clock = route_clock(route, now)\n    hours = {"tarladaki": TARLADAKI_HOURS, "penguen": PENGUEN_HOURS,\n             "gonle": GONLE_HOURS, "film": FILM_HOURS, "film_second": FILM_HOURS}\n    if route == "daily_laugh":\n        slots = [(h, 0) for h in daily_laugh_hours_for_date(clock.date())]\n    elif route == "toonzone":\n        slots = [(12, m) for m in (0, 10, 20, 30)]\n    else:\n        slots = [(h, 30 if route == "penguen" else 15 if route == "gonle" else 0) for h in hours[route]]\n    if os.getenv("ADAPTIVE_SCHEDULE_ENABLED", "false").lower() == "true":\n        from adaptive_schedule import slots_for_route\n        try:\n            document = json.loads((ROOT / "adaptive-schedule.json").read_text(encoding="utf-8"))\n        except (OSError, ValueError):\n            document = {}\n        slots = slots_for_route(document, route, now, slots)\n    if os.getenv("COMPLETE_DAY_DATE") == now.date().isoformat():\n        # The second Film page still lacked the already-confirmed Part 6 at cutover.\n        return len(slots) + (1 if route == "film_second" and now.date().isoformat() == "2026-10-23" else 0)\n    return sum((h, m) <= (clock.hour, clock.minute) for h, m in slots)\n\n\ndef apply_verified_migration(state):\n    payload = json.loads(Path(__file__).with_name("migration_verified_publications.json").read_text())\n    if payload.get("schema") != 1 or not isinstance(payload.get("records"), list):\n        raise RuntimeError("Doğrulanmış aktarım geçmişi geçersiz")\n    # The first audit incorrectly treated generic Daily captions as file IDs.\n    # Remove only those derived inferences; preserve all actual upload intents/results.\n    state["entries"] = {k: e for k, e in state["entries"].items()\n                        if not (e["route"] == "daily_laugh" and not e.get("run_id")\n                                and e.get("proof") != "verified-afk-log")}\n    for row in payload["records"]:\n        key = f"{row['route']}:{row['platform']}:{row['file_id']}"\n        if key in state["entries"] and state["entries"][key].get("run_id"):\n            continue\n        recorded = datetime.fromisoformat(row["recorded_at"].replace("Z", "+00:00"))\n        state["entries"][key] = {\n            "route": row["route"], "platform": row["platform"], "status": "done",\n            "caption_hash": "verified-file-id:" + row["file_id"],\n            "post_id": row["post_id"], "file": row["file_name"],\n            "day": route_clock(row["route"], recorded.astimezone(TR)).date().isoformat(),\n            "proof": "verified-afk-log", "source_run_id": row["source_run_id"],\n        }\n\n\ndef toonzone_cover_coverage(videos, covers):\n    """Count exact part-specific PNG matches; never reuse another part's artwork."""\n    stems = [Path(name).stem for name in videos if name.lower().endswith(".mp4")]\n    matched = sum(stem + ".png" in covers for stem in stems)\n    return matched, len(stems) - matched\n\n\ndef toonzone_episode_confirmed(state, videos, episode):\n    """A rollover requires all four source parts done on FB and IG with IDs."""\n    for row in state["entries"].values():\n        if row.get("route") != "toonzone":\n            continue\n        order = parse_order(Path(row.get("file", "")).stem, "cartoon")\n        if (order and list(order[:2]) == list(episode)\n                and row.get("status") != "done"):\n            return False\n    parts = {}\n    for video in videos:\n        order = parse_order(Path(video["name"]).stem, "cartoon")\n        if order and list(order[:2]) == list(episode):\n            if order[2] in parts:\n                return False\n            parts[order[2]] = video\n    if set(parts) != {1, 2, 3, 4}:\n        return False\n    for video in parts.values():\n        for platform in ("facebook", "instagram"):\n            row = state["entries"].get(f"toonzone:{platform}:{video['id']}", {})\n            if (row.get("status") != "done" or row.get("file") != video["name"]\n                    or not str(row.get("post_id") or "").strip()):\n                return False\n    return True\n\n\ndef conflicting_done_post_source(entries, key, route, platform, post_id):\n    """A caption match is not a Drive source-ID match.\n\n    A different verified row already owning the remote post forbids treating an\n    uncertain source as published. Exact content duplicates use their separate\n    verified fingerprint path, not this weak caption-only reconciliation.\n    """\n    if not str(post_id or "").strip():\n        return False\n    return any(\n        other_key != key and isinstance(row, dict)\n        and row.get("route") == route and row.get("platform") == platform\n        and row.get("status") == "done"\n        and str(row.get("post_id") or "") == str(post_id)\n        for other_key, row in entries.items()\n    )\n\n\ndef quarantine_weak_caption_aliases(state):\n    """Repair only weak caption-based duplicates, retaining forensic evidence."""\n    entries = state["entries"]\n    for key, entry in entries.items():\n        if (entry.get("status") == "done"\n                and entry.get("reconciliation_proof") == "unique_platform_history_caption"\n                and conflicting_done_post_source(\n                    entries, key, entry["route"], entry["platform"], entry.get("post_id"))):\n            old_post = entry.pop("post_id")\n            entry["status"] = "uncertain"\n            entry["source_collision_post_id"] = old_post\n            entry["reconciliation_conflict"] = "post_id_belongs_to_other_source"\n\n\n# Exact Drive sources independently read in full after local-only failures.\n# A corrected upload with a new Drive ID is eligible as a separate source.\n# A valid MP4 can also lack a decodable frame on its advertised timeline;\n# never weaken visual dedupe or fingerprint its attached cover to accept it.\n_CONFIRMED_UNREADABLE_SHARED_SOURCES = {\n    ("tarladaki", "1hArLxDecYFwPs9lWQasXaNHK4f0dQ20W", "195.mp4"): {\n        "run_id": "41790686639",\n    },\n    # 7 Nov owner Drive read of the exact 18,612,272-byte source:\n    # both ffprobe and ffmpeg fail "moov atom not found". Existing Meta\n    # ledger has Facebook/IG local-only ready failures for this same source\n    # in run 42378874507. Never resubmit it on a later calendar day.\n    # A repaired clip must be a new Drive object, preserving source identity.\n    ("daily_laugh", "1TBHD0d-rtgt8ECx_6oYHeRBW8Ae2ysyH", "195.mp4"): {\n        "run_id": "42378874507",\n    },\n    # 10 Nov run 42888833591 fetched exact bytes SHA, but FFmpeg could not\n    # decode the frame required for safe visual fingerprinting BEFORE any POST.\n    # Facebook and IG both retained local-only "ready" failures. Do not keep\n    # retrying this same unmodified Drive object across future days; a\n    # separately uploaded corrected video receives a distinct Drive ID.\n    ("daily_laugh", "1i0pA26ewaAOlqxTbIxva_nsxZ_K_OrUW", "40.mp4"): {\n        "run_id": "42888833591",\n        "sha256": "579051bc54e3466977fec7656b1eb15b03bd1e2c339c9dfa3acd889086e2f45c",\n    },\n    ("penguen", "1lBoXFmmxvlfL6lUhxk4Qc_eZ6WHANb2I", "250.mp4"): {\n        "run_id": "42175366213",\n        "sha256": "513d67961759f96a7e64196bf2adbe4d8ce01f0acb3b0257a5acce71a27ea1b0",\n    },\n    ("tarladaki", "1T3nTIgRJwmgeQOkCwZrvezl61tic3aI2", "278.mp4"): {\n        "run_id": "42222196393",\n        "sha256": "dba86d78a9590d17c129d80b49c62d8f0441cd1839c1b2a8c105c05ea0f983dd",\n    },\n}\n\n\ndef quarantined_unordered_local_failure(route, item, state, platforms, day):\n    """Skip an already proven pre-upload-broken clip, never an uncertain POST.\n\n    Limit this to unordered feeds. Normally the hold lasts one\n    publication day; an independently verified local source failure can stay held.\n    Every active platform must have an exact prior source, file and local-only\n    failure record. Do not alter those records or release any old intents.\n    """\n    if route not in {"tarladaki", "penguen", "gonle", "daily_laugh"} or not platforms:\n        return False\n    confirmed = _CONFIRMED_UNREADABLE_SHARED_SOURCES.get(\n        (route, item["id"], item["name"]), {})\n    for platform in platforms:\n        if platform not in {"facebook", "instagram"}:\n            return False\n        entry = state.get("entries", {}).get(\n            f"{route}:{platform}:{item['id']}", {})\n        failure = entry.get("failure") or {}\n        if not (\n            entry.get("route") == route and entry.get("platform") == platform\n            and entry.get("file") == item["name"]\n            and (entry.get("day") == day or (\n                str(entry.get("run_id")) == confirmed.get("run_id")\n                and (not confirmed.get("sha256")\n                     or entry.get("source_sha256") == confirmed["sha256"])\n            ))\n            and entry.get("status") == "ready"\n            and isinstance(failure, dict)\n            and failure.get("reason") == "source_or_cover_preparation_failed"\n            and failure.get("safe_to_repost") is True\n            and str(entry.get("run_id") or "") != str(os.getenv("GITHUB_RUN_ID", ""))\n            and str(entry.get("run_id") or "").isdecimal()\n        ):\n            return False\n    return True\n\n\ndef can_advance_past_local_visual_hold(route, entry):\n    """Only an exact non-posted visual duplicate may be bypassed on unordered feeds."""\n    if route not in {"tarladaki", "penguen", "gonle", "daily_laugh"}:\n        return False\n    if not isinstance(entry, dict) or entry.get("status") != "held":\n        return False\n    proof = entry.get("failure")\n    return (isinstance(proof, dict) and proof.get("reason") == "visual_duplicate_review"\n            and proof.get("external_post_attempted") is False\n            and proof.get("safe_to_repost") is False\n            and isinstance(proof.get("conflicting_platforms"), list)\n            and bool(proof["conflicting_platforms"])\n            and all(p in {"facebook", "instagram"} for p in proof["conflicting_platforms"]))\n\n\ndef prioritized_route_items(day):\n    """Move rights-approved serial routes first only during today's owner catch-up."""\n    items = list(ROUTES.items())\n    if os.getenv("CATCHUP_BATCH_DATE") == day:\n        series_first = {"film": 0, "film_second": 1, "toonzone": 2}\n        items.sort(key=lambda pair: series_first.get(pair[0], 3))\n    return items\n\n\ndef plan(audit=False):\n    now = datetime.now(TR)\n    day = now.date().isoformat()\n    state = restore()\n    if not audit and os.getenv("ADAPTIVE_SCHEDULE_ENABLED", "false").lower() == "true":\n        # Persist the first policy (including an empty fallback) for the day.\n        # A late/re-run report must never move today's remaining publication slots.\n        from adaptive_schedule import freeze_schedule\n        freeze_schedule(state, day, ROOT / "adaptive-schedule.json")\n    apply_verified_migration(state)\n    quarantine_weak_caption_aliases(state)\n    pages = {p["page_name"]: p for p in load_meta_auth()["pages"]}\n    verified_pages = preflight_verified_pages()\n    report = [f"# Public link publisher — {day}", "", "YouTube: disabled. Drive OAuth: not used.", ""]\n    catalogs = {}\n    unavailable_catalogs = set()\n    for key, value in FOLDERS.items():\n        try:\n            catalogs[key] = inventory(value)\n        except Exception as exc:\n            catalogs[key] = {}\n            unavailable_catalogs.add(key)\n            report.append(f"HELD source {key}: {type(exc).__name__}")\n            record_error("drive_inventory", "drive_unavailable", route=key,\n                         error=exc, safe_to_retry=True)\n    for key, files in catalogs.items():\n        report.append(f"{key}: MP4={sum(n.lower().endswith('.mp4') for n in files)}, TXT={sum(n.lower().endswith('.txt') for n in files)}, total={len(files)}")\n    generated_caption_dirs = {}\n    if catalogs.get("daily_laugh"):\n        generated_caption_dirs["daily_laugh"] = ROOT / "daily_laugh_txt"\n        generated, invalid = generate_daily_laugh_txts(catalogs["daily_laugh"], generated_caption_dirs["daily_laugh"])\n        report.append(f"Daily Laugh TXT generated for missing video names: created={generated}; invalid_filenames={invalid}")\n        if invalid:\n            report.append("WARNING: invalid Daily Laugh MP4 filenames will not be published without a readable caption.")\n    if catalogs.get("toonzone"):\n        generated_caption_dirs["toonzone"] = ROOT / "toonzone_txt"\n        generated, invalid = generate_toonzone_txts(catalogs["toonzone"], generated_caption_dirs["toonzone"])\n        report.append(f"ToonZone autogenerated TXT: created={generated}; invalid_filenames={invalid}")\n        matched, missing = toonzone_cover_coverage(catalogs["toonzone"], catalogs["covers"])\n        report.append(f"ToonZone exact part covers: matched={matched}; missing={missing}")\n        # Preserve the exact source->original PNG gaps for owner repair.\n        # Names are derived from filenames, never guessed by episode or re-used\n        # from another part. Do not expose Drive IDs or construct new covers.\n        missing_pngs = sorted(Path(name).stem + ".png"\n                              for name in catalogs["toonzone"]\n                              if name.lower().endswith(".mp4")\n                              and Path(name).stem + ".png" not in catalogs["covers"])\n        save(ROOT / "toonzone-cover-gaps.json", {\n            "schema": 1, "source_video_count": matched + missing,\n            "matched_original_png_count": matched,\n            "missing_original_png_count": missing,\n            "missing_original_png_names": missing_pngs,\n            "original_cover_required": True,\n            "generated_cover_fallback_allowed": False,\n        })\n        if missing:\n            # Exact owner-approved cover files are mandatory for ToonZone.\n            # The former synthetic first-frame fallback could make a different\n            # visual than the intended cover even when the job was green.\n            report.append(\n                "WARNING: ToonZone videos without exact PNG artwork will be held; "\n                "per-part cover fallback is disabled."\n            )\n    plans = []\n    planned_counts = {}\n    # Reserve the exact final caption per route/platform within this batch.\n    # Different Drive IDs with identical text are not two safe posts.\n    planned_caption_hashes = set()\n    scope = account_scope()\n    # A signed, exact-date workflow gate sets this flag for the PRIMARY Film\n    # route only. It cannot affect normal slots, other routes or later dates.\n    film_ten_once = (os.getenv("FILM_TEN_PARTS_ONCE") == "true"\n                     and day == "2026-11-10" and scope == "film")\n    film_gap_once = (os.getenv("FILM_GAP_PART6TO10_ONCE") == "true"\n                     and day == "2026-11-10" and scope == "film")\n    batch_limit = (5 if film_gap_once else 10 if film_ten_once\n                   else 8 if os.getenv("CATCHUP_BATCH_DATE") == day else 1)\n    from operational_enhancements import bounded_catchup_limit\n    history_cache = {}\n    duplicate_fingerprints = {}\n    rescue_only = os.getenv("IG_AUDITED_RESCUE_ONLY") == "true"\n    for route, (source, page_name) in prioritized_route_items(day):\n        if scope and route != scope:\n            continue\n        if rescue_only and route not in _AUDITED_IG_V3_FILES:\n            continue\n        report.extend(["", f"## {page_name}"])\n        if verified_pages is not None and page_name not in verified_pages:\n            report.append("HELD: this account failed identity preflight; other accounts continue.")\n            record_error("meta_account", "account_preflight_held", route=route)\n            continue\n        if not route_enabled(route):\n            report.append("HELD: existing route/rights switch is disabled.")\n            continue\n        page = pages.get(page_name)\n        if not page:\n            report.append("HELD: Meta page not available.")\n            record_error("meta_account", "meta_account_missing", route=route)\n            continue\n        ig_enabled = not (route == "gonle" and route_paused("gonle_ig")) and not (route == "daily_laugh" and route_paused("daily_laugh_instagram"))\n        platforms = ["facebook"] + (["instagram"] if page.get("instagram_id") and route != "film_second" and ig_enabled else [])\n        if rescue_only:\n            if "instagram" not in platforms:\n                report.append("HELD: audited IG rescue requires linked Instagram identity.")\n                continue\n            platforms = ["instagram"]\n        clock = route_clock(route, now)\n        try:\n            histories = {}\n            for p in platforms:\n                cache_key = (page_name, p)\n                if cache_key not in history_cache:\n                    history_cache[cache_key] = graph_rows(page, p)\n                histories[p] = history_cache[cache_key]\n                # Keep validation inside this account's failure boundary even\n                # when a different history adapter is injected by a caller.\n                for row in histories[p]:\n                    timestamp(row)\n        except (RuntimeError, ValueError, TypeError, KeyError) as exc:\n            report.append("HELD: account history unavailable; other routes continue.")\n            record_error("meta_history", "meta_history_unavailable",\n                         route=route, error=exc)\n            continue\n        season1_receipts_by_part = {}\n        season2_approved = False\n        if route == "toonzone":\n            from toonzone_season1_gate import season1_receipts, season2_release_allowed\n            season1_check = season1_receipts(\n                [v for name, v in catalogs[source].items() if name.lower().endswith(".mp4")],\n                catalogs["covers"], state,\n                {p: histories.get(p, []) for p in ("facebook", "instagram")})\n            save(ROOT / "toonzone-season1-live-receipts.json", season1_check)\n            season1_receipts_by_part = {\n                (row["slot"], row["platform"]): row\n                for row in season1_check["rows"]}\n            season2_approved = season2_release_allowed(\n                season1_check,\n                owner_release=os.getenv("TOONZONE_SEASON2_RELEASE_ENABLED", "false").lower() == "true")\n            report.append(\n                "ToonZone S01E04–12: "\n                f'{season1_check["verified_platform_receipts"]}/72 archived IDs seen in live Meta history; '\n                f'Season 2 release={"approved" if season2_approved else "held"}.')\n            if not season1_check["all_verified"]:\n                first_unverified = next(\n                    (r for r in season1_check["rows"] if r["status"] != "verified_in_history"), None)\n                if first_unverified:\n                    report.append(\n                        f'PRIORITY Season 1: {first_unverified["slot"]} '\n                        f'{first_unverified["platform"]} reason={first_unverified["reason"]}; '\n                        'do not infer deletion or blindly re-upload.')\n        caption_indexes = {p: index_history_captions(rows) for p, rows in histories.items()}\n        remote = {p: index[0] for p, index in caption_indexes.items()}\n        ambiguous_captions = {p: index[1] for p, index in caption_indexes.items()}\n        for platform, rows in histories.items():\n            count = sum(route_clock(route, timestamp(row)).date() == clock.date() for row in rows)\n            report.append(f"{platform}: published_today={count}, history_records={len(rows)}")\n        # Match uncertain intents by the exact platform caption before deciding.\n        for key, entry in state["entries"].items():\n            if entry["route"] != route or entry["platform"] not in platforms:\n                continue\n            caption_hash = entry.get("caption_hash")\n            # Fixed TXT repeats on every clip: caption is not a source identity.\n            # Remote caption matching must NEVER convert its uncertain intent to done.\n            if entry.get("caption_source") == "account-fixed-txt":\n                continue\n            if entry["status"] != "done" and caption_hash in ambiguous_captions[entry["platform"]]:\n                report.append("HELD: previous uncertain intent matches multiple remote posts.")\n                continue\n            match = remote[entry["platform"]].get(caption_hash)\n            if entry["status"] != "done" and match:\n                # A Film caption match is not proof of which Drive source was\n                # posted. Keep old intents unresolved until exact source proof.\n                if route in {"film", "film_second"}:\n                    report.append("HELD: Film caption candidate requires exact source evidence.")\n                    continue\n                try:\n                    confirmed_id, confirmed_day = history_publication_match(route, match)\n                except RuntimeError:\n                    report.append("HELD: previous intent matched a post with invalid ID or timestamp.")\n                    continue\n                if conflicting_done_post_source(\n                        state["entries"], key, route, entry["platform"], confirmed_id):\n                    report.append("HELD: caption matches an existing post from a different source ID.")\n                    continue\n                entry.update(\n                    status="done", post_id=confirmed_id, day=confirmed_day,\n                    reconciled_in_run_id=os.getenv("GITHUB_RUN_ID", ""),\n                    reconciliation_proof="unique_platform_history_caption",\n                )\n        counts = {p: max(\n            sum(route_clock(route, timestamp(row)).date() == clock.date() for row in histories[p]),\n            ledger_daily_count(state, route, p, clock.date().isoformat())\n        ) for p in platforms}\n        if rescue_only:\n            # An exact orphaned prepublish attempt is independent of the daily\n            # account quota. Exact caption reconciliation still runs above.\n            counts = {p: 0 for p in platforms}\n        due = target_count(route, now)\n        if film_gap_once and route == "film":\n            # The first release already published five parts on both platforms.\n            # Raise the OWNER-ONLY temporary planning ceiling by five; never\n            # change normal per-account targets or any provider rate limits.\n            due = max(counts.values(), default=0) + 5\n            report.append("OWNER ONCE: only En Buyuk Saban Parts 6-10, no new posts outside gap.")\n        if film_ten_once and route == "film":\n            # Ten *new, distinct* Part 1-10 sources, not ten quota slots\n            # consumed by other Film posts earlier today. Per-source ledger\n            # and provider dedupe still apply, so nothing is blindly reposted.\n            due = max(counts.values(), default=0) + 10\n            report.append("OWNER ONE-SHOT: up to ten En Buyuk Saban parts (1-10) on primary Film Meta routes.")\n        if os.getenv("CATCHUP_BATCH_DATE") != day and not ((film_ten_once or film_gap_once) and route == "film"):\n            batch_limit = bounded_catchup_limit(\n                route, due, counts, clock,\n                enabled=os.getenv("AUTO_BACKFILL_ENABLED", "false").lower() == "true")\n        if due == 0:\n            report.append("NOT DUE: publication hours have not started for this route's local day.")\n            continue\n        if all(counts[p] >= due for p in platforms):\n            report.append("Daily target already complete.")\n            continue\n        files = catalogs[source]\n        videos = [v for n, v in files.items() if n.lower().endswith(".mp4")]\n        # Humor pages share one Drive folder. Their runners may execute at\n        # the same time, so ownership must be stable without a race or shared\n        # in-memory ledger; existing historical posts are still reconciled.\n        if scope and route in {"tarladaki", "penguen"}:\n            videos = [v for v in videos if owned_humor_source(route, v["id"])]\n        if rescue_only:\n            videos = [v for v in videos if v["name"] == _AUDITED_IG_V3_FILES[route]]\n        other_humor_hashes = set()\n        if route in {"tarladaki", "penguen"}:\n            # Match the existing normal publisher's explicit TP activation gate.\n            # Shared files are consumed globally across both humor accounts.\n            other_name = ROUTES["penguen" if route == "tarladaki" else "tarladaki"][1]\n            other_page = pages.get(other_name)\n            if not other_page:\n                report.append("HELD: other shared-humor account history unavailable.")\n                continue\n            try:\n                for p in ("facebook", "instagram"):\n                    if p == "instagram" and not other_page.get("instagram_id"):\n                        continue\n                    ck = (other_name, p)\n                    if ck not in history_cache:\n                        history_cache[ck] = graph_rows(other_page, p)\n                    other_humor_hashes.update(caption_key(r.get("description") or r.get("caption")) for r in history_cache[ck])\n            except RuntimeError as exc:\n                report.append("HELD: " + str(exc))\n                record_error("shared_account_history", "meta_history_unavailable",\n                             route=route, error=exc)\n                continue\n            videos = [v for v in videos if not any(\n                k.endswith(":" + v["id"]) and e["route"] in {"tarladaki", "penguen"} and e["route"] != route\n                for k, e in state["entries"].items())]\n        if source == "film":\n            videos = [v for v in videos if parse_order(Path(v["name"]).stem, "film")]\n            if film_part8_local_only_export_hold(route, files, state["entries"]):\n                # The export has an exact local-only hold, not a failed Meta\n                # upload. Try the separate original Part 8 source instead;\n                # never clear, recategorize or retry the held export.\n                videos = [v for v in videos if v["name"] != "Bickin_Part_8 (1).mp4"]\n                report.append(\n                    "QUARANTINE: Bickin Part 8 export held before Meta POST; "\n                    "original source stays subject to all publish safety gates."\n                )\n            videos.sort(key=lambda v: (not v["name"].lower().startswith("yoksul_1986_"), parse_order(Path(v["name"]).stem, "film")))\n            # Explicit owner handoff after Bıçkın 8 proved visually duplicated\n            # Part 3. Reconcile historical ledger and remote history as usual,\n            # but plan ONLY the complete fresh series. No old intent is reset.\n            if os.getenv("FILM_HANDOFF_TO_EN_BUYUK_SABAN", "false").lower() == "true":\n                from film_series_transition import switch_film_source\n                videos = switch_film_source(route, videos, files)\n                if film_gap_once and route == "film":\n                    # Part 1-5 have already posted; never plan duplicates.\n                    allowed = {f"En_Buyuk_Saban_Part_{i}.mp4" for i in range(6, 11)}\n                    videos = [video for video in videos if video["name"] in allowed]\n                    if len(videos) != 5:\n                        raise RuntimeError("film_gap_source_selection_incomplete")\n                if film_ten_once and route == "film":\n                    # Exclude Part 11+ even if the daily accounting target is\n                    # higher because of already-published unrelated videos.\n                    allowed = {f"En_Buyuk_Saban_Part_{i}.mp4" for i in range(1, 11)}\n                    videos = [video for video in videos if video["name"] in allowed]\n                    if len(videos) != 10:\n                        raise RuntimeError("film_ten_source_selection_incomplete")\n                report.append(\n                    "FILM HANDOFF: complete En_Buyuk_Saban Part 1-32 selected; "\n                    "historical Bickin/Yoksul receipts preserved and checked.")\n        elif source == "toonzone":\n            videos = [v for v in videos if parse_order(Path(v["name"]).stem, "cartoon")]\n            videos.sort(key=lambda v: parse_order(Path(v["name"]).stem, "cartoon"))\n        else:\n            videos.sort(key=lambda v: v["name"])\n        selected = None\n        route_selected = 0\n        blocked_platforms = set()\n        planned_film_parts = set()\n        for item in videos:\n            if source == "toonzone":\n                order = parse_order(Path(item["name"]).stem, "cartoon")\n                if order and order[0] >= 2 and not season2_approved:\n                    report.append(\n                        "HELD: ToonZone Season 2 cannot start before all 36 Season 1 "\n                        "E04–E12 parts have 72 current verified Facebook/Instagram "\n                        "IDs and a separate owner release.")\n                    break\n                if order and order[0] == 1 and 4 <= order[1] <= 12:\n                    slot = f"S01E{order[1]:02d} Part{order[2]}"\n                    unresolved = [\n                        season1_receipts_by_part.get((slot, p), {})\n                        for p in platforms\n                    ]\n                    if any(row.get("reason") == "archived_id_not_in_live_history"\n                           for row in unresolved):\n                        report.append(\n                            "HELD: " + slot + " has archived DONE post IDs absent "\n                            "from current Meta history; verify original remote "\n                            "IDs independently before any further publication."\n                        )\n                        break\n            available = [p for p in platforms if p not in blocked_platforms]\n            route_target = due if (route == "film" and (film_ten_once or film_gap_once)) else target_count(route, now)\n            if not available or all(counts[p] + planned_counts.get((route, p), 0) >= route_target for p in available):\n                break\n            if all(seed_done(route, p, item["name"]) or state["entries"].get(f"{route}:{p}:{item['id']}", {}).get("status") == "done" for p in available):\n                continue\n            if quarantined_unordered_local_failure(\n                    route, item, state, available, clock.date().isoformat()):\n                # Verified earlier local ffprobe failure: no Meta POST occurred.\n                # A different clean clip may fill the daily slot instead.\n                report.append("QUARANTINE: exact source failed local MP4 preparation in a prior run; no blind media retry.")\n                continue\n            if source == "toonzone":\n                ep = list(parse_order(Path(item["name"]).stem, "cartoon")[:2])\n                today_episode = state["episode_days"].get(day)\n                if today_episode and today_episode != ep:\n                    if (ep < today_episode or\n                            not toonzone_episode_confirmed(state, videos, today_episode)):\n                        report.append("HELD: previous ToonZone episode lacks four confirmed parts on both platforms.")\n                        break\n                    report.append("ROLLOVER: completed ToonZone episode; continue in order within the remaining daily quota.")\n            try:\n                with tempfile.TemporaryDirectory() as tmp:\n                    captions, origin = copies(route, item, files, Path(tmp))\n            except (RuntimeError, UnicodeError, ValueError) as exc:\n                report.append("HELD TXT/caption: " + str(exc))\n                record_error("txt_caption", "txt_unavailable", route=route,\n                             video=item["name"], error=exc, safe_to_retry=True)\n                if source in {"film", "toonzone"}:\n                    break\n                continue\n            # Freeze exact text across retries/reconciliation when a new tag\n            # policy was used. Old intents retain their original text/hash.\n            for p in platforms:\n                prior = state["entries"].get(f"{route}:{p}:{item['id']}", {})\n                if isinstance(prior.get("publish_caption"), str):\n                    captions[p] = prior["publish_caption"]\n            if other_humor_hashes and any(caption_key(c) in other_humor_hashes for c in captions.values()):\n                continue\n            pending = []\n            held = False\n            skip_unproven_candidate = False\n            for p in platforms:\n                if p in blocked_platforms:\n                    continue\n                key = f"{route}:{p}:{item['id']}"\n                existing = state["entries"].get(key, {})\n                cap_hash = caption_key(captions[p])\n                if (existing.get("route") == route\n                        and existing.get("platform") == p\n                        and existing.get("file") == item["name"]\n                        and can_advance_past_local_visual_hold(route, existing)):\n                    # A source rejected locally before any Meta POST stays\n                    # quarantined even if its caption also matches old posts.\n                    # Check this before caption ambiguity can stop the queue.\n                    skip_unproven_candidate = True\n                    report.append("QUARANTINE: proven local-only visual duplicate; look for next unique clip.")\n                    continue\n                if (route == "film" and p == "instagram" and existing\n                        and existing.get("status") == "uncertain"\n                        and existing.get("reconciliation_conflict") == "post_id_belongs_to_other_source"):\n                    try:\n                        identical_alias = proven_film_ig_source_alias(\n                            item, existing, route, p, files, state["entries"],\n                            histories[p], duplicate_fingerprints)\n                    except RuntimeError as exc:\n                        report.append("HELD film source identity: " + str(exc))\n                        held = True\n                        continue\n                    if identical_alias:\n                        # Retain old container/intent and the original real\n                        # post owner. Never count, reassign or re-upload alias.\n                        report.append(\n                            "SOURCE ALIAS VERIFIED: identical film bytes belong "\n                            "to an existing real Instagram post; old intent held.")\n                        continue\n                if not existing and source == "film":\n                    try:\n                        duplicate = verified_film_duplicate(\n                            item, route, p, files, state["entries"], histories[p],\n                            duplicate_fingerprints,\n                        )\n                    except RuntimeError as exc:\n                        report.append("HELD film duplicate verification: " + str(exc))\n                        record_error("source_video", "source_or_cover_preparation_failed",\n                                     route=route, platform=p, video=item["name"], error=exc,\n                                     safe_to_retry=True)\n                        held = True\n                        continue\n                    if duplicate:\n                        state["entries"][key] = duplicate\n                        report.append(f"DUPLICATE VERIFIED: {item['name']} {p}; existing post_id={duplicate['post_id']}; no new upload.")\n                        continue\n                if origin != "account-fixed-txt" and cap_hash in ambiguous_captions[p]:\n                    if (source == "film" and\n                            confirmed_existing_film_post_amid_caption_reuse(\n                                existing, route, p, histories[p])):\n                        # Part 13 has two real post IDs using one caption.\n                        # They must not halt the ordered sequence or become\n                        # candidates for another upload.\n                        report.append(\n                            "EXISTING VERIFIED: exact Film post ID, remote "\n                            "timestamp and caption match; no new upload.")\n                        continue\n                    if (source in {"humor", "gonle", "daily_laugh"}\n                            and existing.get("status") not in {"intent", "uncertain", "held"}):\n                        # Several real posts use this caption, but none proves\n                        # which Drive file was sent. Even a partial existing\n                        # ledger must not stop unrelated unordered candidates.\n                        # Preserve its evidence; never invent or replace an ID.\n                        report.append(f"SKIP {page_name} {item['name']} {p}: repeated remote caption; source unverified.")\n                        skip_unproven_candidate = True\n                    else:\n                        report.append("HELD: multiple Meta posts share the same caption; manual reconciliation required.")\n                        held = True\n                    continue\n                match = None if origin == "account-fixed-txt" else remote[p].get(cap_hash)\n                if (match and existing.get("status") in {"uncertain", "intent"}\n                        and conflicting_done_post_source(\n                            state["entries"], key, route, p, str(match.get("id") or ""))):\n                    report.append("HELD: remote post ID already belongs to another source; no caption-only reconciliation.")\n                    if source in {"film", "toonzone"}:\n                        held = True\n                    else:\n                        skip_unproven_candidate = True\n                    continue\n                if existing.get("status") == "done" or seed_done(route, p, item["name"]) or match:\n                    if match:\n                        try:\n                            confirmed_id, confirmed_day = history_publication_match(route, match)\n                        except RuntimeError:\n                            report.append("HELD: remote caption match lacks valid post ID or timestamp.")\n                            held = True\n                            continue\n                        if existing and existing.get("status") in {"intent", "uncertain"}:\n                            if route in {"film", "film_second"}:\n                                report.append("HELD: unresolved Film source identity requires byte evidence.")\n                                held = True\n                                continue\n                            state["entries"][key].update(\n                                status="done", post_id=confirmed_id, day=confirmed_day,\n                                reconciled_in_run_id=os.getenv("GITHUB_RUN_ID", ""),\n                                reconciliation_proof="unique_platform_history_caption",\n                            )\n                        elif not existing:\n                            # Same caption is NOT proof that this video was posted.\n                            # Unordered routes may reuse texts. Quarantine this\n                            # candidate across both platforms and try another;\n                            # ordered Film/ToonZone must retain their position.\n                            if source in {"humor", "gonle", "daily_laugh"}:\n                                report.append(f"SKIP {page_name} {item['name']} {p}: remote caption already exists; source unverified.")\n                                skip_unproven_candidate = True\n                            else:\n                                report.append("HELD: remote caption matches but source identity is unverified.")\n                                held = True\n                    continue\n                if not audit:\n                    if authorize_exact_expired_recovery(route, p, item, existing, page, history_reconciled=True):\n                        report.append("RECOVERY: exact never-published Film container expired; one fresh upload reserved.")\n                    if authorize_film_part17_expired_recovery(\n                            route, p, item, existing, page, history_reconciled=True):\n                        report.append("RECOVERY: Film Part17 exact expired IG container; one bounded re-encoding reserved.")\n                    bind_legacy_ig_container(route, p, item, existing, page)\n                # Historical compact IG uploads that failed *before*\n                # media_publish were incorrectly treated as uncertain forever.\n                # Reclassify only exact, persisted pre-publish HTTP400 evidence,\n                # after successfully reading the remote account's history.\n                # One alternate encoder is permitted, never an ambiguous POST.\n                prior_failure = existing.get("failure") if isinstance(existing, dict) else None\n                if (not audit and p == "instagram" and existing.get("status") == "uncertain"\n                        and existing.get("caption_hash") == cap_hash\n                        and isinstance(prior_failure, dict)):\n                    prior = SimpleNamespace(\n                        stage=prior_failure.get("stage"),\n                        http_status=prior_failure.get("http_status"),\n                        code=prior_failure.get("graph_code"),\n                        subcode=prior_failure.get("graph_subcode"),\n                        container_status=prior_failure.get("container_status"),\n                    )\n                    previous_attempts = existing.get("prepublish_retry_count", 0)\n                    if known_pre_publish_media_rejection(prior, route, previous_attempts):\n                        existing.update(status="ready", prepublish_retry_count=previous_attempts + 1)\n                        report.append(\n                            f"RECOVERY: {item['name']} instagram previously rejected "\n                            "before media_publish; safe alternate encoding authorized once."\n                        )\n                if (not audit and existing.get("caption_hash") == cap_hash\n                        and audited_ig_v3_eligible(\n                            route, p, item["name"], existing)):\n                    # Remote history was read successfully and no unique or\n                    # ambiguous caption match was found above. Old 400 belongs\n                    # to the binary upload stage BEFORE media_publish. Preserve\n                    # all Facebook results and allow one new 720p/96k encode.\n                    existing.update(status="ready", prepublish_retry_count=2)\n                    report.append(\n                        f"RECOVERY V3: {item['name']} instagram audited "\n                        "pre-media_publish HTTP 400; one low-bitrate attempt."\n                    )\n                if (not audit and existing.get("caption_hash") == cap_hash\n                        and audited_ig_v4_eligible(route, p, item["name"], existing)):\n                    existing.update(status="ready", prepublish_retry_count=3)\n                    report.append(\n                        f"RECOVERY V4: {item['name']} instagram 180s compact "\n                        "profile validated FINISHED in no-publish test."\n                    )\n                if (not audit and existing.get("caption_hash") == cap_hash\n                        and audited_avanak_part10_recovery_eligible(route, p, item, existing)):\n                    existing.update(status="ready", prepublish_retry_count=2)\n                    report.append(\n                        "RECOVERY: audited Avanak Apti Part 10 binary rejection; "\n                        "one bounded 720p/96k attempt after remote reconciliation."\n                    )\n                # One owner-authorized Film Part 8 recheck. The old hold was\n                # local-only (no Meta POST) and remains preserved in the\n                # previous scoped artifacts. A fresh remote-history read and\n                # exact source SHA are mandatory; visual comparison runs again\n                # on source bytes BEFORE any provider upload.\n                if (not audit and route == "film"\n                        and os.getenv("FILM_PART8_STRICT_RECHECK_ENABLED") == "true"):\n                    from film_part8_recovery import eligible_original_held\n                    if eligible_original_held(item, existing):\n                        existing["status"] = "ready"\n                        existing["film_part8_recheck_candidate"] = True\n                        report.append(\n                            "RECOVERY: original Bickin Part 8 had local-only "\n                            "visual hold; require extended exact-source comparison "\n                            "before any Meta upload.")\n                if existing and existing.get("status") != "ready":\n                    report.append(f"HELD: {item['name']} {p} has an uncertain previous intent.")\n                    # A green GitHub run is NOT proof these queues are healthy.\n                    # Once per Istanbul day while still blocked, emit an\n                    # actionable alert without retrying the Meta POST.\n                    if (not audit and not can_advance_past_local_visual_hold(route, existing)\n                            and previous_intent_alert_due(existing, now)):\n                        record_error("previous_intent_hold", "unreconciled_previous_intent",\n                                     route=route, platform=p, video=item["name"],\n                                     status="uncertain")\n                        existing["hold_alerted_at"] = now.isoformat()\n                    if quarantine_unordered_ig_source(route, p, item, existing, cap_hash):\n                        # Unordered humor may use another unique clip while the\n                        # exact binary-rejected source stays quarantined on\n                        # both platforms. No retry, resume or intent deletion.\n                        skip_unproven_candidate = True\n                        report.append("QUARANTINE: exact unresolved humor source; look for another unique clip.")\n                    elif can_advance_past_local_visual_hold(route, existing):\n                        # Humor accounts also have no serial predecessor. A\n                        # fingerprint-confirmed local-only duplicate must not\n                        # block their next independent item indefinitely.\n                        # Preserve the original held row and every real post.\n                        skip_unproven_candidate = True\n                        report.append("QUARANTINE: proven local-only visual duplicate; look for next unique clip.")\n                    elif (source in {"gonle", "daily_laugh"}\n                            and existing.get("status") == "held"\n                            and (existing.get("failure") or {}).get("external_post_attempted") is False):\n                        # These feeds have no episode order. An old unresolved\n                        # source is protected on both platforms, while another\n                        # independently deduped clip may fill the daily slot.\n                        skip_unproven_candidate = True\n                        report.append("QUARANTINE: unresolved unordered source preserved; inspect next candidate.")\n                    elif facebook_can_continue_past_ig_rejection(route, p, existing):\n                        # After a proven failed binary upload with its one safe\n                        # IG retry consumed, keep IG in its original blocked\n                        # position. Later Facebook-only parts may proceed.\n                        blocked_platforms.add("instagram")\n                        report.append(\n                            "HELD Instagram sequence; Facebook may continue "\n                            "independently without changing the IG intent."\n                        )\n                    else:\n                        held = True\n                    continue\n                target = due if (film_ten_once or film_gap_once) and route == "film" else target_count(route, now)\n                today_count = sum(route_clock(route, timestamp(row)).date() == clock.date() for row in histories[p])\n                confirmed_in_ledger = ledger_daily_count(state, route, p, clock.date().isoformat())\n                today_count = 0 if rescue_only else max(today_count, confirmed_in_ledger)\n                # A tick catches up one item per account; no all-night busy polling.\n                if today_count + planned_counts.get((route, p), 0) >= target:\n                    continue\n                if (route == "film" and\n                        (p, film_canonical_part(item["name"])) in planned_film_parts):\n                    # Only one unproven same-part source may enter this batch;\n                    # two differently named Drive copies are not two safe slots.\n                    report.append("HELD: film part already planned for this platform in this run.")\n                    continue\n                pending.append(p)\n            if held:\n                break\n            if skip_unproven_candidate:\n                # A matched/ambiguous remote caption means no trustworthy\n                # Drive-file identity: never upload this candidate to either\n                # platform. An unrelated clean candidate may still be planned.\n                continue\n            if not pending:\n                continue\n            if quarantined_unordered_local_failure(\n                    route, item, state, pending, clock.date().isoformat()):\n                # Quotas or an existing publication can leave only a subset\n                # of route platforms pending. Preserve the exact local-only\n                # failure after every history/uncertain-intent guard above;\n                # do not reserve the same broken preparation again.\n                report.append("QUARANTINE: exact pending platforms failed local preparation in a prior run; inspect another unordered source.")\n                continue\n            # Dedupe with the original TXT first; decorate only genuinely new\n            # intents, before their exact publication hashes are persisted.\n            for p in pending:\n                if origin != "account-fixed-txt" and not state["entries"].get(f"{route}:{p}:{item['id']}"):\n                    captions[p] = prepare_caption(captions[p], route, Path(item["name"]).stem, p)\n            if any((route, p, caption_key(captions[p])) in planned_caption_hashes\n                   for p in pending):\n                # Remote history is a snapshot taken before this batch. A\n                # second Drive alias must not bypass the caption check.\n                # Hold the whole clip rather than guessing its source identity.\n                report.append("HELD: identical caption already reserved by another "\n                              "Drive source in this run; no second Meta upload.")\n                continue\n            selected = dict(item, route=route, page=page_name, platforms=pending, captions=captions, caption_source=origin)\n            if (route == "film" and item["name"] == "Bickin_Part_8.mp4"\n                    and pending and all(\n                        state["entries"].get(f"{route}:{p}:{item['id']}", {})\n                        .get("film_part8_recheck_candidate") is True\n                        for p in pending)):\n                selected["film_part8_strict_recheck"] = True\n            ig_entry = state["entries"].get(f"{route}:instagram:{item['id']}", {})\n            if "instagram" in pending and ig_entry.get("container_resume"):\n                if pending != ["instagram"]:\n                    report.append("HELD: existing container requires isolated Instagram recovery.")\n                    continue\n                selected["resume_container_id"] = ig_entry["container_resume"]["container_id"]\n            if "instagram" in pending:\n                _, selected_tags = enhance_instagram_caption(captions["instagram"], route, Path(item["name"]).stem)\n                if selected_tags:\n                    selected["instagram_user_tags"] = selected_tags\n            if source == "toonzone":\n                cover = catalogs["covers"].get(Path(item["name"]).stem + ".png")\n                if cover and str(cover.get("id") or "").strip():\n                    selected["cover_id"] = cover["id"]\n                else:\n                    required_png = Path(item["name"]).stem + ".png"\n                    # Previously a green workflow silently skipped every video\n                    # in this ordered series. Record the actionable first gap.\n                    report.append(\n                        "HELD: exact ToonZone cover missing; "\n                        + "source=" + json.dumps(item["name"], ensure_ascii=False)\n                        + "; required_png=" + json.dumps(required_png, ensure_ascii=False)\n                        + "; fallback disabled."\n                    )\n                    record_error("toonzone_cover", "cover_missing",\n                                 route=route, video=item["name"])\n                    break\n                state["episode_days"][day] = ep\n            report.append(f"NEXT: {item['name']}; caption_source={origin}; platforms={','.join(pending)}")\n            if source == "toonzone":\n                report.append("Caption preview: " + captions[pending[0]][:450].replace("\n", " "))\n            if not audit:\n                for p in pending:\n                    key = f"{route}:{p}:{item['id']}"\n                    old_resume = state["entries"].get(key, {}).get("container_resume")\n                    old_attempts = state["entries"].get(key, {}).get("prepublish_retry_count", 0)\n                    old_expired = state["entries"].get(key, {}).get("expired_container_recovery")\n                    old_source_sha256 = state["entries"].get(key, {}).get("source_sha256")\n                    state["entries"][key] = {\n                        "route": route, "platform": p, "status": "intent",\n                        "caption_hash": caption_key(captions[p]), "file": item["name"],\n                        "publish_caption": captions[p], "caption_source": origin,\n                        "day": clock.date().isoformat(), "run_id": os.environ["GITHUB_RUN_ID"],\n                        "prepublish_retry_count": old_attempts,\n                    }\n                    if isinstance(old_source_sha256, str) and len(old_source_sha256) == 64:\n                        state["entries"][key]["source_sha256"] = old_source_sha256\n                    if p == "instagram" and old_resume:\n                        state["entries"][key]["container_resume"] = old_resume\n                    if p == "instagram" and old_expired:\n                        state["entries"][key]["expired_container_recovery"] = old_expired\n                plans.append(selected)\n                for p in pending:\n                    planned_caption_hashes.add((route, p, caption_key(captions[p])))\n                    planned_counts[(route, p)] = planned_counts.get((route, p), 0) + 1\n                    if route == "film":\n                        planned_film_parts.add((p, film_canonical_part(item["name"])))\n                if (route in _AUDITED_IG_V3_FILES and\n                        item["name"] == _AUDITED_IG_V3_FILES[route] and\n                        "instagram" in pending and\n                        state["entries"][f"{route}:instagram:{item['id']}"]\n                        .get("prepublish_retry_count") == 2):\n                    # One IG-only recovery and one separate FB part can be\n                    # scheduled on the same tick. Never skip the next IG part.\n                    blocked_platforms.add("instagram")\n            route_selected += 1\n            if route_selected >= batch_limit:\n                fb_due = (not audit and route in _AUDITED_IG_V3_FILES\n                          and "instagram" in blocked_platforms\n                          and "facebook" in platforms\n                          and "facebook" not in blocked_platforms\n                          and planned_counts.get((route, "facebook"), 0) < batch_limit\n                          and counts.get("facebook", 0) < target_count(route, now))\n                if not fb_due:\n                    break\n        if selected is None:\n            report.append("No eligible unpublished item below the daily target.")\n            # An empty/blocked queue below a due target is an operational\n            # deficit, not a successful no-op. Journal every due tick;\n            # delivery is deduplicated separately after notification ACK.\n            # Ordinary NOT DUE and already-complete ticks never reach here.\n            alert_days = state.setdefault("queue_alert_days", {})\n            local_day = clock.date().isoformat()\n            # Old publication holds can persist for days and their original\n            # notification may already be deduplicated. They must not hide\n            # today's missing publications; keep the held records untouched.\n            if not audit:\n                record_error("planning_queue", "no_eligible_content", route=route,\n                             safe_to_retry=True)\n                alert_days[route] = local_day\n    save(STATE, state)\n    save(PLAN, plans)\n    from content_stock import build_stock, stock_markdown\n    stocks = build_stock(catalogs, state, ROUTES,\n                         {r: (4 if r == 'toonzone' else 8 if r == 'daily_laugh' else 5)\n                          for r in ROUTES}, unavailable=unavailable_catalogs,\n                         generated_caption_dirs=generated_caption_dirs)\n    save(ROOT / 'content-stock.json', {'measured_at': now.isoformat(), 'accounts': stocks})\n    report.extend(['', stock_markdown(stocks)])\n    summary = "\n".join(report) + "\n"\n    (ROOT / "report.md").write_text(summary, encoding="utf-8")\n    print(summary, flush=True)\n    with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as out:\n        out.write(summary)\n\n\nclass MP4MissingMoov(RuntimeError):\n    """Source MP4 has no sample index. No Meta upload can repair its bytes."""\n    diagnostic_code = "missing_moov_atom"\n\n\ndef verify_source_video(path):\n    """Reject truncated or nonvideo MP4s before either Facebook or IG POST."""\n    try:\n        info = probe(path)\n        streams = info.get("streams", [])\n        fmt = info.get("format", {})\n        duration = float(fmt.get("duration", 0))\n        if not any(stream.get("codec_type") == "video" for stream in streams):\n            raise ValueError("no-video-stream")\n        if not (0 < duration < 10800):\n            raise ValueError("invalid-video-duration")\n    except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:\n        raise RuntimeError("MP4 medya ön doğrulaması başarısız: " + type(exc).__name__) from None\n    except Exception as exc:\n        # An actual ffprobe decode failure may be the MP4's missing moov\n        # index (confirmed for Daily Laugh 195.mp4). Distinguish it from\n        # transient tool errors WITHOUT reading or logging ffprobe stderr.\n        if type(exc).__name__ == "CalledProcessError":\n            try:\n                from instagram_media_compat import mp4_atom_structure\n                atoms = mp4_atom_structure(path)\n                if atoms["moov_offset"] is None:\n                    raise MP4MissingMoov("missing_moov_atom") from None\n            except MP4MissingMoov:\n                raise\n            except (OSError, ValueError, KeyError, TypeError):\n                pass\n        raise RuntimeError("MP4 medya doğrulaması çalıştırılamadı: " + type(exc).__name__) from None\n    return True\n\n\ndef download_verified_publication_video(file_id, path):\n    """Validate the downloaded MP4, with one alternate read if it is unreadable."""\n    video = download(file_id, path)\n    for attempt in range(2):\n        try:\n            with video.open("rb") as source:\n                if source.read(8)[4:8] != b"ftyp":\n                    raise RuntimeError("Source is not MP4")\n            verify_source_video(video)\n            return video\n        except RuntimeError:\n            video.unlink(missing_ok=True)\n            if attempt:\n                raise\n            print("İndirilen MP4 doğrulanamadı; bir kez alternatif Drive indirmesi deneniyor.", flush=True)\n            video = direct_public_drive(file_id, path)\n            if video is None:\n                raise\n\n\ndef pending_publication_platforms(item, state):\n    """Validate a persisted plan against its ledger before any download or POST."""\n    platforms = item.get("platforms")\n    if not isinstance(platforms, list) or len(platforms) != len(set(platforms)):\n        raise RuntimeError("Publication plan platform list invalid")\n    pending = []\n    for platform in platforms:\n        if platform not in {"facebook", "instagram"}:\n            raise RuntimeError("Publication plan platform invalid")\n        key = f"{item['route']}:{platform}:{item['id']}"\n        entry = state.get("entries", {}).get(key)\n        if not isinstance(entry, dict):\n            raise RuntimeError("Publication intent missing")\n        if entry.get("status") == "done":\n            if not str(entry.get("post_id") or "").strip():\n                raise RuntimeError("Completed publication has no confirmed ID")\n            continue\n        if entry.get("status") != "intent":\n            raise RuntimeError("Publication requires a fresh reconciled intent")\n        caption = item.get("captions", {}).get(platform)\n        if not isinstance(caption, str) or not caption.strip():\n            raise RuntimeError("Publication caption missing")\n        # Older imported intents may lack optional identity fields. New\n        # planner entries always persist them; never bypass a present binding.\n        if entry.get("caption_hash") and entry["caption_hash"] != caption_key(caption):\n            raise RuntimeError("Publication caption differs from persisted intent")\n        if entry.get("publish_caption") is not None and entry["publish_caption"] != caption:\n            raise RuntimeError("Publication text differs from persisted intent")\n        if entry.get("file") and entry["file"] != item.get("name"):\n            raise RuntimeError("Publication source differs from persisted intent")\n        if entry.get("run_id") and entry["run_id"] != os.getenv("GITHUB_RUN_ID"):\n            raise RuntimeError("Publication intent belongs to another run")\n        pending.append(platform)\n    return pending\n\n\ndef ordered_predecessors_confirmed(plans, index, item, state):\n    """Do not POST a later serial part until earlier planned parts have IDs."""\n    if item.get("route") not in {"film", "film_second", "toonzone"}:\n        return True\n    for prior in plans[:index]:\n        if prior.get("route") != item["route"]:\n            continue\n        if not prior.get("platforms") or not prior.get("id") or not prior.get("name"):\n            return False\n        for platform in prior["platforms"]:\n            if platform not in {"facebook", "instagram"}:\n                return False\n            row = state.get("entries", {}).get(\n                f"{prior['route']}:{platform}:{prior['id']}")\n            if (not isinstance(row, dict) or row.get("status") != "done"\n                    or not str(row.get("post_id") or "").strip()\n                    or row.get("file") != prior["name"]):\n                return False\n    return True\n\n\ndef hold_unattempted_ordered_successor(item, state):\n    """Release only this run's intact, never-POSTed intents to safe planning."""\n    for platform in item.get("platforms", []):\n        if platform not in {"facebook", "instagram"}:\n            continue\n        row = state.get("entries", {}).get(\n            f"{item.get('route')}:{platform}:{item.get('id')}")\n        caption = item.get("captions", {}).get(platform)\n        if (isinstance(row, dict) and isinstance(caption, str)\n                and row.get("status") == "intent"\n                and row.get("run_id") == os.getenv("GITHUB_RUN_ID")\n                and row.get("file") == item.get("name")\n                and row.get("caption_hash") == caption_key(caption)):\n            row.update(status="ready", failure={\n                "reason": "ordered_predecessor_unconfirmed",\n                "safe_to_repost": True, "external_post_attempted": False})\n\n\ndef publish():\n    scope = account_scope()\n    state = json.loads(STATE.read_text())\n    plans = json.loads(PLAN.read_text())\n    if scope and (not isinstance(plans, list) or any(\n            not isinstance(item, dict) or item.get("route") != scope\n            for item in plans)):\n        # Never trust a stale or foreign plan, even if an artifact is valid.\n        raise RuntimeError("Isolated worker received an out-of-scope publication plan")\n    pages = {p["page_name"]: p for p in load_meta_auth()["pages"]}\n    verified_pages = preflight_verified_pages()\n    failures = []\n    for index, original_item in enumerate(plans):\n        item = dict(original_item)\n        if verified_pages is not None and item.get("page") not in verified_pages:\n            failures.append(str(item.get("route", "unknown")) + ": account preflight held")\n            record_error("publication_preflight", "account_preflight_held",\n                         route=item.get("route"), video=item.get("name"))\n            continue\n        if not ordered_predecessors_confirmed(plans, index, item, state):\n            # An earlier serial part failed or is unconfirmed. Never begin\n            # this part's download or Meta POST, and preserve prior evidence.\n            hold_unattempted_ordered_successor(item, state)\n            save(STATE, state)\n            failures.append(str(item.get("route", "unknown"))\n                            + ": later ordered part held; predecessor unconfirmed")\n            continue\n        try:\n            item["platforms"] = pending_publication_platforms(item, state)\n        except (RuntimeError, KeyError, TypeError) as exc:\n            failures.append(str(item.get("route", "unknown")) + ": publication intent validation failed")\n            record_error("publication_preflight", "intent_validation_failed",\n                         route=item.get("route"), video=item.get("name"), error=exc)\n            continue\n        if not item["platforms"]:\n            continue\n        page = pages.get(item["page"])\n        if page is None:\n            failures.append(str(item.get("route", "unknown")) + ": account identity unavailable")\n            record_error("publication_preflight", "meta_account_missing",\n                         route=item.get("route"), video=item.get("name"))\n            continue\n        if item.get("resume_container_id"):\n            try:\n                if not publish_existing_ig_intent(item, page, state):\n                    failures.append(item["page"] + " instagram: existing container not FINISHED")\n            except Exception as exc:\n                failures.append(item["page"] + " instagram: existing container reconciliation " + type(exc).__name__)\n                record_error("instagram_publish", "existing_container_reconciliation_failed",\n                             route=item["route"], platform="instagram", video=item["name"], error=exc)\n                save(STATE, state)\n            continue\n        if item["route"] == "toonzone" and (\n                item.get("generate_toonzone_cover") or not item.get("cover_id")):\n            # Also reject a stale or forged archived plan. Do not treat the\n            # synthetic fallback's presence as permission to upload.\n            failures.append("ToonZone: exact original Drive cover required")\n            for platform in item["platforms"]:\n                entry = state["entries"].get(f"toonzone:{platform}:{item['id']}")\n                if isinstance(entry, dict) and entry.get("status") == "intent":\n                    entry["status"] = "ready"\n                    entry["failure"] = {"reason": "exact_owner_cover_required",\n                                        "safe_to_repost": True}\n            save(STATE, state)\n            continue\n        with tempfile.TemporaryDirectory() as tmp:\n            temp = Path(tmp)\n            source_fingerprint = None\n            try:\n                video = download_verified_publication_video(item["id"], temp / "source.mp4")\n                from operational_enhancements import bind_source_integrity\n                if not bind_source_integrity(item, state, video):\n                    failures.append(item["page"] + ": source changed; held before Meta upload")\n                    record_error("source_video", "source_content_changed",\n                                 route=item["route"], video=item["name"], safe_to_retry=False)\n                    save(STATE, state)\n                    continue\n                # Persist the immutable source digest before any external POST.\n                save(STATE, state)\n                if os.getenv('MEDIA_QUALITY_ENABLED', 'false').lower() == 'true':\n                    from media_quality import inspect_video, safe_failure_code\n                    try:\n                        quality = inspect_video(video)\n                    except Exception as exc:\n                        save(ROOT / 'quality' / (item['id'] + '.json'),\n                             {'status': 'held', 'reason': 'quality_check_failed',\n                              'check_code': safe_failure_code(exc),\n                              'source_id': item['id']})\n                        raise RuntimeError('Local media quality gate held source') from None\n                    save(ROOT / 'quality' / (item['id'] + '.json'), quality)\n                if item.get("approved_md5"):\n                    checksum = hashlib.md5(video.read_bytes()).hexdigest()\n                    if checksum != item["approved_md5"]:\n                        raise RuntimeError("Human-approved content checksum mismatch")\n                if os.getenv("ADVANCED_DEDUPE_ENABLED", "false").lower() == "true":\n                    from media_similarity import visual_fingerprint\n                    source_fingerprint = visual_fingerprint(video)\n                from subtitle_pipeline import prepare_subtitles\n                video, subtitle_receipt = prepare_subtitles(\n                    video, item["route"], ROOT / "subtitles" / item["route"] / item["id"])\n                save(ROOT / "subtitles" / item["route"] / item["id"] / "receipt.json", subtitle_receipt)\n                if item.get("cover_id"):\n                    cover = download(item["cover_id"], temp / "cover.png")\n                    if item["route"] == "toonzone":\n                        # Validate actual original PNG bytes, not just Drive\n                        # filename/ID, before sending any bytes to Meta.\n                        from toonzone_cover_acceptance import png_identity\n                        png_identity(cover)\n                    video = create_instagram_cover_video(\n                        video, cover, temp / "covered.mp4",\n                        preserve_full_cover=(item["route"] == "toonzone"),\n                    )\n                elif item.get("generate_toonzone_cover"):\n                    raise RuntimeError("toonzone_synthetic_cover_forbidden")\n            except Exception as exc:\n                failures.append(item["page"] + ": " + type(exc).__name__ + ": " + _sanitize_meta_text(str(exc))[:400])\n                for platform in item["platforms"]:\n                    key = f"{item['route']}:{platform}:{item['id']}"\n                    state["entries"][key].update(\n                        status="ready",\n                        failure={"reason": "source_or_cover_preparation_failed",\n                                 "error_type": type(exc).__name__,\n                                 "media_diagnostic": ("missing_moov_atom"\n                                                      if isinstance(exc, MP4MissingMoov)\n                                                      else "N/A"),\n                                 "safe_to_repost": True},\n                    )\n                for platform in item["platforms"]:\n                    record_error("source_video", "source_or_cover_preparation_failed",\n                                 route=item["route"], platform=platform,\n                                 video=item["name"], error=exc, safe_to_retry=True)\n                save(STATE, state)\n                continue\n            if item.get("film_part8_strict_recheck") and source_fingerprint is None:\n                # No dedupe evidence is not permission to upload Bickin 8.\n                failures.append("Film Part 8: extended duplicate check unavailable")\n                for p in item["platforms"]:\n                    state["entries"][f"{item['route']}:{p}:{item['id']}"].update(\n                        status="held", failure={"reason": "extended_visual_check_unavailable",\n                                                "external_post_attempted": False,\n                                                "safe_to_repost": False})\n                save(STATE, state)\n                continue\n            if source_fingerprint is not None:\n                from media_similarity import hold_visual_duplicate\n                if item.get("film_part8_strict_recheck"):\n                    from film_part8_recovery import audit_part8_before_publish\n                    try:\n                        _checked_fp, proof = audit_part8_before_publish(\n                            item, state, temp / "source.mp4",\n                            download_verified_publication_video, temp)\n                    except (OSError, RuntimeError, ValueError) as exc:\n                        film_hold_reason = (\n                            "film_part8_source_visually_duplicate"\n                            if str(exc) == "film_part8_source_visually_duplicates_part3"\n                            else "film_part8_strict_recheck_held"\n                        )\n                        # The original three-frame hold is still authoritative\n                        # unless the stronger source-vs-source proof passes.\n                        if not hold_visual_duplicate(item, state, source_fingerprint):\n                            for p in item["platforms"]:\n                                state["entries"][f"{item['route']}:{p}:{item['id']}"].update(\n                                    status="held",\n                                    failure={"reason": film_hold_reason,\n                                             "external_post_attempted": False,\n                                             "safe_to_repost": False})\n                        record_error("source_video", film_hold_reason,\n                                     route=item["route"], video=item["name"],\n                                     error=exc, safe_to_retry=False)\n                        save(STATE, state)\n                        continue\n                    for p in item["platforms"]:\n                        row = state["entries"][f"{item['route']}:{p}:{item['id']}"]\n                        row["visual_fingerprint"] = source_fingerprint\n                        row["part8_strict_dedupe_proof"] = proof\n                    save(STATE, state)\n                elif hold_visual_duplicate(item, state, source_fingerprint):\n                    # A potentially duplicated source is held for human review,\n                    # never retried automatically. Preserve every prior post.\n                    # The local-only duplicate hold is expected safety, not a provider failure.\n                    # Journal it, but do not turn unrelated successful posts into a red run.\n                    record_error("source_video", "visual_duplicate_review",\n                                 route=item["route"], video=item["name"],\n                                 safe_to_retry=False)\n                    save(STATE, state)\n                    continue\n                # Persist the fingerprint alongside each existing archived\n                # intent before any external upload attempt.\n                save(STATE, state)\n            # Instagram transcoding is local preparation, not a Meta API\n            # upload. If it fails, mark only Instagram ready to try the next\n            # safe scheduled run. Facebook can still publish independently.\n            prepared_ig = None\n            if "instagram" in item["platforms"]:\n                try:\n                    retry_count = state["entries"][\n                        f"{item['route']}:instagram:{item['id']}"\n                    ].get("prepublish_retry_count", 0)\n                    alternate_compact_profile = (\n                        retry_count == 1 and item["route"] in {"film", "film_second", "toonzone"}\n                        and not (retry_count == 3 and\n                                 item["route"] in _AUDITED_IG_V3_FILES and\n                                 item["name"] == _AUDITED_IG_V3_FILES[item["route"]])\n                    )\n                    # Bounded, different FFmpeg encodings for short Reels.\n                    # We never change Facebook state or replay media_publish.\n                    short_recovery_v3 = (\n                        retry_count == 2 and\n                        item["route"] in {"tarladaki", "penguen", "daily_laugh", "gonle"}\n                    )\n                    gonle_alt_vertical = (\n                        item["route"] == "gonle" and retry_count == 1\n                    )\n                    prepared_ig = prepare_instagram_upload(\n                        video, temp / "instagram.mp4",\n                        # 29 Oct: 167.mp4 rejected after a 15 MB 1080p first\n                        # pass. Keep full duration; start short routes at 720p.\n                        short_reel=(retry_count == 0 and item["route"] in {\n                            "tarladaki", "penguen", "daily_laugh"}),\n                        # 24-25 Oct: repeated Meta HTTP 400 ProcessingFailedError\n                        # despite a valid faststart stream-copy remux. Re-encode\n                        # short humour/Daily Reels to 30fps H.264 + AAC instead.\n                        prefer_remux=item["route"] not in {"tarladaki", "penguen", "daily_laugh"},\n                        film_compact=(\n                            not alternate_compact_profile\n                            and not short_recovery_v3\n                            and not gonle_alt_vertical\n                            and not (retry_count == 2 and item["route"] in {"film", "film_second", "toonzone"})\n                            and (item["route"] in {"film", "film_second", "gonle"}\n                                 or retry_count > 0)\n                        ),\n                        toonzone_compact=(\n                            item["route"] == "toonzone" and not alternate_compact_profile\n                            and retry_count != 2\n                        ),\n                        # Last verified prepublish rejection gets a THIRD, distinct\n                        # locally validated full-length MP4 bitstream. This does\n                        # not authorize repeating uncertain Meta writes.\n                        recovery_v4=(retry_count == 2 and item["route"] in\n                                     {"film", "film_second", "toonzone"}),\n                        # Apparent MP4/codec compliance did not prevent the\n                        # repeated short-Reels rupload ProcessingFailedError.\n                        # Always encode first-pass humour/Daily reels into a\n                        # controlled H.264/AAC bitstream, even if ffprobe says\n                        # the original is compliant. Other routes keep their\n                        # established profiles and one-shot retry gates.\n                        force_transcode=(\n                            alternate_compact_profile or gonle_alt_vertical\n                            or (retry_count == 2 and item["route"] in {"film", "film_second", "toonzone"})\n                            or short_recovery_v3\n                            or item["route"] in {"tarladaki", "penguen", "daily_laugh"}\n                        ),\n                        recovery_v3=(\n                            short_recovery_v3\n                            # Film/ToonZone's alternate encoder previously fell\n                            # through to 1080p/4M (95 MB for a 7 MB source).\n                            # Use the existing bounded 720p/1.8M/96k profile.\n                            or alternate_compact_profile\n                            or (retry_count == 2 and\n                                item["route"] in _AUDITED_IG_V3_FILES and\n                                item["name"] == _AUDITED_IG_V3_FILES[item["route"]])\n                        ),\n                    )\n                    if item["route"] == "toonzone":\n                        # Historical five live IG thumbnails disagree with\n                        # their original Drive PNGs. Block NEW IG uploads unless\n                        # the final transcoded MP4 actually begins with this\n                        # exact part's cover; never touch archived done posts.\n                        from toonzone_cover_acceptance import verify_prepared_instagram_first_frame\n                        verify_prepared_instagram_first_frame(cover, prepared_ig)\n                except Exception as exc:\n                    key = f"{item['route']}:instagram:{item['id']}"\n                    state["entries"][key].update(\n                        status="ready", failure={"reason": "media_preparation_failed",\n                                                 "error_type": type(exc).__name__,\n                                                 "safe_to_repost": True},\n                    )\n                    failures.append(item["page"] + " instagram: local media preparation "\n                                    + type(exc).__name__ + " (no Meta upload attempted)")\n                    record_error("instagram_preparation", "media_preparation_failed",\n                                 route=item["route"], platform="instagram",\n                                 video=item["name"], error=exc, safe_to_retry=True)\n                    save(STATE, state)\n            for platform in item["platforms"]:\n                if platform == "instagram" and prepared_ig is None:\n                    continue\n                key = f"{item['route']}:{platform}:{item['id']}"\n                try:\n                    # Persist the point of no blind retry BEFORE the external\n                    # write. A crash/replayed publish step must reconcile first.\n                    state["entries"][key]["status"] = "uncertain"\n                    save(STATE, state)\n                    if platform == "facebook":\n                        post = upload_facebook_reel(page, str(video), item["captions"][platform])\n                    else:\n                        tag_options = ({"user_tags": item["instagram_user_tags"]}\n                                       if item.get("instagram_user_tags") else {})\n                        if item["route"] == "toonzone":\n                            # Select the locally proven first frame explicitly.\n                            # Only the next new Reel receives this option.\n                            tag_options["thumb_offset"] = 0\n                        post = upload_instagram_reel(\n                            page, str(prepared_ig), item["captions"][platform],\n                            append_store_link=False, **tag_options,\n                        )\n                    if not post:\n                        raise RuntimeError("Publication has no post ID")\n                    state["entries"][key].update(\n                        status="done", post_id=str(post),\n                        published_at_utc=datetime.now(timezone.utc).isoformat(),\n                        publication_run_id=os.getenv("GITHUB_RUN_ID", ""),\n                    )\n                    state["entries"][key].pop("failure", None)\n                    print(json.dumps({"page": item["page"], "file": item["name"], "platform": platform, "post_id": str(post)}, ensure_ascii=False), flush=True)\n                except Exception as exc:\n                    # Never blindly repeat a Meta POST, including HTTP 400.\n                    # A rejected API request and a timed-out *accepted* upload\n                    # are indistinguishable without remote reconciliation.\n                    diagnostic = classify_meta_failure(exc)\n                    entry = state["entries"][key]\n                    previous = entry.get("prepublish_retry_count", 0)\n                    if (platform == "instagram" and isinstance(exc, MetaAPIError)\n                            and known_pre_publish_media_rejection(exc, item["route"], previous)):\n                        # This native uploader has not reached media_publish.\n                        # The next scheduled job rechecks remote posts before\n                        # creating a new container with a distinct encoding.\n                        # At most two additional short-Reel profiles are tried.\n                        entry.update(\n                            status="ready",\n                            prepublish_retry_count=previous + 1,\n                            failure=dict(diagnostic,\n                                         recovery_next_profile=previous + 1,\n                                         recovery_action="normalize_then_reconcile_at_next_tick"),\n                        )\n                    else:\n                        entry.update(status="uncertain", failure=diagnostic)\n                    safe = str(exc) if isinstance(exc, MetaAPIError) else type(exc).__name__\n                    failures.append(item["page"] + " " + platform + ": " + safe)\n                    record_error(f"{platform}_publish", diagnostic["reason"],\n                                 route=item["route"], platform=platform,\n                                 video=item["name"], error=exc,\n                                 status=entry["status"],\n                                 safe_to_retry=entry["status"] == "ready")\n                finally:\n                    save(STATE, state)\n    if failures:\n        print("HELD failures: " + "; ".join(failures), flush=True)\n        raise SystemExit(1)\n\n\nif __name__ == "__main__":\n    parser = argparse.ArgumentParser()\n    parser.add_argument("action", choices=("audit", "plan", "publish"))\n    action = parser.parse_args().action\n    if action == "publish":\n        publish()\n    else:\n        plan(audit=action == "audit")\n\n
+"""Meta-only publishing from the owner's shared links, without Drive OAuth.
+
+The workflow persists its complete intent before uploading any media. An
+uncertain publication is held for reconciliation, never blindly retried.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import io
+import json
+import os
+import re
+import time
+import tempfile
+import zipfile
+from types import SimpleNamespace
+from datetime import datetime, timezone
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+import gdown
+import requests
+
+from cloud_omnichannel_publisher import (
+    GRAPH_API_VERSION, MetaAPIError, create_instagram_cover_video,
+    upload_facebook_reel, upload_instagram_reel, _sanitize_meta_text,
+)
+from instagram_media_compat import prepare_instagram_upload, probe
+from toonzone_cover_fallback import generate_part_cover
+from content_hashtags import prepare_caption
+from account_fixed_txt import selected_txt, verify_text
+from instagram_tagging import enhance_instagram_caption
+from publisher_error_journal import record_error
+from expired_ig_container_recovery import (
+    authorize_exact_expired_recovery, authorize_film_part17_expired_recovery,
+    terminal_recovery_reserved,
+)
+from meta_auth_loader import load_meta_auth
+from ordered_channels import TOONZONE_ETSY_LINK, parse_order, toonzone_metadata
+from publication_safety import route_paused
+from publisher_recovery import (
+    read_with_retry, classify_meta_failure, known_pre_publish_media_rejection,
+)
+from scheduled_multi_publisher import (
+    platform_content_from_txt, TARLADAKI_HOURS, PENGUEN_HOURS,
+    GONLE_HOURS, FILM_HOURS, daily_laugh_hours_for_date,
+)
+
+TR = ZoneInfo("Europe/Istanbul")
+ROOT = Path("link-runtime")
+STATE = ROOT / "state.json"
+PLAN = ROOT / "plan.json"
+FOLDERS = {
+    "humor": "11zbrunHoiTZyJ8JDsj99ascO66mmCj-M",
+    "gonle": "1OA-qvfBEcCKBCTSMj4dCz8rg2p6t0aKt",
+    "daily_laugh": "137--TeBht1yikZpMfV9VSEADbKuXZtLT",
+    "film": "1NvEuGQ83BmCMrzdK6ziI1nC_0zzshqJW",
+    "toonzone": "14ee4AnUdf03dYUAdtfpHa-E9Zxyh4UZF",
+    "covers": "1YlGz6rKfW_S2eMW82zOs09flCGtwYWMO",
+}
+ROUTES = {
+    "tarladaki": ("humor", "Tarladaki Fasulye"),
+    "penguen": ("humor", "Beyinsiz Penguen"),
+    "gonle": ("gonle", "Gönle Düşen"),
+    "daily_laugh": ("daily_laugh", "Daily Laugh Lab"),
+    "film": ("film", "Film Mağarası"),
+    "film_second": ("film", "Filmmagrasi"),
+    "toonzone": ("toonzone", "ToonZone"),
+}
+
+
+
+ACCOUNT_SCOPES = frozenset(ROUTES)
+
+
+def account_scope():
+    """Explicit account identity for isolated jobs; unknown values fail closed."""
+    scope = os.getenv("PUBLISH_ACCOUNT_SCOPE", "").strip()
+    if scope and scope not in ACCOUNT_SCOPES:
+        raise RuntimeError("Unrecognized isolated publisher account")
+    return scope
+
+
+def owned_humor_source(route, file_id):
+    """Stable disjoint ownership of shared humor Drive sources across workers."""
+    if route not in {"tarladaki", "penguen"}:
+        raise ValueError("Only humor routes have shared source ownership")
+    bucket = int(hashlib.sha256(str(file_id).encode()).hexdigest(), 16) % 2
+    return bucket == (0 if route == "tarladaki" else 1)
+
+
+def save(path, value):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path == STATE and isinstance(value, dict) and isinstance(value.get("entries"), dict):
+        # Rebuild on every state write, including after a successful Meta POST.
+        # Persist in the SAME link-state-result/intent artifact so subsequent
+        # GitHub runners resume from verified IDs, not an in-memory counter.
+        # Unordered Daily Laugh is deliberately excluded from serial cursor.
+        from serial_publication_cursor import derive_serial_cursor
+        value["serial_cursor"] = derive_serial_cursor(value)
+    path.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def preflight_verified_pages():
+    """Read the preflight identity allowlist; never infer permission from absence."""
+    if os.getenv("META_PREFLIGHT_PARTIAL_OK", "false").lower() != "true":
+        return None
+    path = Path(os.getenv("META_PREFLIGHT_REPORT_PATH",
+                          "link-runtime/meta-preflight.json"))
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        names = payload["verified_pages"]
+        if (payload.get("schema") != 1
+                or payload.get("status") not in {"identity_verified", "partial_identity_verified"}
+                or not isinstance(names, list) or not names
+                or any(not isinstance(n, str) or n not in ROUTES_PAGE_NAMES for n in names)
+                or len(set(names)) != len(names)):
+            raise ValueError("invalid account allowlist")
+        return set(names)
+    except (OSError, KeyError, TypeError, ValueError) as exc:
+        raise RuntimeError("Meta preflight evidence is unavailable or invalid") from None
+
+
+ROUTES_PAGE_NAMES = frozenset(page for _, page in ROUTES.values())
+
+
+def caption_key(value):
+    value = re.sub(r"https://www\.etsy\.com/\S+", "", value or "")
+    value = re.sub(r"\bEtsy:\s*", "", value, flags=re.I)
+    return hashlib.sha256(" ".join(value.split()).encode()).hexdigest()
+
+
+# Proven in production job logs and the 30 Oct GET-only diagnostic. Binding
+# includes the exact old intent, source and text hash; no heuristic association.
+_LEGACY_IG_CONTAINERS = {
+    ("film", "1Zn8kYmexuUe3z1EKLtCrKFCwj4qVnIa2"): (
+        "Avanak_Apti_Part_10 (1).mp4", "41036563337", "17904577569599675",
+        "d7bfd2238b0de47372e0536e61c79545049346aa56a7a75b0d5e707a342d1417",
+        "1239298989276639", "17841477990224124"),
+    ("toonzone", "1rdn35OLH8Sh4IAxSMTkErVxHLb2MX9Ic"): (
+        "S01E07_Grilled_Cheese_Deluxe_Part3.mp4", "41049898379", "17910279864580142",
+        "15e8f8d4715275c7ecaa8797b261a8ab4346853414f60aa6a54bf1385ff9e46e",
+        "1298191963387372", "17841477404255851"),
+}
+
+
+def bind_legacy_ig_container(route, platform, item, entry, page, *, allow_reserved=False):
+    if terminal_recovery_reserved(route, platform, item, entry):
+        return None
+    proof = _LEGACY_IG_CONTAINERS.get((route, item["id"]))
+    if platform != "instagram" or not proof or entry.get("status") == "done":
+        return None
+    name, origin, container, cap_hash, page_id, ig_id = proof
+    binding = {"container_id": container, "origin_run_id": origin,
+               "caption_hash": cap_hash, "source_id": item["id"]}
+    prior = entry.get("failure", {})
+    valid = (item["name"] == name and entry.get("file") == name
+             and entry.get("route") == route and entry.get("platform") == platform
+             and entry.get("caption_hash") == cap_hash
+             and caption_key(entry.get("publish_caption")) == cap_hash
+             and str(page.get("page_id")) == page_id
+             and str(page.get("instagram_id")) == ig_id
+             and not entry.get("container_publish_attempted")
+             and ((entry.get("run_id") == origin
+                   and prior.get("stage") == "Instagram ikili video aktarımı"
+                   and prior.get("http_status") == 400)
+                  or (entry.get("container_resume") == binding
+                      and (entry.get("resume_no_publish_confirmed") is True
+                           or (allow_reserved and entry.get("status") == "intent"
+                               and entry.get("run_id") == os.getenv("GITHUB_RUN_ID"))))))
+    # Known containers can never fall back to another binary upload, even if
+    # the source/text proof becomes unavailable or a publish became ambiguous.
+    entry["status"] = "uncertain"
+    entry["failure"] = dict(prior, container_id=container, container_status="UNVERIFIED")
+    if not valid:
+        return None
+    entry["container_resume"] = binding
+    entry["failure"] = dict(prior, container_id=container, container_status="UNVERIFIED")
+    entry["status"] = "ready"
+    return container
+
+
+def publish_existing_ig_intent(item, page, state):
+    from cloud_omnichannel_publisher import resume_instagram_container
+    if item["platforms"] != ["instagram"]:
+        raise RuntimeError("Existing container recovery requires Instagram-only intent")
+    key = f"{item['route']}:instagram:{item['id']}"
+    entry = state["entries"][key]
+    container = item["resume_container_id"]
+    if entry.get("container_resume", {}).get("container_id") != container:
+        raise RuntimeError("Existing container intent mismatch")
+    # Re-check the complete immutable binding after the persisted plan.
+    check = dict(entry)
+    if bind_legacy_ig_container(item["route"], "instagram", item, check, page, allow_reserved=True) != container:
+        raise RuntimeError("Existing container proof changed")
+    entry["status"] = "uncertain"
+    save(STATE, state)
+    def reserve_publish():
+        entry["container_publish_attempted"] = True
+        entry.pop("resume_no_publish_confirmed", None)
+        save(STATE, state)
+    post = resume_instagram_container(page, container, reserve_publish)
+    if not post:
+        entry["resume_no_publish_confirmed"] = True
+        record_error("previous_intent_hold", "unreconciled_previous_intent",
+                     route=item["route"], platform="instagram", video=item["name"], status="uncertain")
+        save(STATE, state)
+        return False
+    entry.update(status="done", post_id=str(post),
+                 published_at_utc=datetime.now(timezone.utc).isoformat(),
+                 publication_run_id=os.getenv("GITHUB_RUN_ID", ""))
+    entry.pop("failure", None)
+    save(STATE, state)
+    print(json.dumps({"page": item["page"], "file": item["name"], "platform": "instagram",
+                      "post_id": str(post), "reused_container": container}, ensure_ascii=False), flush=True)
+    return True
+
+
+def github_get(path):
+    repo = os.environ["GITHUB_REPOSITORY"]
+    response = read_with_retry(
+        requests.get, f"https://api.github.com/repos/{repo}/{path}",
+        headers={"Authorization": f"Bearer {os.environ['GH_TOKEN']}"}, timeout=30,
+    )
+    if response.status_code != 200:
+        raise RuntimeError(f"GitHub durum kaydı okunamadı: HTTP {response.status_code}")
+    return response
+
+
+def restore():
+    """Newest run's result wins; otherwise its pre-upload intent is authoritative."""
+    def artifact_list(name):
+        payload = github_get(f"actions/artifacts?per_page=100&name={name}").json()
+        if not isinstance(payload, dict) or not isinstance(payload.get("artifacts"), list):
+            raise RuntimeError("GitHub durum listesi geçersiz; otomatik sıfırlama yapılmadı")
+        return payload["artifacts"]
+    scope = account_scope()
+    # A worker reads ONLY its own last result/intent. The legacy global
+    # archive is consulted once during migration, never after scoped evidence
+    # exists. A sibling's newer job cannot erase this account's pending intent.
+    suffix = "-" + scope if scope else ""
+    artifacts = artifact_list("link-state-result" + suffix)
+    intents = artifact_list("link-state-intent" + suffix)
+    if scope and not (artifacts or intents):
+        artifacts = artifact_list("link-state-result")
+        intents = artifact_list("link-state-intent")
+    rows = [x for x in artifacts + intents if not x.get("expired")]
+    if not rows:
+        if artifacts or intents:
+            raise RuntimeError("Önceki durum kaydının süresi dolmuş; otomatik sıfırlama yapılmadı")
+        return {"schema": 1, "entries": {}, "episode_days": {}}
+    rows.sort(key=lambda x: (int(x["workflow_run"]["id"]), x["name"] == "link-state-result"), reverse=True)
+    response = github_get(f"actions/artifacts/{rows[0]['id']}/zip")
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        names = [name for name in archive.namelist() if name.endswith("state.json")]
+        if len(names) != 1:
+            raise RuntimeError("Önceki durum arşivi geçersiz; otomatik sıfırlama yapılmadı")
+        state = json.loads(archive.read(names[0]))
+    if state.get("schema") != 1 or not isinstance(state.get("entries"), dict):
+        raise RuntimeError("Önceki yayın durumu geçersiz")
+    return state
+
+
+def inventory(folder):
+    # Drive folder metadata is a read-only operation; retry transient failures.
+    files = None
+    for attempt in range(3):
+        try:
+            files = gdown.download_folder(id=folder, skip_download=True, quiet=True,
+                                         use_cookies=False, timeout=40)
+            if files is not None:
+                break
+        except Exception:
+            if attempt == 2:
+                raise
+        if attempt < 2:
+            time.sleep(2 ** attempt)
+    if files is None:
+        raise RuntimeError("Paylaşılan Drive klasör listesi 3 denemede alınamadı")
+    result, ambiguous = {}, set()
+    for item in files:
+        if len(Path(item.path).parts) != 1:
+            continue
+        name = Path(item.path).name
+        # Exclude recursive child folders: they must use their own approved source.
+        if name in result and result[name]["id"] != item.id:
+            if folder != FOLDERS["daily_laugh"]:
+                raise RuntimeError("Aynı adlı birden çok Drive dosyası bulundu")
+            ambiguous.add(name)
+        result[name] = {"id": item.id, "name": name}
+    for name in ambiguous:
+        result.pop(name, None)
+    if not result:
+        raise RuntimeError("Paylaşılan klasör boş veya erişilemiyor")
+    return result
+
+
+def direct_public_drive(file_id, path, *, get=None):
+    """Read-only alternate path for gdown FileURLRetrievalError; fail closed.
+
+    Downloads only files identified by the existing, verified Drive inventory.
+    Never follows a non-Google final URL, accepts an HTML confirmation page,
+    writes credentials, or touches a Meta upload/publish endpoint.
+    """
+    from urllib.parse import urlsplit
+
+    if (not isinstance(file_id, str)
+            or not re.fullmatch(r"[A-Za-z0-9_-]{20,128}", file_id)
+            or path.suffix.lower() not in {".mp4", ".png", ".txt"}):
+        return None
+    get = get or requests.get
+    partial = path.with_name(path.name + ".partial")
+    response = None
+    try:
+        response = get(
+            "https://drive.usercontent.google.com/download",
+            params={"id": file_id, "export": "download", "confirm": "t"},
+            timeout=(10, 60), allow_redirects=True, stream=True,
+            headers={"Accept": "application/octet-stream"},
+        )
+        final = urlsplit(str(getattr(response, "url", "")))
+        host = (final.hostname or "").lower()
+        if (final.scheme != "https" or
+                host not in {"drive.usercontent.google.com", "drive.google.com"}
+                and not host.endswith(".googleusercontent.com")):
+            raise ValueError("Untrusted Drive redirect")
+        if response.status_code != 200:
+            raise ValueError("Drive response not downloadable")
+        content_type = str(response.headers.get("Content-Type", "")).lower()
+        if any(t in content_type for t in ("text/html", "application/json", "text/xml", "application/xml")):
+            raise ValueError("Drive confirmation or error page")
+        length = response.headers.get("Content-Length")
+        expected = int(length) if length is not None else None
+        if expected is not None and (expected <= 0 or expected > 600_000_000):
+            raise ValueError("Unsafe Drive download length")
+        size = 0
+        head = b""
+        with partial.open("wb") as out:
+            for chunk in response.iter_content(chunk_size=65536):
+                if not chunk:
+                    continue
+                size += len(chunk)
+                if size > 600_000_000:
+                    raise ValueError("Drive download size exceeded")
+                if len(head) < 128:
+                    head = (head + chunk)[:128]
+                out.write(chunk)
+        if not size or (expected is not None and size != expected):
+            raise ValueError("Empty or incomplete Drive download")
+        if head.lstrip().lower().startswith((b"<!doctype html", b"<html", b"<?xml")):
+            raise ValueError("Drive returned an HTML page")
+        if path.suffix.lower() == ".mp4" and head[4:8] != b"ftyp":
+            raise ValueError("Downloaded file is not MP4")
+        if path.suffix.lower() == ".png" and not head.startswith(b"\x89PNG\r\n\x1a\n"):
+            raise ValueError("Downloaded file is not PNG")
+        partial.replace(path)
+        return path
+    except Exception:
+        # No untrusted provider URLs, exception bodies or file IDs in logs.
+        return None
+    finally:
+        if response is not None:
+            try:
+                response.close()
+            except Exception:
+                pass
+        if partial.exists():
+            partial.unlink()
+
+
+def download(file_id, path):
+    """Retry transient read-only Drive transfers before touching Meta.
+
+    Never return partial files; exhaust retries rather than reusing corrupted
+    content. The publication intent ledger still controls all Meta retries.
+    """
+    failures = []
+    for attempt in range(3):
+        try:
+            # A stale Drive confirmation cookie can poison every retry in the
+            # same runner. Keep the first established path, then use a clean
+            # public-link session instead of repeating the identical request.
+            result = gdown.download(id=file_id, output=str(path), quiet=True,
+                                    use_cookies=(attempt == 0), timeout=40)
+            if result and path.is_file() and path.stat().st_size > 0:
+                return path
+            failures.append("empty_or_missing")
+        except Exception as exc:
+            # The Drive provider can raise FileURLRetrievalError on a transient
+            # shared-link fetch. Do not log untrusted exception URLs/tokens.
+            failures.append(type(exc).__name__)
+        if path.exists():
+            path.unlink()
+        if attempt < 2:
+            time.sleep((2, 8)[attempt])
+    if "FileURLRetrievalError" in failures:
+        # One separate, uncookied public GET; this is a source read only.
+        # A quota response, redirect, HTML page or partial file is rejected.
+        recovered = direct_public_drive(file_id, path)
+        if recovered is not None:
+            return recovered
+        failures.append("direct_public_get_blocked")
+    raise RuntimeError(
+        "Paylaşılan Drive dosyası 3 denemede indirilemedi "
+        f"({','.join(failures)})"
+    ) from None
+
+
+def graph_rows(page, platform):
+    object_id = page["page_id"] if platform == "facebook" else page.get("instagram_id")
+    if not object_id:
+        return []
+    fields = "id,description,created_time" if platform == "facebook" else "id,caption,timestamp,permalink,media_type"
+    edge = "videos" if platform == "facebook" else "media"
+    params = {"fields": fields, "limit": 100}
+    rows, seen, media_ids = [], set(), set()
+    for _ in range(40):
+        try:
+            response = read_with_retry(
+                requests.get, f"https://graph.facebook.com/{GRAPH_API_VERSION}/{object_id}/{edge}",
+                headers={"Authorization": f"Bearer {page['page_token']}"},
+                params=dict(params), timeout=30, graph_read=True,
+            )
+        except OSError:
+            raise RuntimeError("Meta geçmiş bağlantısı tamamlanamadı; bu hesap bekletildi") from None
+        try:
+            payload = response.json()
+        except ValueError:
+            raise RuntimeError("Meta geçmiş yanıtı geçersiz") from None
+        if not isinstance(payload, dict):
+            raise RuntimeError("Meta geçmiş yanıtı geçersiz; yayın durduruldu")
+        if response.status_code != 200 or "error" in payload or not isinstance(payload.get("data"), list):
+            error = payload.get("error")
+            code = error.get("code") if isinstance(error, dict) else None
+            safe_code = code if type(code) is int else "unknown"
+            raise RuntimeError(f"Meta geçmişi okunamadı: HTTP {response.status_code}, kod {safe_code}")
+        for media in payload["data"]:
+            if not isinstance(media, dict):
+                raise RuntimeError("Meta geçmişinde geçersiz medya kaydı")
+            if platform == "instagram":
+                media_type = media.get("media_type")
+                if not isinstance(media_type, str):
+                    raise RuntimeError("Instagram medya türü alınamadı; güvenli sayım mümkün değil")
+                # Only video/reel media count toward the video publication target.
+                # Instagram photos must never satisfy a missing Reels slot.
+                if media_type != "VIDEO":
+                    continue
+            media_id = str(media.get("id") or "")
+            if not media_id.isdecimal():
+                raise RuntimeError("Meta geçmişinde doğrulanabilir gönderi kimliği yok")
+            # A moving paginated history can repeat the same video across pages.
+            # Count the platform ID once, or a route can falsely reach its quota.
+            if media_id in media_ids:
+                continue
+            timestamp(media)
+            media_ids.add(media_id)
+            rows.append(media)
+        paging = payload.get("paging") or {}
+        if not isinstance(paging, dict):
+            raise RuntimeError("Meta geçmiş sayfalaması geçersiz; yayın durduruldu")
+        if not paging.get("next"):
+            return rows
+        cursors = paging.get("cursors") or {}
+        after = cursors.get("after") if isinstance(cursors, dict) else None
+        if not isinstance(after, str) or not after or after in seen:
+            raise RuntimeError("Meta geçmişi eksik; yayın durduruldu")
+        seen.add(after)
+        params["after"] = after
+    raise RuntimeError("Meta geçmiş sınırı aşıldı; yayın durduruldu")
+
+
+def index_history_captions(rows):
+    """Return only unique, nonempty caption matches; ambiguous posts are blocked.
+
+    A description hash is a weak proxy for video identity. Never choose an
+    arbitrary post when multiple videos share the same description.
+    """
+    unique, ambiguous = {}, set()
+    for row in rows:
+        caption = row.get("description") or row.get("caption")
+        if not isinstance(caption, str) or not caption.strip():
+            continue
+        key = caption_key(caption)
+        if key in unique:
+            del unique[key]
+            ambiguous.add(key)
+        elif key not in ambiguous:
+            unique[key] = row
+    return unique, ambiguous
+
+
+def history_publication_match(route, row):
+    """Require a real numeric platform post ID and valid publication timestamp."""
+    if not isinstance(row, dict) or not str(row.get("id") or "").isdecimal():
+        raise RuntimeError("Meta geçmişinde doğrulanabilir gönderi kimliği yok")
+    day = publication_day(route, row)  # timezone-aware or fail closed
+    return str(row["id"]), day
+
+
+def timestamp(row):
+    value = row.get("created_time") or row.get("timestamp")
+    if not value:
+        raise RuntimeError("Meta geçmişinde yayın zamanı eksik")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (ValueError, TypeError, AttributeError):
+        raise RuntimeError("Meta geçmişinde yayın zamanı geçersiz") from None
+    if parsed.tzinfo is None:
+        raise RuntimeError("Meta geçmişinde yayın zaman dilimi eksik")
+    return parsed.astimezone(TR)
+
+
+def exact_txt_coverage(files):
+    """Audit exact case-sensitive MP4/TXT stem pairs (the publish-time rule)."""
+    videos = {name[:-4] for name in files if name.lower().endswith(".mp4")}
+    txts = {name[:-4] for name in files if name.endswith(".txt")}
+    missing = sorted(videos - txts)
+    return {"mp4": len(videos), "matched": len(videos) - len(missing),
+            "missing": len(missing), "missing_examples": missing[:12]}
+
+
+def toonzone_txt_text(stem):
+    """Publish a short sourced Turkish episode plot, season/part and hashtags."""
+    from toonzone_episode_summaries import episode_summary
+
+    metadata = toonzone_metadata(stem)
+    season = metadata["season"]
+    episode = metadata["episode"]
+    part = metadata["part"]
+    short_plot = episode_summary(season, episode)
+    display_title = metadata["title"].split(" — Part ", 1)[0]
+    if display_title.endswith(" Tr"):
+        display_title = display_title[:-3].strip()
+    episode_tag = f"S{season:02d}E{episode:02d}"
+    return (
+        f"🎬 Regular Show | {display_title}\n"
+        f"📺 Sezon {season} • Bölüm {episode} • Part {part}/4\n\n"
+        f"📖 {short_plot}\n\n"
+        f"💬 Bu bölüm hakkındaki düşünceni yorumlara yaz!\n\n"
+        f"🛍️ Etsy: {TOONZONE_ETSY_LINK}\n\n"
+        f"#RegularShow #ToonZone #Mordecai #Rigby "
+        f"#ÇizgiFilm #CartoonNetwork #{episode_tag} #Part{part}"
+    )
+
+
+def generate_toonzone_txts(files, output_dir):
+    """Create one stable UTF-8 TXT for each validated ToonZone MP4 part."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    generated, invalid = 0, 0
+    for name in sorted(files):
+        if not name.lower().endswith(".mp4"):
+            continue
+        stem = Path(name).stem
+        try:
+            content = toonzone_txt_text(stem)
+        except ValueError:
+            invalid += 1
+            continue
+        (output_dir / (stem + ".txt")).write_text(content + "\n", encoding="utf-8")
+        generated += 1
+    return generated, invalid
+
+
+def daily_laugh_txt_text(stem):
+    """A unique English caption without guessing what happens in a video."""
+    if not re.fullmatch(r"[1-9][0-9]{0,5}", stem):
+        raise ValueError("Daily Laugh video filename is not a positive numeric ID")
+    return (
+        "😂 Take a quick laugh break!\\n\\n"
+        "What made you smile today? Tag a friend who needs a laugh! 😄\\n\\n"
+        "#DailyLaughLab #FunnyVideos #Comedy #DailyLaughs #Reels"
+    ).replace("\\n", "\n")
+
+
+def generate_daily_laugh_txts(files, output_dir):
+    """Create exact-stem TXT only for missing Daily Laugh source captions."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    generated, invalid = 0, 0
+    for name in sorted(files):
+        if not name.lower().endswith(".mp4"):
+            continue
+        stem = Path(name).stem
+        if stem + ".txt" in files:
+            continue
+        try:
+            content = daily_laugh_txt_text(stem)
+        except ValueError:
+            invalid += 1
+            continue
+        (output_dir / (stem + ".txt")).write_text(content + "\n", encoding="utf-8")
+        generated += 1
+    return generated, invalid
+
+
+def clean_caption_ui(raw):
+    """Remove only a recognized standalone UI line; never invent video copy."""
+    pattern = r"(?im)^[ \t]*view[ \t]+all[ \t]+[\d,]+[ \t]+comments?[ \t]*$"
+    cleaned = re.sub(pattern, "", raw).strip()
+    if cleaned != raw.strip() and not re.search(r"[^\W\d_]", cleaned, re.UNICODE):
+        raise RuntimeError("TXT yalnızca sosyal medya arayüz metni içeriyor")
+    return cleaned
+
+
+def copies(route, item, files, temp, use_txt=True):
+    stem = Path(item["name"]).stem
+    fixed = selected_txt(route, files) if use_txt else None
+    text = fixed if fixed else (files.get(stem + ".txt") if use_txt else None)
+    raw = None
+    origin = "account-fixed-txt" if fixed else "matching-txt"
+    if text:
+        try:
+            raw = download(text["id"], temp / "caption.txt").read_text(encoding="utf-8-sig").strip()
+            if fixed:
+                raw = verify_text(raw, fixed["sha256"])
+        except Exception as exc:
+            if route != "toonzone":
+                raise RuntimeError(f"Eşleşen TXT indirilemedi: {route}/{item['name']} ({type(exc).__name__})") from None
+            # A future optional ToonZone TXT must not stop validated metadata copy.
+    elif route == "daily_laugh":
+        # The source archive has clips without matching TXT. Materialize a
+        # deterministic caption before planning a publication; never invent
+        # dialogue or specific events in the video.
+        generated = ROOT / "daily_laugh_txt" / (stem + ".txt")
+        content = daily_laugh_txt_text(stem)
+        generated.parent.mkdir(parents=True, exist_ok=True)
+        generated.write_text(content + "\n", encoding="utf-8")
+        raw = content
+        origin = "generated-daily-laugh-txt"
+    elif route != "toonzone":
+        raise RuntimeError(f"Eşleşen TXT bulunamadı: {route}/{item['name']}")
+    if text and not raw and route != "toonzone":
+        raise RuntimeError(f"Eşleşen TXT boş: {route}/{item['name']}")
+    if route == "toonzone":
+        # Enforce a canonical Turkish title AND the exact episode/part marker.
+        # Historical Drive TXT or a stale generated TXT must never silently
+        # replace the source-derived copy with a wrong episode title.
+        # This is strictly a future-publish safety check; old IDs/intents
+        # retain their archived captions and are never edited or re-posted.
+        canonical = toonzone_txt_text(stem)
+        fb = ig = canonical
+        if text:
+            origin = ("validated-toonzone-txt" if raw == canonical
+                      else "corrected-toonzone-txt")
+        else:
+            origin = "generated-toonzone-txt"
+    elif raw:
+        # Preserve actual source copy and remove only a recognized standalone
+        # comment-count UI line. UI-only sources remain blocked before intent.
+        raw = clean_caption_ui(raw)
+        _, _, fb, ig, _ = platform_content_from_txt(raw, stem, route.removesuffix("_second"))
+    else:
+        # Other routes must never upload with generic filename-only captions.
+        raise RuntimeError(f"Eşleşen TXT gerekli: {route}/{item['name']}")
+    if route == "daily_laugh" and not fixed:
+        # Reused TXT bodies are paired to specific videos to avoid ambiguous reconciliation.
+        reference = f"Daily Laugh Lab · Video {stem}\n\n"
+        fb, ig = reference + fb, reference + ig
+    # IG-only tagging, applied before caption hash/remote reconciliation.
+    # FB caption remains unchanged; non-approved videos are bit-for-bit unchanged.
+    if not fixed:
+        ig, _tags = enhance_instagram_caption(ig, route, stem)
+    if not fb.strip() or not ig.strip() or len(ig) > 2200 or "<html" in fb.lower():
+        raise RuntimeError("Platform açıklaması geçersiz")
+    return {"facebook": fb, "instagram": ig}, origin
+
+
+def seed_done(route, platform, name):
+    """Only publications already verified in the AFK/985 production logs."""
+    if route == "toonzone":
+        order = parse_order(Path(name).stem, "cartoon")
+        return bool(order and (order[:2] < (1, 2) or order[:3] == (1, 2, 1)))
+    if route in {"film", "film_second"}:
+        match = re.fullmatch(r"Yoksul_1986_Part_(\d+)\.mp4", name, re.I)
+        return bool(match and int(match[1]) <= (6 if route == "film" else 5))
+    return False
+
+
+def verified_film_duplicate(item, route, platform, files, entries, history, fingerprints):
+    """Prove a Drive export copy belongs to an already confirmed film post.
+
+    A same-part filename or caption alone never proves identity. Require the
+    old file ID in the current catalog, a confirmed ledger result, that exact
+    remote post/caption/date, and equal full source bytes. No Meta write here.
+    """
+    if route not in {"film", "film_second"}:
+        return None
+    def canonical(name):
+        return re.sub(r" \([0-9]+\)$", "", Path(name).stem).casefold()
+    name = canonical(item["name"])
+    matches = []
+    for key, prior in entries.items():
+        if (prior.get("route") != route or prior.get("platform") != platform
+                or prior.get("status") != "done" or not prior.get("post_id")
+                or canonical(prior.get("file", "")) != name):
+            continue
+        prior_file = files.get(prior["file"])
+        if (not prior_file or prior_file.get("id") == item["id"]
+                or key != f"{route}:{platform}:{prior_file['id']}"):
+            continue
+        remote = [r for r in history if str(r.get("id")) == str(prior["post_id"])]
+        if len(remote) != 1:
+            continue
+        row = remote[0]
+        remote_caption = row.get("description") or row.get("caption")
+        if not isinstance(remote_caption, str):
+            continue
+        post_id, day = history_publication_match(route, row)
+        if (day != prior.get("day") or not prior.get("caption_hash")
+                or caption_key(remote_caption) != prior["caption_hash"]):
+            continue
+        matches.append((prior_file, prior))
+    # Multiple old confirmed sources for one part require explicit review.
+    if len(matches) != 1:
+        return None
+    prior_file, prior = matches[0]
+    with tempfile.TemporaryDirectory(prefix="film-duplicate-") as tmp:
+        for source in (item, prior_file):
+            if source["id"] not in fingerprints:
+                path = download(source["id"], Path(tmp) / (source["id"] + ".mp4"))
+                verify_source_video(path)
+                digest = hashlib.sha256()
+                with path.open("rb") as stream:
+                    for block in iter(lambda: stream.read(1024 * 1024), b""):
+                        digest.update(block)
+                fingerprints[source["id"]] = digest.hexdigest()
+    if fingerprints[item["id"]] != fingerprints[prior_file["id"]]:
+        raise RuntimeError("Aynı film/part dosyalarının içerikleri farklı; sıra bekletildi")
+    return dict(prior, file=item["name"], duplicate_of_file_id=prior_file["id"],
+                source_sha256=fingerprints[item["id"]],
+                reconciliation_proof="identical_source_bytes_and_exact_remote_post",
+                duplicate_verified_in_run_id=os.getenv("GITHUB_RUN_ID", ""))
+
+
+def proven_film_ig_source_alias(item, entry, route, platform,
+                                files, entries, history, fingerprints):
+    """A source collision can be skipped only with exact bytes AND a real post.
+
+    Never turn the stale/uncertain intent into a second done result; a distinct
+    Drive ID with the same video bytes is not a new published Instagram post.
+    """
+    if not (
+        route == "film" and platform == "instagram"
+        and entry.get("route") == route and entry.get("platform") == platform
+        and entry.get("status") == "uncertain"
+        and entry.get("file") == item["name"]
+        and entry.get("reconciliation_conflict") == "post_id_belongs_to_other_source"
+        and entry.get("source_collision_post_id")
+        and entry.get("resume_no_publish_confirmed") is True
+        and not entry.get("container_publish_attempted")
+    ):
+        return False
+    proof = verified_film_duplicate(
+        item, route, platform, files, entries, history, fingerprints)
+    return bool(
+        proof and proof.get("reconciliation_proof") ==
+        "identical_source_bytes_and_exact_remote_post"
+        and str(proof.get("post_id")) == str(entry["source_collision_post_id"])
+        and proof.get("duplicate_of_file_id") != item["id"]
+    )
+
+
+def confirmed_existing_film_post_amid_caption_reuse(entry, route, platform, history):
+    """The exact already-done ID outranks a non-unique description.
+
+    This protects a real post during planning, NOT an unverified new source.
+    Previous weak caption-only reconciliations never gain this privilege.
+    """
+    if not (
+        route == "film" and platform in {"facebook", "instagram"}
+        and entry.get("status") == "done" and entry.get("post_id")
+        and entry.get("day") and entry.get("caption_hash")
+        and entry.get("reconciliation_proof") != "unique_platform_history_caption"
+    ):
+        return False
+    matches = [row for row in history
+               if str(row.get("id") or "") == str(entry["post_id"])]
+    if len(matches) != 1:
+        return False
+    row = matches[0]
+    caption = row.get("description") or row.get("caption")
+    if not isinstance(caption, str):
+        return False
+    try:
+        actual_id, actual_day = history_publication_match(route, row)
+    except RuntimeError:
+        return False
+    return (str(actual_id) == str(entry["post_id"]) and
+            actual_day == entry["day"] and
+            caption_key(caption) == entry["caption_hash"])
+
+
+def film_canonical_part(name):
+    return re.sub(r" \([0-9]+\)$", "", Path(name).stem).casefold()
+
+
+def film_part8_local_only_export_hold(route, files, entries):
+    """Allow the separate original Part 8 source to be examined, never the held copy.
+
+    The exported "(1)" video was held by the visual gate before any Meta POST.
+    Preserve its original ledger evidence. This does NOT prove the original is
+    correct: caption, identity, serial order, and visual checks still apply.
+    """
+    if route not in {"film", "film_second"}:
+        return False
+    original = files.get("Bickin_Part_8.mp4")
+    exported = files.get("Bickin_Part_8 (1).mp4")
+    if not isinstance(original, dict) or not isinstance(exported, dict):
+        return False
+    if (not original.get("id") or not exported.get("id")
+            or original["id"] == exported["id"]):
+        return False
+    row = entries.get(f"{route}:facebook:{exported['id']}", {})
+    failure = row.get("failure") if isinstance(row, dict) else None
+    return (
+        row.get("route") == route
+        and row.get("platform") == "facebook"
+        and row.get("file") == exported["name"] == "Bickin_Part_8 (1).mp4"
+        and row.get("status") == "held"
+        and not row.get("post_id")
+        and isinstance(failure, dict)
+        and failure.get("reason") == "visual_duplicate_review"
+        and failure.get("external_post_attempted") is False
+        and failure.get("safe_to_repost") is False
+        and isinstance(failure.get("conflicting_platforms"), list)
+        and "facebook" in failure["conflicting_platforms"]
+    )
+
+
+def route_enabled(route):
+    return not route_paused("film" if route == "film_second" else route)
+
+
+def route_clock(route, now):
+    return now.astimezone(ZoneInfo("America/New_York")) if route == "daily_laugh" else now
+
+
+def previous_intent_alert_due(entry, now):
+    """One warning per unresolved entry per Istanbul calendar day.
+
+    An invalid or missing saved timestamp triggers one warning, but never
+    changes the publishing intent or authorizes a Meta POST.
+    """
+    previous = entry.get("hold_alerted_at")
+    if not isinstance(previous, str) or not previous.strip():
+        return True
+    try:
+        seen = datetime.fromisoformat(previous)
+    except ValueError:
+        return True
+    if seen.tzinfo is None:
+        return True
+    return seen.astimezone(TR).date() < now.astimezone(TR).date()
+
+
+# Only these audited files are authorized for ONE additional recovery using
+# a materially different low-bandwidth media profile. No other route/video can
+# opt in, and previous media_publish uncertainty never qualifies.
+_AUDITED_IG_V3_FILES = {
+    "film": "Yoksul_1986_Part_16.mp4",
+    "toonzone": "S01E03_Caffeinated_Concert_Tickets_Part3.mp4",
+}
+
+
+def audited_ig_v3_eligible(route, platform, name, entry):
+    if route not in _AUDITED_IG_V3_FILES or platform != "instagram":
+        return False
+    if name != _AUDITED_IG_V3_FILES[route]:
+        return False
+    if not isinstance(entry, dict):
+        return False
+    if (entry.get("status") != "uncertain" or
+            entry.get("prepublish_retry_count") != 1 or
+            str(entry.get("run_id", "")) != "40224351466"):
+        return False
+    failure = entry.get("failure")
+    if not isinstance(failure, dict):
+        return False
+    return (failure.get("stage") == "Instagram ikili video aktarımı"
+            and failure.get("http_status") == 400
+            and failure.get("graph_code") in (None, 100))
+
+
+def audited_ig_v4_eligible(route, platform, name, entry):
+    """Only two exact prior failed IG binaries after verified 180s upload-only."""
+    if route not in _AUDITED_IG_V3_FILES or platform != "instagram":
+        return False
+    if name != _AUDITED_IG_V3_FILES[route] or not isinstance(entry, dict):
+        return False
+    if (entry.get("status") != "uncertain" or
+            entry.get("prepublish_retry_count") != 2 or
+            str(entry.get("run_id", "")) != "40281812561"):
+        return False
+    fail = entry.get("failure")
+    return (isinstance(fail, dict)
+            and fail.get("stage") == "Instagram ikili video aktarımı"
+            and fail.get("http_status") == 400
+            and fail.get("graph_code") in (None, 100))
+
+
+def audited_avanak_part10_recovery_eligible(route, platform, item, entry):
+    """One 720p recovery for the audited 30 Oct rejected 1080p upload.
+
+    The planner must also reconcile remote history and the saved caption.
+    This exact binary-stage rejection never reached media_publish.
+    """
+    if (route != "film" or platform != "instagram"
+            or item.get("id") != "1Zn8kYmexuUe3z1EKLtCrKFCwj4qVnIa2"
+            or item.get("name") != "Avanak_Apti_Part_10 (1).mp4"
+            or not isinstance(entry, dict)):
+        return False
+    failure = entry.get("failure")
+    return (entry.get("status") == "uncertain"
+            and type(entry.get("prepublish_retry_count")) is int
+            and entry["prepublish_retry_count"] == 1
+            and str(entry.get("run_id", "")) == "41029613650"
+            and isinstance(failure, dict)
+            and failure.get("stage") == "Instagram ikili video aktarımı"
+            and type(failure.get("http_status")) is int
+            and failure["http_status"] == 400
+            and failure.get("graph_code") is None
+            and failure.get("graph_subcode") is None)
+
+
+def quarantine_unordered_ig_source(route, platform, item, entry, cap_hash):
+    """Skip a proven pre-publish source, never retry it or erase its intent."""
+    failure = entry.get("failure")
+    if not isinstance(failure, dict):
+        return False
+    return (route in {"tarladaki", "penguen", "gonle", "daily_laugh"} and platform == "instagram"
+            and entry.get("route") == route and entry.get("platform") == platform
+            and entry.get("file") == item["name"]
+            and entry.get("caption_hash") == cap_hash
+            and entry.get("status") == "uncertain"
+            and not entry.get("container_publish_attempted")
+            and failure.get("stage") == "Instagram ikili video aktarımı"
+            and failure.get("http_status") == 400)
+
+
+def facebook_can_continue_past_ig_rejection(route, platform, entry):
+    """Hold IG independently while preserving its source and dedupe ledger.
+
+    This does not clear the uncertain intent, grant an Instagram retry, or skip
+    Film/ToonZone parts on Instagram. Facebook has a separate dedupe ledger.
+    """
+    if platform != "instagram":
+        return False
+    if route in {"tarladaki", "penguen"}:
+        # Humor routes are unordered and Facebook has an independent intent.
+        # Keep the exact uncertain IG source and all later IG uploads held;
+        # allow only independently deduped Facebook work to continue.
+        return entry.get("status") in {"intent", "uncertain"}
+    if route not in {"film", "toonzone"}:
+        return False
+    if entry.get("status") != "uncertain" or entry.get("prepublish_retry_count") not in (1, 2, 3):
+        return False
+    prior = entry.get("failure")
+    if not isinstance(prior, dict):
+        return False
+    marker = SimpleNamespace(stage=prior.get("stage"),
+                             http_status=prior.get("http_status"),
+                             code=prior.get("graph_code"),
+                             subcode=prior.get("graph_subcode"),
+                             container_status=prior.get("container_status"))
+    return known_pre_publish_media_rejection(marker, route, previous_retries=0)
+
+
+def publication_day(route, row):
+    """Use the account scheduling timezone for confirmed Meta history entries."""
+    return route_clock(route, timestamp(row)).date().isoformat()
+
+
+def ledger_daily_count(state, route, platform, day):
+    """One confirmed platform post is one quota unit, even with ledger aliases."""
+    return len({str(e["post_id"]) for e in state["entries"].values()
+                if e.get("route") == route and e.get("platform") == platform
+                and e.get("status") == "done" and e.get("day") == day
+                and str(e.get("post_id") or "").strip()})
+
+
+def target_count(route, now):
+    if (os.getenv("IG_AUDITED_RESCUE_ONLY") == "true"
+            and route in _AUDITED_IG_V3_FILES):
+        return 1
+    clock = route_clock(route, now)
+    hours = {"tarladaki": TARLADAKI_HOURS, "penguen": PENGUEN_HOURS,
+             "gonle": GONLE_HOURS, "film": FILM_HOURS, "film_second": FILM_HOURS}
+    if route == "daily_laugh":
+        slots = [(h, 0) for h in daily_laugh_hours_for_date(clock.date())]
+    elif route == "toonzone":
+        slots = [(12, m) for m in (0, 10, 20, 30)]
+    else:
+        slots = [(h, 30 if route == "penguen" else 15 if route == "gonle" else 0) for h in hours[route]]
+    if os.getenv("ADAPTIVE_SCHEDULE_ENABLED", "false").lower() == "true":
+        from adaptive_schedule import slots_for_route
+        try:
+            document = json.loads((ROOT / "adaptive-schedule.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            document = {}
+        slots = slots_for_route(document, route, now, slots)
+    if os.getenv("COMPLETE_DAY_DATE") == now.date().isoformat():
+        # The second Film page still lacked the already-confirmed Part 6 at cutover.
+        return len(slots) + (1 if route == "film_second" and now.date().isoformat() == "2026-10-23" else 0)
+    return sum((h, m) <= (clock.hour, clock.minute) for h, m in slots)
+
+
+def apply_verified_migration(state):
+    payload = json.loads(Path(__file__).with_name("migration_verified_publications.json").read_text())
+    if payload.get("schema") != 1 or not isinstance(payload.get("records"), list):
+        raise RuntimeError("Doğrulanmış aktarım geçmişi geçersiz")
+    # The first audit incorrectly treated generic Daily captions as file IDs.
+    # Remove only those derived inferences; preserve all actual upload intents/results.
+    state["entries"] = {k: e for k, e in state["entries"].items()
+                        if not (e["route"] == "daily_laugh" and not e.get("run_id")
+                                and e.get("proof") != "verified-afk-log")}
+    for row in payload["records"]:
+        key = f"{row['route']}:{row['platform']}:{row['file_id']}"
+        if key in state["entries"] and state["entries"][key].get("run_id"):
+            continue
+        recorded = datetime.fromisoformat(row["recorded_at"].replace("Z", "+00:00"))
+        state["entries"][key] = {
+            "route": row["route"], "platform": row["platform"], "status": "done",
+            "caption_hash": "verified-file-id:" + row["file_id"],
+            "post_id": row["post_id"], "file": row["file_name"],
+            "day": route_clock(row["route"], recorded.astimezone(TR)).date().isoformat(),
+            "proof": "verified-afk-log", "source_run_id": row["source_run_id"],
+        }
+
+
+def toonzone_cover_coverage(videos, covers):
+    """Count exact part-specific PNG matches; never reuse another part's artwork."""
+    stems = [Path(name).stem for name in videos if name.lower().endswith(".mp4")]
+    matched = sum(stem + ".png" in covers for stem in stems)
+    return matched, len(stems) - matched
+
+
+def toonzone_episode_confirmed(state, videos, episode):
+    """A rollover requires all four source parts done on FB and IG with IDs."""
+    for row in state["entries"].values():
+        if row.get("route") != "toonzone":
+            continue
+        order = parse_order(Path(row.get("file", "")).stem, "cartoon")
+        if (order and list(order[:2]) == list(episode)
+                and row.get("status") != "done"):
+            return False
+    parts = {}
+    for video in videos:
+        order = parse_order(Path(video["name"]).stem, "cartoon")
+        if order and list(order[:2]) == list(episode):
+            if order[2] in parts:
+                return False
+            parts[order[2]] = video
+    if set(parts) != {1, 2, 3, 4}:
+        return False
+    for video in parts.values():
+        for platform in ("facebook", "instagram"):
+            row = state["entries"].get(f"toonzone:{platform}:{video['id']}", {})
+            if (row.get("status") != "done" or row.get("file") != video["name"]
+                    or not str(row.get("post_id") or "").strip()):
+                return False
+    return True
+
+
+def conflicting_done_post_source(entries, key, route, platform, post_id):
+    """A caption match is not a Drive source-ID match.
+
+    A different verified row already owning the remote post forbids treating an
+    uncertain source as published. Exact content duplicates use their separate
+    verified fingerprint path, not this weak caption-only reconciliation.
+    """
+    if not str(post_id or "").strip():
+        return False
+    return any(
+        other_key != key and isinstance(row, dict)
+        and row.get("route") == route and row.get("platform") == platform
+        and row.get("status") == "done"
+        and str(row.get("post_id") or "") == str(post_id)
+        for other_key, row in entries.items()
+    )
+
+
+def quarantine_weak_caption_aliases(state):
+    """Repair only weak caption-based duplicates, retaining forensic evidence."""
+    entries = state["entries"]
+    for key, entry in entries.items():
+        if (entry.get("status") == "done"
+                and entry.get("reconciliation_proof") == "unique_platform_history_caption"
+                and conflicting_done_post_source(
+                    entries, key, entry["route"], entry["platform"], entry.get("post_id"))):
+            old_post = entry.pop("post_id")
+            entry["status"] = "uncertain"
+            entry["source_collision_post_id"] = old_post
+            entry["reconciliation_conflict"] = "post_id_belongs_to_other_source"
+
+
+# Exact Drive sources independently read in full after local-only failures.
+# A corrected upload with a new Drive ID is eligible as a separate source.
+# A valid MP4 can also lack a decodable frame on its advertised timeline;
+# never weaken visual dedupe or fingerprint its attached cover to accept it.
+_CONFIRMED_UNREADABLE_SHARED_SOURCES = {
+    ("tarladaki", "1hArLxDecYFwPs9lWQasXaNHK4f0dQ20W", "195.mp4"): {
+        "run_id": "41790686639",
+    },
+    # 7 Nov owner Drive read of the exact 18,612,272-byte source:
+    # both ffprobe and ffmpeg fail "moov atom not found". Existing Meta
+    # ledger has Facebook/IG local-only ready failures for this same source
+    # in run 42378874507. Never resubmit it on a later calendar day.
+    # A repaired clip must be a new Drive object, preserving source identity.
+    ("daily_laugh", "1TBHD0d-rtgt8ECx_6oYHeRBW8Ae2ysyH", "195.mp4"): {
+        "run_id": "42378874507",
+    },
+    # 10 Nov run 42888833591 fetched exact bytes SHA, but FFmpeg could not
+    # decode the frame required for safe visual fingerprinting BEFORE any POST.
+    # Facebook and IG both retained local-only "ready" failures. Do not keep
+    # retrying this same unmodified Drive object across future days; a
+    # separately uploaded corrected video receives a distinct Drive ID.
+    ("daily_laugh", "1i0pA26ewaAOlqxTbIxva_nsxZ_K_OrUW", "40.mp4"): {
+        "run_id": "42888833591",
+        "sha256": "579051bc54e3466977fec7656b1eb15b03bd1e2c339c9dfa3acd889086e2f45c",
+    },
+    ("penguen", "1lBoXFmmxvlfL6lUhxk4Qc_eZ6WHANb2I", "250.mp4"): {
+        "run_id": "42175366213",
+        "sha256": "513d67961759f96a7e64196bf2adbe4d8ce01f0acb3b0257a5acce71a27ea1b0",
+    },
+    ("tarladaki", "1T3nTIgRJwmgeQOkCwZrvezl61tic3aI2", "278.mp4"): {
+        "run_id": "42222196393",
+        "sha256": "dba86d78a9590d17c129d80b49c62d8f0441cd1839c1b2a8c105c05ea0f983dd",
+    },
+}
+
+
+def quarantined_unordered_local_failure(route, item, state, platforms, day):
+    """Skip an already proven pre-upload-broken clip, never an uncertain POST.
+
+    Limit this to unordered feeds. Normally the hold lasts one
+    publication day; an independently verified local source failure can stay held.
+    Every active platform must have an exact prior source, file and local-only
+    failure record. Do not alter those records or release any old intents.
+    """
+    if route not in {"tarladaki", "penguen", "gonle", "daily_laugh"} or not platforms:
+        return False
+    confirmed = _CONFIRMED_UNREADABLE_SHARED_SOURCES.get(
+        (route, item["id"], item["name"]), {})
+    for platform in platforms:
+        if platform not in {"facebook", "instagram"}:
+            return False
+        entry = state.get("entries", {}).get(
+            f"{route}:{platform}:{item['id']}", {})
+        failure = entry.get("failure") or {}
+        if not (
+            entry.get("route") == route and entry.get("platform") == platform
+            and entry.get("file") == item["name"]
+            and (entry.get("day") == day or (
+                str(entry.get("run_id")) == confirmed.get("run_id")
+                and (not confirmed.get("sha256")
+                     or entry.get("source_sha256") == confirmed["sha256"])
+            ))
+            and entry.get("status") == "ready"
+            and isinstance(failure, dict)
+            and failure.get("reason") == "source_or_cover_preparation_failed"
+            and failure.get("safe_to_repost") is True
+            and str(entry.get("run_id") or "") != str(os.getenv("GITHUB_RUN_ID", ""))
+            and str(entry.get("run_id") or "").isdecimal()
+        ):
+            return False
+    return True
+
+
+def can_advance_past_local_visual_hold(route, entry):
+    """Only an exact non-posted visual duplicate may be bypassed on unordered feeds."""
+    if route not in {"tarladaki", "penguen", "gonle", "daily_laugh"}:
+        return False
+    if not isinstance(entry, dict) or entry.get("status") != "held":
+        return False
+    proof = entry.get("failure")
+    return (isinstance(proof, dict) and proof.get("reason") == "visual_duplicate_review"
+            and proof.get("external_post_attempted") is False
+            and proof.get("safe_to_repost") is False
+            and isinstance(proof.get("conflicting_platforms"), list)
+            and bool(proof["conflicting_platforms"])
+            and all(p in {"facebook", "instagram"} for p in proof["conflicting_platforms"]))
+
+
+def prioritized_route_items(day):
+    """Move rights-approved serial routes first only during today's owner catch-up."""
+    items = list(ROUTES.items())
+    if os.getenv("CATCHUP_BATCH_DATE") == day:
+        series_first = {"film": 0, "film_second": 1, "toonzone": 2}
+        items.sort(key=lambda pair: series_first.get(pair[0], 3))
+    return items
+
+
+def plan(audit=False):
+    now = datetime.now(TR)
+    day = now.date().isoformat()
+    state = restore()
+    if not audit and os.getenv("ADAPTIVE_SCHEDULE_ENABLED", "false").lower() == "true":
+        # Persist the first policy (including an empty fallback) for the day.
+        # A late/re-run report must never move today's remaining publication slots.
+        from adaptive_schedule import freeze_schedule
+        freeze_schedule(state, day, ROOT / "adaptive-schedule.json")
+    apply_verified_migration(state)
+    quarantine_weak_caption_aliases(state)
+    pages = {p["page_name"]: p for p in load_meta_auth()["pages"]}
+    verified_pages = preflight_verified_pages()
+    report = [f"# Public link publisher — {day}", "", "YouTube: disabled. Drive OAuth: not used.", ""]
+    catalogs = {}
+    unavailable_catalogs = set()
+    for key, value in FOLDERS.items():
+        try:
+            catalogs[key] = inventory(value)
+        except Exception as exc:
+            catalogs[key] = {}
+            unavailable_catalogs.add(key)
+            report.append(f"HELD source {key}: {type(exc).__name__}")
+            record_error("drive_inventory", "drive_unavailable", route=key,
+                         error=exc, safe_to_retry=True)
+    for key, files in catalogs.items():
+        report.append(f"{key}: MP4={sum(n.lower().endswith('.mp4') for n in files)}, TXT={sum(n.lower().endswith('.txt') for n in files)}, total={len(files)}")
+    generated_caption_dirs = {}
+    if catalogs.get("daily_laugh"):
+        generated_caption_dirs["daily_laugh"] = ROOT / "daily_laugh_txt"
+        generated, invalid = generate_daily_laugh_txts(catalogs["daily_laugh"], generated_caption_dirs["daily_laugh"])
+        report.append(f"Daily Laugh TXT generated for missing video names: created={generated}; invalid_filenames={invalid}")
+        if invalid:
+            report.append("WARNING: invalid Daily Laugh MP4 filenames will not be published without a readable caption.")
+    if catalogs.get("toonzone"):
+        generated_caption_dirs["toonzone"] = ROOT / "toonzone_txt"
+        generated, invalid = generate_toonzone_txts(catalogs["toonzone"], generated_caption_dirs["toonzone"])
+        report.append(f"ToonZone autogenerated TXT: created={generated}; invalid_filenames={invalid}")
+        matched, missing = toonzone_cover_coverage(catalogs["toonzone"], catalogs["covers"])
+        report.append(f"ToonZone exact part covers: matched={matched}; missing={missing}")
+        # Preserve the exact source->original PNG gaps for owner repair.
+        # Names are derived from filenames, never guessed by episode or re-used
+        # from another part. Do not expose Drive IDs or construct new covers.
+        missing_pngs = sorted(Path(name).stem + ".png"
+                              for name in catalogs["toonzone"]
+                              if name.lower().endswith(".mp4")
+                              and Path(name).stem + ".png" not in catalogs["covers"])
+        save(ROOT / "toonzone-cover-gaps.json", {
+            "schema": 1, "source_video_count": matched + missing,
+            "matched_original_png_count": matched,
+            "missing_original_png_count": missing,
+            "missing_original_png_names": missing_pngs,
+            "original_cover_required": True,
+            "generated_cover_fallback_allowed": False,
+        })
+        if missing:
+            # Exact owner-approved cover files are mandatory for ToonZone.
+            # The former synthetic first-frame fallback could make a different
+            # visual than the intended cover even when the job was green.
+            report.append(
+                "WARNING: ToonZone videos without exact PNG artwork will be held; "
+                "per-part cover fallback is disabled."
+            )
+    plans = []
+    planned_counts = {}
+    # Reserve the exact final caption per route/platform within this batch.
+    # Different Drive IDs with identical text are not two safe posts.
+    planned_caption_hashes = set()
+    scope = account_scope()
+    # A signed, exact-date workflow gate sets this flag for the PRIMARY Film
+    # route only. It cannot affect normal slots, other routes or later dates.
+    film_ten_once = (os.getenv("FILM_TEN_PARTS_ONCE") == "true"
+                     and day == "2026-11-10" and scope == "film")
+    film_gap_once = (os.getenv("FILM_GAP_PART6TO10_ONCE") == "true"
+                     and day == "2026-11-10" and scope == "film")
+    batch_limit = (5 if film_gap_once else 10 if film_ten_once
+                   else 8 if os.getenv("CATCHUP_BATCH_DATE") == day else 1)
+    from operational_enhancements import bounded_catchup_limit
+    history_cache = {}
+    duplicate_fingerprints = {}
+    rescue_only = os.getenv("IG_AUDITED_RESCUE_ONLY") == "true"
+    for route, (source, page_name) in prioritized_route_items(day):
+        if scope and route != scope:
+            continue
+        if rescue_only and route not in _AUDITED_IG_V3_FILES:
+            continue
+        report.extend(["", f"## {page_name}"])
+        if verified_pages is not None and page_name not in verified_pages:
+            report.append("HELD: this account failed identity preflight; other accounts continue.")
+            record_error("meta_account", "account_preflight_held", route=route)
+            continue
+        if not route_enabled(route):
+            report.append("HELD: existing route/rights switch is disabled.")
+            continue
+        page = pages.get(page_name)
+        if not page:
+            report.append("HELD: Meta page not available.")
+            record_error("meta_account", "meta_account_missing", route=route)
+            continue
+        ig_enabled = not (route == "gonle" and route_paused("gonle_ig")) and not (route == "daily_laugh" and route_paused("daily_laugh_instagram"))
+        platforms = ["facebook"] + (["instagram"] if page.get("instagram_id") and route != "film_second" and ig_enabled else [])
+        if rescue_only:
+            if "instagram" not in platforms:
+                report.append("HELD: audited IG rescue requires linked Instagram identity.")
+                continue
+            platforms = ["instagram"]
+        clock = route_clock(route, now)
+        try:
+            histories = {}
+            for p in platforms:
+                cache_key = (page_name, p)
+                if cache_key not in history_cache:
+                    history_cache[cache_key] = graph_rows(page, p)
+                histories[p] = history_cache[cache_key]
+                # Keep validation inside this account's failure boundary even
+                # when a different history adapter is injected by a caller.
+                for row in histories[p]:
+                    timestamp(row)
+        except (RuntimeError, ValueError, TypeError, KeyError) as exc:
+            report.append("HELD: account history unavailable; other routes continue.")
+            record_error("meta_history", "meta_history_unavailable",
+                         route=route, error=exc)
+            continue
+        season1_receipts_by_part = {}
+        season2_approved = False
+        if route == "toonzone":
+            from toonzone_season1_gate import season1_receipts, season2_release_allowed
+            season1_check = season1_receipts(
+                [v for name, v in catalogs[source].items() if name.lower().endswith(".mp4")],
+                catalogs["covers"], state,
+                {p: histories.get(p, []) for p in ("facebook", "instagram")})
+            save(ROOT / "toonzone-season1-live-receipts.json", season1_check)
+            season1_receipts_by_part = {
+                (row["slot"], row["platform"]): row
+                for row in season1_check["rows"]}
+            season2_approved = season2_release_allowed(
+                season1_check,
+                owner_release=os.getenv("TOONZONE_SEASON2_RELEASE_ENABLED", "false").lower() == "true")
+            report.append(
+                "ToonZone S01E04–12: "
+                f'{season1_check["verified_platform_receipts"]}/72 archived IDs seen in live Meta history; '
+                f'Season 2 release={"approved" if season2_approved else "held"}.')
+            if not season1_check["all_verified"]:
+                first_unverified = next(
+                    (r for r in season1_check["rows"] if r["status"] != "verified_in_history"), None)
+                if first_unverified:
+                    report.append(
+                        f'PRIORITY Season 1: {first_unverified["slot"]} '
+                        f'{first_unverified["platform"]} reason={first_unverified["reason"]}; '
+                        'do not infer deletion or blindly re-upload.')
+        caption_indexes = {p: index_history_captions(rows) for p, rows in histories.items()}
+        remote = {p: index[0] for p, index in caption_indexes.items()}
+        ambiguous_captions = {p: index[1] for p, index in caption_indexes.items()}
+        for platform, rows in histories.items():
+            count = sum(route_clock(route, timestamp(row)).date() == clock.date() for row in rows)
+            report.append(f"{platform}: published_today={count}, history_records={len(rows)}")
+        # Match uncertain intents by the exact platform caption before deciding.
+        for key, entry in state["entries"].items():
+            if entry["route"] != route or entry["platform"] not in platforms:
+                continue
+            caption_hash = entry.get("caption_hash")
+            # Fixed TXT repeats on every clip: caption is not a source identity.
+            # Remote caption matching must NEVER convert its uncertain intent to done.
+            if entry.get("caption_source") == "account-fixed-txt":
+                continue
+            if entry["status"] != "done" and caption_hash in ambiguous_captions[entry["platform"]]:
+                report.append("HELD: previous uncertain intent matches multiple remote posts.")
+                continue
+            match = remote[entry["platform"]].get(caption_hash)
+            if entry["status"] != "done" and match:
+                # A Film caption match is not proof of which Drive source was
+                # posted. Keep old intents unresolved until exact source proof.
+                if route in {"film", "film_second"}:
+                    report.append("HELD: Film caption candidate requires exact source evidence.")
+                    continue
+                try:
+                    confirmed_id, confirmed_day = history_publication_match(route, match)
+                except RuntimeError:
+                    report.append("HELD: previous intent matched a post with invalid ID or timestamp.")
+                    continue
+                if conflicting_done_post_source(
+                        state["entries"], key, route, entry["platform"], confirmed_id):
+                    report.append("HELD: caption matches an existing post from a different source ID.")
+                    continue
+                entry.update(
+                    status="done", post_id=confirmed_id, day=confirmed_day,
+                    reconciled_in_run_id=os.getenv("GITHUB_RUN_ID", ""),
+                    reconciliation_proof="unique_platform_history_caption",
+                )
+        counts = {p: max(
+            sum(route_clock(route, timestamp(row)).date() == clock.date() for row in histories[p]),
+            ledger_daily_count(state, route, p, clock.date().isoformat())
+        ) for p in platforms}
+        if rescue_only:
+            # An exact orphaned prepublish attempt is independent of the daily
+            # account quota. Exact caption reconciliation still runs above.
+            counts = {p: 0 for p in platforms}
+        due = target_count(route, now)
+        if film_gap_once and route == "film":
+            # The first release already published five parts on both platforms.
+            # Raise the OWNER-ONLY temporary planning ceiling by five; never
+            # change normal per-account targets or any provider rate limits.
+            due = max(counts.values(), default=0) + 5
+            report.append("OWNER ONCE: only En Buyuk Saban Parts 6-10, no new posts outside gap.")
+        if film_ten_once and route == "film":
+            # Ten *new, distinct* Part 1-10 sources, not ten quota slots
+            # consumed by other Film posts earlier today. Per-source ledger
+            # and provider dedupe still apply, so nothing is blindly reposted.
+            due = max(counts.values(), default=0) + 10
+            report.append("OWNER ONE-SHOT: up to ten En Buyuk Saban parts (1-10) on primary Film Meta routes.")
+        if os.getenv("CATCHUP_BATCH_DATE") != day and not ((film_ten_once or film_gap_once) and route == "film"):
+            batch_limit = bounded_catchup_limit(
+                route, due, counts, clock,
+                enabled=os.getenv("AUTO_BACKFILL_ENABLED", "false").lower() == "true")
+        if due == 0:
+            report.append("NOT DUE: publication hours have not started for this route's local day.")
+            continue
+        if all(counts[p] >= due for p in platforms):
+            report.append("Daily target already complete.")
+            continue
+        files = catalogs[source]
+        videos = [v for n, v in files.items() if n.lower().endswith(".mp4")]
+        # Humor pages share one Drive folder. Their runners may execute at
+        # the same time, so ownership must be stable without a race or shared
+        # in-memory ledger; existing historical posts are still reconciled.
+        if scope and route in {"tarladaki", "penguen"}:
+            videos = [v for v in videos if owned_humor_source(route, v["id"])]
+        if rescue_only:
+            videos = [v for v in videos if v["name"] == _AUDITED_IG_V3_FILES[route]]
+        other_humor_hashes = set()
+        if route in {"tarladaki", "penguen"}:
+            # Match the existing normal publisher's explicit TP activation gate.
+            # Shared files are consumed globally across both humor accounts.
+            other_name = ROUTES["penguen" if route == "tarladaki" else "tarladaki"][1]
+            other_page = pages.get(other_name)
+            if not other_page:
+                report.append("HELD: other shared-humor account history unavailable.")
+                continue
+            try:
+                for p in ("facebook", "instagram"):
+                    if p == "instagram" and not other_page.get("instagram_id"):
+                        continue
+                    ck = (other_name, p)
+                    if ck not in history_cache:
+                        history_cache[ck] = graph_rows(other_page, p)
+                    other_humor_hashes.update(caption_key(r.get("description") or r.get("caption")) for r in history_cache[ck])
+            except RuntimeError as exc:
+                report.append("HELD: " + str(exc))
+                record_error("shared_account_history", "meta_history_unavailable",
+                             route=route, error=exc)
+                continue
+            videos = [v for v in videos if not any(
+                k.endswith(":" + v["id"]) and e["route"] in {"tarladaki", "penguen"} and e["route"] != route
+                for k, e in state["entries"].items())]
+        if source == "film":
+            videos = [v for v in videos if parse_order(Path(v["name"]).stem, "film")]
+            if film_part8_local_only_export_hold(route, files, state["entries"]):
+                # The export has an exact local-only hold, not a failed Meta
+                # upload. Try the separate original Part 8 source instead;
+                # never clear, recategorize or retry the held export.
+                videos = [v for v in videos if v["name"] != "Bickin_Part_8 (1).mp4"]
+                report.append(
+                    "QUARANTINE: Bickin Part 8 export held before Meta POST; "
+                    "original source stays subject to all publish safety gates."
+                )
+            videos.sort(key=lambda v: (not v["name"].lower().startswith("yoksul_1986_"), parse_order(Path(v["name"]).stem, "film")))
+            # Explicit owner handoff after Bıçkın 8 proved visually duplicated
+            # Part 3. Reconcile historical ledger and remote history as usual,
+            # but plan ONLY the complete fresh series. No old intent is reset.
+            if os.getenv("FILM_HANDOFF_TO_EN_BUYUK_SABAN", "false").lower() == "true":
+                from film_series_transition import switch_film_source
+                videos = switch_film_source(route, videos, files)
+                if film_gap_once and route == "film":
+                    # Part 1-5 have already posted; never plan duplicates.
+                    allowed = {f"En_Buyuk_Saban_Part_{i}.mp4" for i in range(6, 11)}
+                    videos = [video for video in videos if video["name"] in allowed]
+                    if len(videos) != 5:
+                        raise RuntimeError("film_gap_source_selection_incomplete")
+                if film_ten_once and route == "film":
+                    # Exclude Part 11+ even if the daily accounting target is
+                    # higher because of already-published unrelated videos.
+                    allowed = {f"En_Buyuk_Saban_Part_{i}.mp4" for i in range(1, 11)}
+                    videos = [video for video in videos if video["name"] in allowed]
+                    if len(videos) != 10:
+                        raise RuntimeError("film_ten_source_selection_incomplete")
+                report.append(
+                    "FILM HANDOFF: complete En_Buyuk_Saban Part 1-32 selected; "
+                    "historical Bickin/Yoksul receipts preserved and checked.")
+        elif source == "toonzone":
+            videos = [v for v in videos if parse_order(Path(v["name"]).stem, "cartoon")]
+            videos.sort(key=lambda v: parse_order(Path(v["name"]).stem, "cartoon"))
+        else:
+            videos.sort(key=lambda v: v["name"])
+        selected = None
+        route_selected = 0
+        blocked_platforms = set()
+        planned_film_parts = set()
+        for item in videos:
+            if source == "toonzone":
+                order = parse_order(Path(item["name"]).stem, "cartoon")
+                if order and order[0] >= 2 and not season2_approved:
+                    report.append(
+                        "HELD: ToonZone Season 2 cannot start before all 36 Season 1 "
+                        "E04–E12 parts have 72 current verified Facebook/Instagram "
+                        "IDs and a separate owner release.")
+                    break
+                if order and order[0] == 1 and 4 <= order[1] <= 12:
+                    slot = f"S01E{order[1]:02d} Part{order[2]}"
+                    unresolved = [
+                        season1_receipts_by_part.get((slot, p), {})
+                        for p in platforms
+                    ]
+                    if any(row.get("reason") == "archived_id_not_in_live_history"
+                           for row in unresolved):
+                        report.append(
+                            "HELD: " + slot + " has archived DONE post IDs absent "
+                            "from current Meta history; verify original remote "
+                            "IDs independently before any further publication."
+                        )
+                        break
+            available = [p for p in platforms if p not in blocked_platforms]
+            route_target = due if (route == "film" and (film_ten_once or film_gap_once)) else target_count(route, now)
+            if not available or all(counts[p] + planned_counts.get((route, p), 0) >= route_target for p in available):
+                break
+            if all(seed_done(route, p, item["name"]) or state["entries"].get(f"{route}:{p}:{item['id']}", {}).get("status") == "done" for p in available):
+                continue
+            if quarantined_unordered_local_failure(
+                    route, item, state, available, clock.date().isoformat()):
+                # Verified earlier local ffprobe failure: no Meta POST occurred.
+                # A different clean clip may fill the daily slot instead.
+                report.append("QUARANTINE: exact source failed local MP4 preparation in a prior run; no blind media retry.")
+                continue
+            if source == "toonzone":
+                ep = list(parse_order(Path(item["name"]).stem, "cartoon")[:2])
+                today_episode = state["episode_days"].get(day)
+                if today_episode and today_episode != ep:
+                    if (ep < today_episode or
+                            not toonzone_episode_confirmed(state, videos, today_episode)):
+                        report.append("HELD: previous ToonZone episode lacks four confirmed parts on both platforms.")
+                        break
+                    report.append("ROLLOVER: completed ToonZone episode; continue in order within the remaining daily quota.")
+            try:
+                with tempfile.TemporaryDirectory() as tmp:
+                    captions, origin = copies(route, item, files, Path(tmp))
+            except (RuntimeError, UnicodeError, ValueError) as exc:
+                report.append("HELD TXT/caption: " + str(exc))
+                record_error("txt_caption", "txt_unavailable", route=route,
+                             video=item["name"], error=exc, safe_to_retry=True)
+                if source in {"film", "toonzone"}:
+                    break
+                continue
+            # Freeze exact text across retries/reconciliation when a new tag
+            # policy was used. Old intents retain their original text/hash.
+            for p in platforms:
+                prior = state["entries"].get(f"{route}:{p}:{item['id']}", {})
+                if isinstance(prior.get("publish_caption"), str):
+                    captions[p] = prior["publish_caption"]
+            if other_humor_hashes and any(caption_key(c) in other_humor_hashes for c in captions.values()):
+                continue
+            pending = []
+            held = False
+            skip_unproven_candidate = False
+            for p in platforms:
+                if p in blocked_platforms:
+                    continue
+                key = f"{route}:{p}:{item['id']}"
+                existing = state["entries"].get(key, {})
+                cap_hash = caption_key(captions[p])
+                if (existing.get("route") == route
+                        and existing.get("platform") == p
+                        and existing.get("file") == item["name"]
+                        and can_advance_past_local_visual_hold(route, existing)):
+                    # A source rejected locally before any Meta POST stays
+                    # quarantined even if its caption also matches old posts.
+                    # Check this before caption ambiguity can stop the queue.
+                    skip_unproven_candidate = True
+                    report.append("QUARANTINE: proven local-only visual duplicate; look for next unique clip.")
+                    continue
+                if (route == "film" and p == "instagram" and existing
+                        and existing.get("status") == "uncertain"
+                        and existing.get("reconciliation_conflict") == "post_id_belongs_to_other_source"):
+                    try:
+                        identical_alias = proven_film_ig_source_alias(
+                            item, existing, route, p, files, state["entries"],
+                            histories[p], duplicate_fingerprints)
+                    except RuntimeError as exc:
+                        report.append("HELD film source identity: " + str(exc))
+                        held = True
+                        continue
+                    if identical_alias:
+                        # Retain old container/intent and the original real
+                        # post owner. Never count, reassign or re-upload alias.
+                        report.append(
+                            "SOURCE ALIAS VERIFIED: identical film bytes belong "
+                            "to an existing real Instagram post; old intent held.")
+                        continue
+                if not existing and source == "film":
+                    try:
+                        duplicate = verified_film_duplicate(
+                            item, route, p, files, state["entries"], histories[p],
+                            duplicate_fingerprints,
+                        )
+                    except RuntimeError as exc:
+                        report.append("HELD film duplicate verification: " + str(exc))
+                        record_error("source_video", "source_or_cover_preparation_failed",
+                                     route=route, platform=p, video=item["name"], error=exc,
+                                     safe_to_retry=True)
+                        held = True
+                        continue
+                    if duplicate:
+                        state["entries"][key] = duplicate
+                        report.append(f"DUPLICATE VERIFIED: {item['name']} {p}; existing post_id={duplicate['post_id']}; no new upload.")
+                        continue
+                if origin != "account-fixed-txt" and cap_hash in ambiguous_captions[p]:
+                    if (source == "film" and
+                            confirmed_existing_film_post_amid_caption_reuse(
+                                existing, route, p, histories[p])):
+                        # Part 13 has two real post IDs using one caption.
+                        # They must not halt the ordered sequence or become
+                        # candidates for another upload.
+                        report.append(
+                            "EXISTING VERIFIED: exact Film post ID, remote "
+                            "timestamp and caption match; no new upload.")
+                        continue
+                    if (source in {"humor", "gonle", "daily_laugh"}
+                            and existing.get("status") not in {"intent", "uncertain", "held"}):
+                        # Several real posts use this caption, but none proves
+                        # which Drive file was sent. Even a partial existing
+                        # ledger must not stop unrelated unordered candidates.
+                        # Preserve its evidence; never invent or replace an ID.
+                        report.append(f"SKIP {page_name} {item['name']} {p}: repeated remote caption; source unverified.")
+                        skip_unproven_candidate = True
+                    else:
+                        report.append("HELD: multiple Meta posts share the same caption; manual reconciliation required.")
+                        held = True
+                    continue
+                match = None if origin == "account-fixed-txt" else remote[p].get(cap_hash)
+                if (match and existing.get("status") in {"uncertain", "intent"}
+                        and conflicting_done_post_source(
+                            state["entries"], key, route, p, str(match.get("id") or ""))):
+                    report.append("HELD: remote post ID already belongs to another source; no caption-only reconciliation.")
+                    if source in {"film", "toonzone"}:
+                        held = True
+                    else:
+                        skip_unproven_candidate = True
+                    continue
+                if existing.get("status") == "done" or seed_done(route, p, item["name"]) or match:
+                    if match:
+                        try:
+                            confirmed_id, confirmed_day = history_publication_match(route, match)
+                        except RuntimeError:
+                            report.append("HELD: remote caption match lacks valid post ID or timestamp.")
+                            held = True
+                            continue
+                        if existing and existing.get("status") in {"intent", "uncertain"}:
+                            if route in {"film", "film_second"}:
+                                report.append("HELD: unresolved Film source identity requires byte evidence.")
+                                held = True
+                                continue
+                            state["entries"][key].update(
+                                status="done", post_id=confirmed_id, day=confirmed_day,
+                                reconciled_in_run_id=os.getenv("GITHUB_RUN_ID", ""),
+                                reconciliation_proof="unique_platform_history_caption",
+                            )
+                        elif not existing:
+                            # Same caption is NOT proof that this video was posted.
+                            # Unordered routes may reuse texts. Quarantine this
+                            # candidate across both platforms and try another;
+                            # ordered Film/ToonZone must retain their position.
+                            if source in {"humor", "gonle", "daily_laugh"}:
+                                report.append(f"SKIP {page_name} {item['name']} {p}: remote caption already exists; source unverified.")
+                                skip_unproven_candidate = True
+                            else:
+                                report.append("HELD: remote caption matches but source identity is unverified.")
+                                held = True
+                    continue
+                if not audit:
+                    if authorize_exact_expired_recovery(route, p, item, existing, page, history_reconciled=True):
+                        report.append("RECOVERY: exact never-published Film container expired; one fresh upload reserved.")
+                    if authorize_film_part17_expired_recovery(
+                            route, p, item, existing, page, history_reconciled=True):
+                        report.append("RECOVERY: Film Part17 exact expired IG container; one bounded re-encoding reserved.")
+                    bind_legacy_ig_container(route, p, item, existing, page)
+                # Historical compact IG uploads that failed *before*
+                # media_publish were incorrectly treated as uncertain forever.
+                # Reclassify only exact, persisted pre-publish HTTP400 evidence,
+                # after successfully reading the remote account's history.
+                # One alternate encoder is permitted, never an ambiguous POST.
+                prior_failure = existing.get("failure") if isinstance(existing, dict) else None
+                if (not audit and p == "instagram" and existing.get("status") == "uncertain"
+                        and existing.get("caption_hash") == cap_hash
+                        and isinstance(prior_failure, dict)):
+                    prior = SimpleNamespace(
+                        stage=prior_failure.get("stage"),
+                        http_status=prior_failure.get("http_status"),
+                        code=prior_failure.get("graph_code"),
+                        subcode=prior_failure.get("graph_subcode"),
+                        container_status=prior_failure.get("container_status"),
+                    )
+                    previous_attempts = existing.get("prepublish_retry_count", 0)
+                    if known_pre_publish_media_rejection(prior, route, previous_attempts):
+                        existing.update(status="ready", prepublish_retry_count=previous_attempts + 1)
+                        report.append(
+                            f"RECOVERY: {item['name']} instagram previously rejected "
+                            "before media_publish; safe alternate encoding authorized once."
+                        )
+                if (not audit and existing.get("caption_hash") == cap_hash
+                        and audited_ig_v3_eligible(
+                            route, p, item["name"], existing)):
+                    # Remote history was read successfully and no unique or
+                    # ambiguous caption match was found above. Old 400 belongs
+                    # to the binary upload stage BEFORE media_publish. Preserve
+                    # all Facebook results and allow one new 720p/96k encode.
+                    existing.update(status="ready", prepublish_retry_count=2)
+                    report.append(
+                        f"RECOVERY V3: {item['name']} instagram audited "
+                        "pre-media_publish HTTP 400; one low-bitrate attempt."
+                    )
+                if (not audit and existing.get("caption_hash") == cap_hash
+                        and audited_ig_v4_eligible(route, p, item["name"], existing)):
+                    existing.update(status="ready", prepublish_retry_count=3)
+                    report.append(
+                        f"RECOVERY V4: {item['name']} instagram 180s compact "
+                        "profile validated FINISHED in no-publish test."
+                    )
+                if (not audit and existing.get("caption_hash") == cap_hash
+                        and audited_avanak_part10_recovery_eligible(route, p, item, existing)):
+                    existing.update(status="ready", prepublish_retry_count=2)
+                    report.append(
+                        "RECOVERY: audited Avanak Apti Part 10 binary rejection; "
+                        "one bounded 720p/96k attempt after remote reconciliation."
+                    )
+                # One owner-authorized Film Part 8 recheck. The old hold was
+                # local-only (no Meta POST) and remains preserved in the
+                # previous scoped artifacts. A fresh remote-history read and
+                # exact source SHA are mandatory; visual comparison runs again
+                # on source bytes BEFORE any provider upload.
+                if (not audit and route == "film"
+                        and os.getenv("FILM_PART8_STRICT_RECHECK_ENABLED") == "true"):
+                    from film_part8_recovery import eligible_original_held
+                    if eligible_original_held(item, existing):
+                        existing["status"] = "ready"
+                        existing["film_part8_recheck_candidate"] = True
+                        report.append(
+                            "RECOVERY: original Bickin Part 8 had local-only "
+                            "visual hold; require extended exact-source comparison "
+                            "before any Meta upload.")
+                if existing and existing.get("status") != "ready":
+                    report.append(f"HELD: {item['name']} {p} has an uncertain previous intent.")
+                    # A green GitHub run is NOT proof these queues are healthy.
+                    # Once per Istanbul day while still blocked, emit an
+                    # actionable alert without retrying the Meta POST.
+                    if (not audit and not can_advance_past_local_visual_hold(route, existing)
+                            and previous_intent_alert_due(existing, now)):
+                        record_error("previous_intent_hold", "unreconciled_previous_intent",
+                                     route=route, platform=p, video=item["name"],
+                                     status="uncertain")
+                        existing["hold_alerted_at"] = now.isoformat()
+                    if quarantine_unordered_ig_source(route, p, item, existing, cap_hash):
+                        # Unordered humor may use another unique clip while the
+                        # exact binary-rejected source stays quarantined on
+                        # both platforms. No retry, resume or intent deletion.
+                        skip_unproven_candidate = True
+                        report.append("QUARANTINE: exact unresolved humor source; look for another unique clip.")
+                    elif can_advance_past_local_visual_hold(route, existing):
+                        # Humor accounts also have no serial predecessor. A
+                        # fingerprint-confirmed local-only duplicate must not
+                        # block their next independent item indefinitely.
+                        # Preserve the original held row and every real post.
+                        skip_unproven_candidate = True
+                        report.append("QUARANTINE: proven local-only visual duplicate; look for next unique clip.")
+                    elif (source in {"gonle", "daily_laugh"}
+                            and existing.get("status") == "held"
+                            and (existing.get("failure") or {}).get("external_post_attempted") is False):
+                        # These feeds have no episode order. An old unresolved
+                        # source is protected on both platforms, while another
+                        # independently deduped clip may fill the daily slot.
+                        skip_unproven_candidate = True
+                        report.append("QUARANTINE: unresolved unordered source preserved; inspect next candidate.")
+                    elif facebook_can_continue_past_ig_rejection(route, p, existing):
+                        # After a proven failed binary upload with its one safe
+                        # IG retry consumed, keep IG in its original blocked
+                        # position. Later Facebook-only parts may proceed.
+                        blocked_platforms.add("instagram")
+                        report.append(
+                            "HELD Instagram sequence; Facebook may continue "
+                            "independently without changing the IG intent."
+                        )
+                    else:
+                        held = True
+                    continue
+                target = due if (film_ten_once or film_gap_once) and route == "film" else target_count(route, now)
+                today_count = sum(route_clock(route, timestamp(row)).date() == clock.date() for row in histories[p])
+                confirmed_in_ledger = ledger_daily_count(state, route, p, clock.date().isoformat())
+                today_count = 0 if rescue_only else max(today_count, confirmed_in_ledger)
+                # A tick catches up one item per account; no all-night busy polling.
+                if today_count + planned_counts.get((route, p), 0) >= target:
+                    continue
+                if (route == "film" and
+                        (p, film_canonical_part(item["name"])) in planned_film_parts):
+                    # Only one unproven same-part source may enter this batch;
+                    # two differently named Drive copies are not two safe slots.
+                    report.append("HELD: film part already planned for this platform in this run.")
+                    continue
+                pending.append(p)
+            if held:
+                break
+            if skip_unproven_candidate:
+                # A matched/ambiguous remote caption means no trustworthy
+                # Drive-file identity: never upload this candidate to either
+                # platform. An unrelated clean candidate may still be planned.
+                continue
+            if not pending:
+                continue
+            if quarantined_unordered_local_failure(
+                    route, item, state, pending, clock.date().isoformat()):
+                # Quotas or an existing publication can leave only a subset
+                # of route platforms pending. Preserve the exact local-only
+                # failure after every history/uncertain-intent guard above;
+                # do not reserve the same broken preparation again.
+                report.append("QUARANTINE: exact pending platforms failed local preparation in a prior run; inspect another unordered source.")
+                continue
+            # Dedupe with the original TXT first; decorate only genuinely new
+            # intents, before their exact publication hashes are persisted.
+            for p in pending:
+                if origin != "account-fixed-txt" and not state["entries"].get(f"{route}:{p}:{item['id']}"):
+                    captions[p] = prepare_caption(captions[p], route, Path(item["name"]).stem, p)
+            if any((route, p, caption_key(captions[p])) in planned_caption_hashes
+                   for p in pending):
+                # Remote history is a snapshot taken before this batch. A
+                # second Drive alias must not bypass the caption check.
+                # Hold the whole clip rather than guessing its source identity.
+                report.append("HELD: identical caption already reserved by another "
+                              "Drive source in this run; no second Meta upload.")
+                continue
+            selected = dict(item, route=route, page=page_name, platforms=pending, captions=captions, caption_source=origin)
+            if (route == "film" and item["name"] == "Bickin_Part_8.mp4"
+                    and pending and all(
+                        state["entries"].get(f"{route}:{p}:{item['id']}", {})
+                        .get("film_part8_recheck_candidate") is True
+                        for p in pending)):
+                selected["film_part8_strict_recheck"] = True
+            ig_entry = state["entries"].get(f"{route}:instagram:{item['id']}", {})
+            if "instagram" in pending and ig_entry.get("container_resume"):
+                if pending != ["instagram"]:
+                    report.append("HELD: existing container requires isolated Instagram recovery.")
+                    continue
+                selected["resume_container_id"] = ig_entry["container_resume"]["container_id"]
+            if "instagram" in pending:
+                _, selected_tags = enhance_instagram_caption(captions["instagram"], route, Path(item["name"]).stem)
+                if selected_tags:
+                    selected["instagram_user_tags"] = selected_tags
+            if source == "toonzone":
+                cover = catalogs["covers"].get(Path(item["name"]).stem + ".png")
+                if cover and str(cover.get("id") or "").strip():
+                    selected["cover_id"] = cover["id"]
+                else:
+                    required_png = Path(item["name"]).stem + ".png"
+                    # Previously a green workflow silently skipped every video
+                    # in this ordered series. Record the actionable first gap.
+                    report.append(
+                        "HELD: exact ToonZone cover missing; "
+                        + "source=" + json.dumps(item["name"], ensure_ascii=False)
+                        + "; required_png=" + json.dumps(required_png, ensure_ascii=False)
+                        + "; fallback disabled."
+                    )
+                    record_error("toonzone_cover", "cover_missing",
+                                 route=route, video=item["name"])
+                    break
+                state["episode_days"][day] = ep
+            report.append(f"NEXT: {item['name']}; caption_source={origin}; platforms={','.join(pending)}")
+            if source == "toonzone":
+                report.append("Caption preview: " + captions[pending[0]][:450].replace("\n", " "))
+            if not audit:
+                for p in pending:
+                    key = f"{route}:{p}:{item['id']}"
+                    old_resume = state["entries"].get(key, {}).get("container_resume")
+                    old_attempts = state["entries"].get(key, {}).get("prepublish_retry_count", 0)
+                    old_expired = state["entries"].get(key, {}).get("expired_container_recovery")
+                    old_source_sha256 = state["entries"].get(key, {}).get("source_sha256")
+                    state["entries"][key] = {
+                        "route": route, "platform": p, "status": "intent",
+                        "caption_hash": caption_key(captions[p]), "file": item["name"],
+                        "publish_caption": captions[p], "caption_source": origin,
+                        "day": clock.date().isoformat(), "run_id": os.environ["GITHUB_RUN_ID"],
+                        "prepublish_retry_count": old_attempts,
+                    }
+                    if isinstance(old_source_sha256, str) and len(old_source_sha256) == 64:
+                        state["entries"][key]["source_sha256"] = old_source_sha256
+                    if p == "instagram" and old_resume:
+                        state["entries"][key]["container_resume"] = old_resume
+                    if p == "instagram" and old_expired:
+                        state["entries"][key]["expired_container_recovery"] = old_expired
+                plans.append(selected)
+                for p in pending:
+                    planned_caption_hashes.add((route, p, caption_key(captions[p])))
+                    planned_counts[(route, p)] = planned_counts.get((route, p), 0) + 1
+                    if route == "film":
+                        planned_film_parts.add((p, film_canonical_part(item["name"])))
+                if (route in _AUDITED_IG_V3_FILES and
+                        item["name"] == _AUDITED_IG_V3_FILES[route] and
+                        "instagram" in pending and
+                        state["entries"][f"{route}:instagram:{item['id']}"]
+                        .get("prepublish_retry_count") == 2):
+                    # One IG-only recovery and one separate FB part can be
+                    # scheduled on the same tick. Never skip the next IG part.
+                    blocked_platforms.add("instagram")
+            route_selected += 1
+            if route_selected >= batch_limit:
+                fb_due = (not audit and route in _AUDITED_IG_V3_FILES
+                          and "instagram" in blocked_platforms
+                          and "facebook" in platforms
+                          and "facebook" not in blocked_platforms
+                          and planned_counts.get((route, "facebook"), 0) < batch_limit
+                          and counts.get("facebook", 0) < target_count(route, now))
+                if not fb_due:
+                    break
+        if selected is None:
+            report.append("No eligible unpublished item below the daily target.")
+            # An empty/blocked queue below a due target is an operational
+            # deficit, not a successful no-op. Journal every due tick;
+            # delivery is deduplicated separately after notification ACK.
+            # Ordinary NOT DUE and already-complete ticks never reach here.
+            alert_days = state.setdefault("queue_alert_days", {})
+            local_day = clock.date().isoformat()
+            # Old publication holds can persist for days and their original
+            # notification may already be deduplicated. They must not hide
+            # today's missing publications; keep the held records untouched.
+            if not audit:
+                record_error("planning_queue", "no_eligible_content", route=route,
+                             safe_to_retry=True)
+                alert_days[route] = local_day
+    save(STATE, state)
+    save(PLAN, plans)
+    from content_stock import build_stock, stock_markdown
+    stocks = build_stock(catalogs, state, ROUTES,
+                         {r: (4 if r == 'toonzone' else 8 if r == 'daily_laugh' else 5)
+                          for r in ROUTES}, unavailable=unavailable_catalogs,
+                         generated_caption_dirs=generated_caption_dirs)
+    save(ROOT / 'content-stock.json', {'measured_at': now.isoformat(), 'accounts': stocks})
+    report.extend(['', stock_markdown(stocks)])
+    summary = "\n".join(report) + "\n"
+    (ROOT / "report.md").write_text(summary, encoding="utf-8")
+    print(summary, flush=True)
+    with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as out:
+        out.write(summary)
+
+
+class MP4MissingMoov(RuntimeError):
+    """Source MP4 has no sample index. No Meta upload can repair its bytes."""
+    diagnostic_code = "missing_moov_atom"
+
+
+def verify_source_video(path):
+    """Reject truncated or nonvideo MP4s before either Facebook or IG POST."""
+    try:
+        info = probe(path)
+        streams = info.get("streams", [])
+        fmt = info.get("format", {})
+        duration = float(fmt.get("duration", 0))
+        if not any(stream.get("codec_type") == "video" for stream in streams):
+            raise ValueError("no-video-stream")
+        if not (0 < duration < 10800):
+            raise ValueError("invalid-video-duration")
+    except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
+        raise RuntimeError("MP4 medya ön doğrulaması başarısız: " + type(exc).__name__) from None
+    except Exception as exc:
+        # An actual ffprobe decode failure may be the MP4's missing moov
+        # index (confirmed for Daily Laugh 195.mp4). Distinguish it from
+        # transient tool errors WITHOUT reading or logging ffprobe stderr.
+        if type(exc).__name__ == "CalledProcessError":
+            try:
+                from instagram_media_compat import mp4_atom_structure
+                atoms = mp4_atom_structure(path)
+                if atoms["moov_offset"] is None:
+                    raise MP4MissingMoov("missing_moov_atom") from None
+            except MP4MissingMoov:
+                raise
+            except (OSError, ValueError, KeyError, TypeError):
+                pass
+        raise RuntimeError("MP4 medya doğrulaması çalıştırılamadı: " + type(exc).__name__) from None
+    return True
+
+
+def download_verified_publication_video(file_id, path):
+    """Validate the downloaded MP4, with one alternate read if it is unreadable."""
+    video = download(file_id, path)
+    for attempt in range(2):
+        try:
+            with video.open("rb") as source:
+                if source.read(8)[4:8] != b"ftyp":
+                    raise RuntimeError("Source is not MP4")
+            verify_source_video(video)
+            return video
+        except RuntimeError:
+            video.unlink(missing_ok=True)
+            if attempt:
+                raise
+            print("İndirilen MP4 doğrulanamadı; bir kez alternatif Drive indirmesi deneniyor.", flush=True)
+            video = direct_public_drive(file_id, path)
+            if video is None:
+                raise
+
+
+def pending_publication_platforms(item, state):
+    """Validate a persisted plan against its ledger before any download or POST."""
+    platforms = item.get("platforms")
+    if not isinstance(platforms, list) or len(platforms) != len(set(platforms)):
+        raise RuntimeError("Publication plan platform list invalid")
+    pending = []
+    for platform in platforms:
+        if platform not in {"facebook", "instagram"}:
+            raise RuntimeError("Publication plan platform invalid")
+        key = f"{item['route']}:{platform}:{item['id']}"
+        entry = state.get("entries", {}).get(key)
+        if not isinstance(entry, dict):
+            raise RuntimeError("Publication intent missing")
+        if entry.get("status") == "done":
+            if not str(entry.get("post_id") or "").strip():
+                raise RuntimeError("Completed publication has no confirmed ID")
+            continue
+        if entry.get("status") != "intent":
+            raise RuntimeError("Publication requires a fresh reconciled intent")
+        caption = item.get("captions", {}).get(platform)
+        if not isinstance(caption, str) or not caption.strip():
+            raise RuntimeError("Publication caption missing")
+        # Older imported intents may lack optional identity fields. New
+        # planner entries always persist them; never bypass a present binding.
+        if entry.get("caption_hash") and entry["caption_hash"] != caption_key(caption):
+            raise RuntimeError("Publication caption differs from persisted intent")
+        if entry.get("publish_caption") is not None and entry["publish_caption"] != caption:
+            raise RuntimeError("Publication text differs from persisted intent")
+        if entry.get("file") and entry["file"] != item.get("name"):
+            raise RuntimeError("Publication source differs from persisted intent")
+        if entry.get("run_id") and entry["run_id"] != os.getenv("GITHUB_RUN_ID"):
+            raise RuntimeError("Publication intent belongs to another run")
+        pending.append(platform)
+    return pending
+
+
+def ordered_predecessors_confirmed(plans, index, item, state):
+    """Do not POST a later serial part until earlier planned parts have IDs."""
+    if item.get("route") not in {"film", "film_second", "toonzone"}:
+        return True
+    for prior in plans[:index]:
+        if prior.get("route") != item["route"]:
+            continue
+        if not prior.get("platforms") or not prior.get("id") or not prior.get("name"):
+            return False
+        for platform in prior["platforms"]:
+            if platform not in {"facebook", "instagram"}:
+                return False
+            row = state.get("entries", {}).get(
+                f"{prior['route']}:{platform}:{prior['id']}")
+            if (not isinstance(row, dict) or row.get("status") != "done"
+                    or not str(row.get("post_id") or "").strip()
+                    or row.get("file") != prior["name"]):
+                return False
+    return True
+
+
+def hold_unattempted_ordered_successor(item, state):
+    """Release only this run's intact, never-POSTed intents to safe planning."""
+    for platform in item.get("platforms", []):
+        if platform not in {"facebook", "instagram"}:
+            continue
+        row = state.get("entries", {}).get(
+            f"{item.get('route')}:{platform}:{item.get('id')}")
+        caption = item.get("captions", {}).get(platform)
+        if (isinstance(row, dict) and isinstance(caption, str)
+                and row.get("status") == "intent"
+                and row.get("run_id") == os.getenv("GITHUB_RUN_ID")
+                and row.get("file") == item.get("name")
+                and row.get("caption_hash") == caption_key(caption)):
+            row.update(status="ready", failure={
+                "reason": "ordered_predecessor_unconfirmed",
+                "safe_to_repost": True, "external_post_attempted": False})
+
+
+def publish():
+    scope = account_scope()
+    state = json.loads(STATE.read_text())
+    plans = json.loads(PLAN.read_text())
+    if scope and (not isinstance(plans, list) or any(
+            not isinstance(item, dict) or item.get("route") != scope
+            for item in plans)):
+        # Never trust a stale or foreign plan, even if an artifact is valid.
+        raise RuntimeError("Isolated worker received an out-of-scope publication plan")
+    pages = {p["page_name"]: p for p in load_meta_auth()["pages"]}
+    verified_pages = preflight_verified_pages()
+    failures = []
+    for index, original_item in enumerate(plans):
+        item = dict(original_item)
+        if verified_pages is not None and item.get("page") not in verified_pages:
+            failures.append(str(item.get("route", "unknown")) + ": account preflight held")
+            record_error("publication_preflight", "account_preflight_held",
+                         route=item.get("route"), video=item.get("name"))
+            continue
+        if not ordered_predecessors_confirmed(plans, index, item, state):
+            # An earlier serial part failed or is unconfirmed. Never begin
+            # this part's download or Meta POST, and preserve prior evidence.
+            hold_unattempted_ordered_successor(item, state)
+            save(STATE, state)
+            failures.append(str(item.get("route", "unknown"))
+                            + ": later ordered part held; predecessor unconfirmed")
+            continue
+        try:
+            item["platforms"] = pending_publication_platforms(item, state)
+        except (RuntimeError, KeyError, TypeError) as exc:
+            failures.append(str(item.get("route", "unknown")) + ": publication intent validation failed")
+            record_error("publication_preflight", "intent_validation_failed",
+                         route=item.get("route"), video=item.get("name"), error=exc)
+            continue
+        if not item["platforms"]:
+            continue
+        page = pages.get(item["page"])
+        if page is None:
+            failures.append(str(item.get("route", "unknown")) + ": account identity unavailable")
+            record_error("publication_preflight", "meta_account_missing",
+                         route=item.get("route"), video=item.get("name"))
+            continue
+        if item.get("resume_container_id"):
+            try:
+                if not publish_existing_ig_intent(item, page, state):
+                    failures.append(item["page"] + " instagram: existing container not FINISHED")
+            except Exception as exc:
+                failures.append(item["page"] + " instagram: existing container reconciliation " + type(exc).__name__)
+                record_error("instagram_publish", "existing_container_reconciliation_failed",
+                             route=item["route"], platform="instagram", video=item["name"], error=exc)
+                save(STATE, state)
+            continue
+        if item["route"] == "toonzone" and (
+                item.get("generate_toonzone_cover") or not item.get("cover_id")):
+            # Also reject a stale or forged archived plan. Do not treat the
+            # synthetic fallback's presence as permission to upload.
+            failures.append("ToonZone: exact original Drive cover required")
+            for platform in item["platforms"]:
+                entry = state["entries"].get(f"toonzone:{platform}:{item['id']}")
+                if isinstance(entry, dict) and entry.get("status") == "intent":
+                    entry["status"] = "ready"
+                    entry["failure"] = {"reason": "exact_owner_cover_required",
+                                        "safe_to_repost": True}
+            save(STATE, state)
+            continue
+        with tempfile.TemporaryDirectory() as tmp:
+            temp = Path(tmp)
+            source_fingerprint = None
+            try:
+                video = download_verified_publication_video(item["id"], temp / "source.mp4")
+                from operational_enhancements import bind_source_integrity
+                if not bind_source_integrity(item, state, video):
+                    failures.append(item["page"] + ": source changed; held before Meta upload")
+                    record_error("source_video", "source_content_changed",
+                                 route=item["route"], video=item["name"], safe_to_retry=False)
+                    save(STATE, state)
+                    continue
+                # Persist the immutable source digest before any external POST.
+                save(STATE, state)
+                if os.getenv('MEDIA_QUALITY_ENABLED', 'false').lower() == 'true':
+                    from media_quality import inspect_video, safe_failure_code
+                    try:
+                        quality = inspect_video(video)
+                    except Exception as exc:
+                        save(ROOT / 'quality' / (item['id'] + '.json'),
+                             {'status': 'held', 'reason': 'quality_check_failed',
+                              'check_code': safe_failure_code(exc),
+                              'source_id': item['id']})
+                        raise RuntimeError('Local media quality gate held source') from None
+                    save(ROOT / 'quality' / (item['id'] + '.json'), quality)
+                if item.get("approved_md5"):
+                    checksum = hashlib.md5(video.read_bytes()).hexdigest()
+                    if checksum != item["approved_md5"]:
+                        raise RuntimeError("Human-approved content checksum mismatch")
+                if os.getenv("ADVANCED_DEDUPE_ENABLED", "false").lower() == "true":
+                    from media_similarity import visual_fingerprint
+                    source_fingerprint = visual_fingerprint(video)
+                from subtitle_pipeline import prepare_subtitles
+                video, subtitle_receipt = prepare_subtitles(
+                    video, item["route"], ROOT / "subtitles" / item["route"] / item["id"])
+                save(ROOT / "subtitles" / item["route"] / item["id"] / "receipt.json", subtitle_receipt)
+                if item.get("cover_id"):
+                    cover = download(item["cover_id"], temp / "cover.png")
+                    if item["route"] == "toonzone":
+                        # Validate actual original PNG bytes, not just Drive
+                        # filename/ID, before sending any bytes to Meta.
+                        from toonzone_cover_acceptance import png_identity
+                        png_identity(cover)
+                    video = create_instagram_cover_video(
+                        video, cover, temp / "covered.mp4",
+                        preserve_full_cover=(item["route"] == "toonzone"),
+                    )
+                elif item.get("generate_toonzone_cover"):
+                    raise RuntimeError("toonzone_synthetic_cover_forbidden")
+            except Exception as exc:
+                failures.append(item["page"] + ": " + type(exc).__name__ + ": " + _sanitize_meta_text(str(exc))[:400])
+                for platform in item["platforms"]:
+                    key = f"{item['route']}:{platform}:{item['id']}"
+                    state["entries"][key].update(
+                        status="ready",
+                        failure={"reason": "source_or_cover_preparation_failed",
+                                 "error_type": type(exc).__name__,
+                                 "media_diagnostic": ("missing_moov_atom"
+                                                      if isinstance(exc, MP4MissingMoov)
+                                                      else "N/A"),
+                                 "safe_to_repost": True},
+                    )
+                for platform in item["platforms"]:
+                    record_error("source_video", "source_or_cover_preparation_failed",
+                                 route=item["route"], platform=platform,
+                                 video=item["name"], error=exc, safe_to_retry=True)
+                save(STATE, state)
+                continue
+            if item.get("film_part8_strict_recheck") and source_fingerprint is None:
+                # No dedupe evidence is not permission to upload Bickin 8.
+                failures.append("Film Part 8: extended duplicate check unavailable")
+                for p in item["platforms"]:
+                    state["entries"][f"{item['route']}:{p}:{item['id']}"].update(
+                        status="held", failure={"reason": "extended_visual_check_unavailable",
+                                                "external_post_attempted": False,
+                                                "safe_to_repost": False})
+                save(STATE, state)
+                continue
+            if source_fingerprint is not None:
+                from media_similarity import hold_visual_duplicate
+                if item.get("film_part8_strict_recheck"):
+                    from film_part8_recovery import audit_part8_before_publish
+                    try:
+                        _checked_fp, proof = audit_part8_before_publish(
+                            item, state, temp / "source.mp4",
+                            download_verified_publication_video, temp)
+                    except (OSError, RuntimeError, ValueError) as exc:
+                        film_hold_reason = (
+                            "film_part8_source_visually_duplicate"
+                            if str(exc) == "film_part8_source_visually_duplicates_part3"
+                            else "film_part8_strict_recheck_held"
+                        )
+                        # The original three-frame hold is still authoritative
+                        # unless the stronger source-vs-source proof passes.
+                        if not hold_visual_duplicate(item, state, source_fingerprint):
+                            for p in item["platforms"]:
+                                state["entries"][f"{item['route']}:{p}:{item['id']}"].update(
+                                    status="held",
+                                    failure={"reason": film_hold_reason,
+                                             "external_post_attempted": False,
+                                             "safe_to_repost": False})
+                        record_error("source_video", film_hold_reason,
+                                     route=item["route"], video=item["name"],
+                                     error=exc, safe_to_retry=False)
+                        save(STATE, state)
+                        continue
+                    for p in item["platforms"]:
+                        row = state["entries"][f"{item['route']}:{p}:{item['id']}"]
+                        row["visual_fingerprint"] = source_fingerprint
+                        row["part8_strict_dedupe_proof"] = proof
+                    save(STATE, state)
+                elif hold_visual_duplicate(item, state, source_fingerprint):
+                    # A potentially duplicated source is held for human review,
+                    # never retried automatically. Preserve every prior post.
+                    # The local-only duplicate hold is expected safety, not a provider failure.
+                    # Journal it, but do not turn unrelated successful posts into a red run.
+                    record_error("source_video", "visual_duplicate_review",
+                                 route=item["route"], video=item["name"],
+                                 safe_to_retry=False)
+                    save(STATE, state)
+                    continue
+                # Persist the fingerprint alongside each existing archived
+                # intent before any external upload attempt.
+                save(STATE, state)
+            # Instagram transcoding is local preparation, not a Meta API
+            # upload. If it fails, mark only Instagram ready to try the next
+            # safe scheduled run. Facebook can still publish independently.
+            prepared_ig = None
+            if "instagram" in item["platforms"]:
+                try:
+                    retry_count = state["entries"][
+                        f"{item['route']}:instagram:{item['id']}"
+                    ].get("prepublish_retry_count", 0)
+                    alternate_compact_profile = (
+                        retry_count == 1 and item["route"] in {"film", "film_second", "toonzone"}
+                        and not (retry_count == 3 and
+                                 item["route"] in _AUDITED_IG_V3_FILES and
+                                 item["name"] == _AUDITED_IG_V3_FILES[item["route"]])
+                    )
+                    # Bounded, different FFmpeg encodings for short Reels.
+                    # We never change Facebook state or replay media_publish.
+                    short_recovery_v3 = (
+                        retry_count == 2 and
+                        item["route"] in {"tarladaki", "penguen", "daily_laugh", "gonle"}
+                    )
+                    gonle_alt_vertical = (
+                        item["route"] == "gonle" and retry_count == 1
+                    )
+                    prepared_ig = prepare_instagram_upload(
+                        video, temp / "instagram.mp4",
+                        # 29 Oct: 167.mp4 rejected after a 15 MB 1080p first
+                        # pass. Keep full duration; start short routes at 720p.
+                        short_reel=(retry_count == 0 and item["route"] in {
+                            "tarladaki", "penguen", "daily_laugh"}),
+                        # 24-25 Oct: repeated Meta HTTP 400 ProcessingFailedError
+                        # despite a valid faststart stream-copy remux. Re-encode
+                        # short humour/Daily Reels to 30fps H.264 + AAC instead.
+                        prefer_remux=item["route"] not in {"tarladaki", "penguen", "daily_laugh"},
+                        film_compact=(
+                            not alternate_compact_profile
+                            and not short_recovery_v3
+                            and not gonle_alt_vertical
+                            and not (retry_count == 2 and item["route"] in {"film", "film_second", "toonzone"})
+                            and (item["route"] in {"film", "film_second", "gonle"}
+                                 or retry_count > 0)
+                        ),
+                        toonzone_compact=(
+                            item["route"] == "toonzone" and not alternate_compact_profile
+                            and retry_count != 2
+                        ),
+                        # Last verified prepublish rejection gets a THIRD, distinct
+                        # locally validated full-length MP4 bitstream. This does
+                        # not authorize repeating uncertain Meta writes.
+                        recovery_v4=(retry_count == 2 and item["route"] in
+                                     {"film", "film_second", "toonzone"}),
+                        # Apparent MP4/codec compliance did not prevent the
+                        # repeated short-Reels rupload ProcessingFailedError.
+                        # Always encode first-pass humour/Daily reels into a
+                        # controlled H.264/AAC bitstream, even if ffprobe says
+                        # the original is compliant. Other routes keep their
+                        # established profiles and one-shot retry gates.
+                        force_transcode=(
+                            alternate_compact_profile or gonle_alt_vertical
+                            or (retry_count == 2 and item["route"] in {"film", "film_second", "toonzone"})
+                            or short_recovery_v3
+                            or item["route"] in {"tarladaki", "penguen", "daily_laugh"}
+                        ),
+                        recovery_v3=(
+                            short_recovery_v3
+                            # Film/ToonZone's alternate encoder previously fell
+                            # through to 1080p/4M (95 MB for a 7 MB source).
+                            # Use the existing bounded 720p/1.8M/96k profile.
+                            or alternate_compact_profile
+                            or (retry_count == 2 and
+                                item["route"] in _AUDITED_IG_V3_FILES and
+                                item["name"] == _AUDITED_IG_V3_FILES[item["route"]])
+                        ),
+                    )
+                    if item["route"] == "toonzone":
+                        # Historical five live IG thumbnails disagree with
+                        # their original Drive PNGs. Block NEW IG uploads unless
+                        # the final transcoded MP4 actually begins with this
+                        # exact part's cover; never touch archived done posts.
+                        from toonzone_cover_acceptance import verify_prepared_instagram_first_frame
+                        verify_prepared_instagram_first_frame(cover, prepared_ig)
+                except Exception as exc:
+                    key = f"{item['route']}:instagram:{item['id']}"
+                    state["entries"][key].update(
+                        status="ready", failure={"reason": "media_preparation_failed",
+                                                 "error_type": type(exc).__name__,
+                                                 "safe_to_repost": True},
+                    )
+                    failures.append(item["page"] + " instagram: local media preparation "
+                                    + type(exc).__name__ + " (no Meta upload attempted)")
+                    record_error("instagram_preparation", "media_preparation_failed",
+                                 route=item["route"], platform="instagram",
+                                 video=item["name"], error=exc, safe_to_retry=True)
+                    save(STATE, state)
+            for platform in item["platforms"]:
+                if platform == "instagram" and prepared_ig is None:
+                    continue
+                key = f"{item['route']}:{platform}:{item['id']}"
+                try:
+                    # Persist the point of no blind retry BEFORE the external
+                    # write. A crash/replayed publish step must reconcile first.
+                    state["entries"][key]["status"] = "uncertain"
+                    save(STATE, state)
+                    if platform == "facebook":
+                        post = upload_facebook_reel(page, str(video), item["captions"][platform])
+                    else:
+                        tag_options = ({"user_tags": item["instagram_user_tags"]}
+                                       if item.get("instagram_user_tags") else {})
+                        if item["route"] == "toonzone":
+                            # Select the locally proven first frame explicitly.
+                            # Only the next new Reel receives this option.
+                            tag_options["thumb_offset"] = 0
+                        post = upload_instagram_reel(
+                            page, str(prepared_ig), item["captions"][platform],
+                            append_store_link=False, **tag_options,
+                        )
+                    if not post:
+                        raise RuntimeError("Publication has no post ID")
+                    state["entries"][key].update(
+                        status="done", post_id=str(post),
+                        published_at_utc=datetime.now(timezone.utc).isoformat(),
+                        publication_run_id=os.getenv("GITHUB_RUN_ID", ""),
+                    )
+                    state["entries"][key].pop("failure", None)
+                    print(json.dumps({"page": item["page"], "file": item["name"], "platform": platform, "post_id": str(post)}, ensure_ascii=False), flush=True)
+                except Exception as exc:
+                    # Never blindly repeat a Meta POST, including HTTP 400.
+                    # A rejected API request and a timed-out *accepted* upload
+                    # are indistinguishable without remote reconciliation.
+                    diagnostic = classify_meta_failure(exc)
+                    entry = state["entries"][key]
+                    previous = entry.get("prepublish_retry_count", 0)
+                    if (platform == "instagram" and isinstance(exc, MetaAPIError)
+                            and known_pre_publish_media_rejection(exc, item["route"], previous)):
+                        # This native uploader has not reached media_publish.
+                        # The next scheduled job rechecks remote posts before
+                        # creating a new container with a distinct encoding.
+                        # At most two additional short-Reel profiles are tried.
+                        entry.update(
+                            status="ready",
+                            prepublish_retry_count=previous + 1,
+                            failure=dict(diagnostic,
+                                         recovery_next_profile=previous + 1,
+                                         recovery_action="normalize_then_reconcile_at_next_tick"),
+                        )
+                    else:
+                        entry.update(status="uncertain", failure=diagnostic)
+                    safe = str(exc) if isinstance(exc, MetaAPIError) else type(exc).__name__
+                    failures.append(item["page"] + " " + platform + ": " + safe)
+                    record_error(f"{platform}_publish", diagnostic["reason"],
+                                 route=item["route"], platform=platform,
+                                 video=item["name"], error=exc,
+                                 status=entry["status"],
+                                 safe_to_retry=entry["status"] == "ready")
+                finally:
+                    save(STATE, state)
+    if failures:
+        print("HELD failures: " + "; ".join(failures), flush=True)
+        raise SystemExit(1)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("action", choices=("audit", "plan", "publish"))
+    action = parser.parse_args().action
+    if action == "publish":
+        publish()
+    else:
+        plan(audit=action == "audit")
+
