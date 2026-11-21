@@ -2147,12 +2147,13 @@ def publish():
                 # Persist the immutable source digest before any external POST.
                 save(STATE, state)
                 if os.getenv('MEDIA_QUALITY_ENABLED', 'false').lower() == 'true':
-                    from media_quality import inspect_video
+                    from media_quality import inspect_video, safe_failure_code
                     try:
                         quality = inspect_video(video)
-                    except Exception:
+                    except Exception as exc:
                         save(ROOT / 'quality' / (item['id'] + '.json'),
                              {'status': 'held', 'reason': 'quality_check_failed',
+                              'check_code': safe_failure_code(exc),
                               'source_id': item['id']})
                         raise RuntimeError('Local media quality gate held source') from None
                     save(ROOT / 'quality' / (item['id'] + '.json'), quality)

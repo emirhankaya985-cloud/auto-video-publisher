@@ -1516,7 +1516,18 @@ class LinkRuntimeSafety(unittest.TestCase):
             ig.assert_not_called()
             entries = json.loads((root / 'state.json').read_text())['entries']
             self.assertTrue(all(r['status'] == 'ready' for r in entries.values()))
-            self.assertEqual(json.loads((root / 'quality/v.json').read_text())['status'], 'held')
+            quality = json.loads((root / 'quality/v.json').read_text())
+            self.assertEqual(quality['status'], 'held')
+            self.assertEqual(quality['check_code'], 'black_screen_samples')
+
+    def test_quality_failure_report_redacts_unrecognized_exception_details(self):
+        from media_quality import safe_failure_code
+        self.assertEqual(safe_failure_code(RuntimeError('silent_audio_samples')),
+                         'silent_audio_samples')
+        self.assertEqual(safe_failure_code(RuntimeError('private path /secret/video.mp4')),
+                         'quality_check_failed')
+        self.assertEqual(safe_failure_code(ValueError('private provider detail')),
+                         'quality_check_failed')
 
 
     def test_daily_laugh_caption_collision_skips_old_and_plans_new_without_duplicate(self):
