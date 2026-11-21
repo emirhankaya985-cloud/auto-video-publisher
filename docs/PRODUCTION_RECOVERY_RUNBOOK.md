@@ -829,3 +829,9 @@ Run 42103999147: full exact Drive cover plus compact profile created 13739862-by
 - **Kanıt:** [44916271942](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/44916271942) Penguen Facebook ve Instagram yükleme adımlarını yerel kalite kontrolünde durdurdu; yeni post oluşmadı. Mevcut `quality` artifact'i yalnız genel `quality_check_failed` veriyor, başarısız ölçütü göstermiyordu.
 - **Güvenli aksiyon:** Kalite eşiğini ve durdurma kararını koru; artifact'e yalnız sabit allow-list'teki ölçüt kodunu ekle. Beklenmeyen exception metni, dosya yolu veya ffmpeg logu kaydedilmez. Ölçüt düzeltme ve uygun kaynak yeniden denetlenene kadar upload yok.
 - **Test:** Mock kalite hatasında sabit kod saklanmalı; bilinmeyen exception metni/path yalnız genel `quality_check_failed` olarak kalmalı. Bu tanı iyileştirmesi hiçbir kalite engelini geçersiz kılmaz; normal schedule'da ayrı canlı doğrulama gerekir.
+
+## 21 Kasım 2026 — publisher watchdog'u matrix sonucunu hesap bazında sınıflandırmalı
+
+- **Kanıt:** [44924603765](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/44924603765) watchdog'u iki kırmızı publisher matrix koşumunu doğrudan `consecutive_failures` diye duyurdu. Aynı çalıştırmalarda Tarladaki ve Gönle gibi kardeş hesaplar başarılıydı; kırmızı sonuç Penguen kaynak kalite engeli ve Film/Film Second içerik beklemelerinden geldi.
+- **Güvenli aksiyon:** Scheduler workflow'larının kırmızı/yeşil toplam sonucunu değil, mevcut hesap başına incident receipt'lerini esas al. Receipt'lerde engelli route varsa `blocked_routes` ile sınırlı alarm üret; tüm receipt'ler sağlıklıysa sibling başarısız job'larıyla genel Meta kesintisi uydurma; receipt okunamıyorsa `unknown` olarak bırak.
+- **Test:** Matrix run'lar fail iken sağlıklı receipt'ler `healthy`; bir Penguen receipt engelliyse yalnız `penguen` listelensin; receipt yoksa durum `unknown` kalmalı. Hiçbir publisher veya API yazımı yapılmaz.

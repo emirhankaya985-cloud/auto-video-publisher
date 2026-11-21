@@ -151,18 +151,17 @@ def check_publisher(*, now=None, token=None, get=requests.get):
         if not recent:
             return {"status": "unhealthy", "reason": "no_recent_scheduled_runs", "recent_runs": 0}
         completed = [r for _, r in recent if r.get("status") == "completed"]
-        if len(completed) >= 2 and all(r.get("conclusion") == "failure" for r in completed[:2]):
-            return {"status": "unhealthy", "reason": "consecutive_failures",
-                    "recent_runs": len(recent),
-                    "failed_run_ids": [str(r["id"]) for r in completed[:2] if str(r.get("id", "")).isdigit()]}
-        if not any(r.get("status") == "completed" and r.get("conclusion") == "success"
-                   for _, r in recent):
-            return {"status": "unhealthy", "reason": "no_recent_success",
-                    "recent_runs": len(recent),
-                    "failed_run_ids": [str(r["id"]) for r in completed if r.get("conclusion")=="failure" and str(r.get("id", "")).isdigit()]}
+        failed_ids = [str(r["id"]) for r in completed
+                      if r.get("conclusion") == "failure" and str(r.get("id", "")).isdigit()]
+        # A matrix workflow can be red because one account failed while sibling
+        # accounts posted successfully. Trust the per-account incident receipts
+        # before classifying any workflow-level failure as a publisher outage.
         evidence = check_publication_receipts(evidence_runs, get=get, headers={
             "Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"})
-        return dict(evidence, recent_runs=len(recent))
+        evidence["recent_runs"] = len(recent)
+        if failed_ids:
+            evidence["failed_run_ids"] = failed_ids[:8]
+        return evidence
     except requests.RequestException:
         return {"status": "unknown", "reason": "github_request_failed"}
     except (TypeError, ValueError):

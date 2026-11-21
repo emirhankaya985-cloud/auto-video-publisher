@@ -37,13 +37,16 @@ class PublicLinkHealthTests(unittest.TestCase):
         self.assertEqual(get.call_args.kwargs["params"]["event"], "schedule")
         self.assertFalse(get.call_args.kwargs["allow_redirects"])
 
-    def test_consecutive_failures_trigger_alert(self):
-        result = health.check_publisher(now=NOW, token="test", get=fake_get([
-            run("2026-10-24T08:37:00Z", "failure"),
-            run("2026-10-24T08:07:00Z", "failure"),
-            run("2026-10-24T07:37:00Z", "success")]))
-        self.assertEqual(result["status"], "unhealthy")
-        self.assertEqual(result["reason"], "consecutive_failures")
+    def test_failed_matrix_runs_do_not_hide_healthy_account_receipts(self):
+        runs = [
+            dict(run("2026-10-24T08:37:00Z", "failure"), id=101),
+            dict(run("2026-10-24T08:07:00Z", "failure"), id=102),
+            dict(run("2026-10-24T07:37:00Z", "success"), id=103),
+        ]
+        result = health.check_publisher(now=NOW, token="test", get=fake_get(runs))
+        self.assertEqual(result["status"], "healthy")
+        self.assertEqual(result["recent_runs"], 3)
+        self.assertEqual(result["failed_run_ids"], ["101", "102"])
 
     def test_single_failure_after_success_is_not_consecutive(self):
         result = health.check_publisher(now=NOW, token="test", get=fake_get([
@@ -51,10 +54,23 @@ class PublicLinkHealthTests(unittest.TestCase):
             run("2026-10-24T08:07:00Z", "success")]))
         self.assertEqual(result["status"], "healthy")
 
-    def test_no_recent_success_triggers_alert(self):
-        result = health.check_publisher(now=NOW, token="test", get=fake_get([
-            run("2026-10-24T08:07:00Z", "failure")]))
-        self.assertEqual(result["reason"], "no_recent_success")
+    def test_failed_matrix_runs_report_only_accounts_with_blocked_receipts(self):
+        with patch.object(health, "check_publication_receipts", return_value={
+                "status": "unhealthy", "reason": "publication_blocked",
+                "blocked_routes": ["penguen"], "receipt_accounts": 7}):
+            result = health.check_publisher(now=NOW, token="test", get=fake_get([
+                run("2026-10-24T08:07:00Z", "failure")]))
+        self.assertEqual(result["status"], "unhealthy")
+        self.assertEqual(result["reason"], "publication_blocked")
+        self.assertEqual(result["blocked_routes"], ["penguen"])
+
+    def test_failed_matrix_runs_with_unavailable_receipts_stay_unknown(self):
+        with patch.object(health, "check_publication_receipts", return_value={
+                "status": "unknown", "reason": "publication_receipts_unavailable"}):
+            result = health.check_publisher(now=NOW, token="test", get=fake_get([
+                run("2026-10-24T08:07:00Z", "failure")]))
+        self.assertEqual(result["status"], "unknown")
+        self.assertEqual(result["reason"], "publication_receipts_unavailable")
 
     def test_wrong_branch_manual_or_old_run_cannot_mask_failure(self):
         get = fake_get([
