@@ -77,6 +77,7 @@ def check_publication_receipts(recent, *, get, headers):
         if not latest:
             raise ValueError("no verified receipts")
         blocked, posts = [], 0
+        platform_evidence = {}
         for route, artifact in latest.items():
             aid = artifact.get("id")
             if type(aid) is not int or aid <= 0:
@@ -96,6 +97,19 @@ def check_publication_receipts(recent, *, get, headers):
             outcomes = receipt.get("step_outcomes")
             if type(count) is not int or count < 0 or not isinstance(blockers, dict) or not isinstance(outcomes, dict):
                 raise ValueError("invalid receipt evidence")
+            incidents = receipt.get("incidents", [])
+            error_events = receipt.get("all_error_events", [])
+            if not isinstance(incidents, list) or not isinstance(error_events, list):
+                raise ValueError("invalid platform receipt evidence")
+            affected_platforms = set()
+            for item in incidents + error_events:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("route") != route:
+                    continue
+                platform = item.get("platform")
+                if platform in {"facebook", "instagram"}:
+                    affected_platforms.add(platform)
             posts += count
             if (receipt.get("state_available") is False
                     or any(type(value) is int and value > 0 for value in blockers.values())
@@ -103,9 +117,11 @@ def check_publication_receipts(recent, *, get, headers):
                            if key in {"preflight", "verify", "plan", "publish", "post_verification", "notify"})
                     or receipt.get("unverified_done_entries", 0)):
                 blocked.append(route)
+                platform_evidence[route] = sorted(affected_platforms) or ["unknown"]
         return {"status": "unhealthy" if blocked else "healthy",
                 "reason": "publication_blocked" if blocked else "publication_receipts_checked",
-                "blocked_routes": sorted(blocked), "receipt_accounts": len(latest),
+                "blocked_routes": sorted(blocked), "blocked_platforms": platform_evidence,
+                "receipt_accounts": len(latest),
                 "confirmed_new_posts_in_latest_receipts": posts}
     except (requests.RequestException, ValueError, TypeError, KeyError, zipfile.BadZipFile):
         return {"status": "unknown", "reason": "publication_receipts_unavailable"}
@@ -194,10 +210,16 @@ def main():
     print(json.dumps(verdict, sort_keys=True), flush=True)
     summary = os.getenv("GITHUB_STEP_SUMMARY")
     if summary:
+        platforms = verdict.get("blocked_platforms", {})
+        platform_lines = [
+            f"- Affected platforms ({route}): {', '.join(platforms.get(route, ['unknown']))}"
+            for route in verdict.get("blocked_routes", [])
+        ]
         with open(summary, "a", encoding="utf-8") as output:
             output.write(f"### Meta-only publisher health\n\n"
                          f"- Result: {verdict['status']}\n"
                          f"- Reason: {verdict.get('reason', 'unverified')}\n"
+                         + ("\n".join(platform_lines) + "\n" if platform_lines else "") +
                          f"- This is an Actions health check, not proof of individual published posts.\n")
     if verdict["status"] == "healthy":
         return 0
@@ -218,7 +240,9 @@ def main():
     message = ("985 hesabındaki otomatik Meta yayınlarında devam eden bir engel "
                "veya doğrulanamayan çalışma kaydedildi. "
                f"Durum: {verdict['status']}; neden: {verdict.get('reason', 'unknown')}. " +
-               ("Engelli hesaplar: " + ", ".join(verdict["blocked_routes"]) + ". "
+               ("Engelli hesap/platformlar: " + "; ".join(
+                    f"{route} ({', '.join(verdict.get('blocked_platforms', {}).get(route, ['unknown']))})"
+                    for route in verdict["blocked_routes"]) + ". "
                 if verdict.get("blocked_routes") else "") +
                "Bu bir otomasyon arızası uyarısıdır, paylaşım sonucu değildir.")
     if os.getenv("NTFY_TOPIC", "").strip() or os.getenv("NTFY_TOPIC_URL", "").strip():

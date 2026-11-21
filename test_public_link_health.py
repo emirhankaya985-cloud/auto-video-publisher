@@ -234,6 +234,28 @@ class PublicationReceiptTests(unittest.TestCase):
         self.assertEqual(verdict["status"], "unhealthy")
         self.assertEqual(verdict["confirmed_new_posts_in_latest_receipts"], 2)
 
+    def test_blocked_account_reports_only_allowlisted_platform_evidence(self):
+        blocked = {"run_id": "123", "confirmed_new_posts": 0,
+                   "planning_blocker_counts": {"no_eligible_content": 1},
+                   "step_outcomes": {"publish": "success"},
+                   "incidents": [{"route": "penguen", "platform": "instagram"}],
+                   "all_error_events": [
+                       {"route": "penguen", "platform": "facebook"},
+                       {"route": "gonle", "platform": "instagram"},
+                       {"route": "penguen", "platform": "threads"},
+                   ]}
+        verdict = health.check_publication_receipts([(NOW, {"id": 123, "status": "completed"})],
+            get=self.receipt_get({"penguen": blocked}), headers={})
+        self.assertEqual(verdict["blocked_platforms"], {"penguen": ["facebook", "instagram"]})
+
+    def test_blocked_account_without_platform_evidence_is_unknown(self):
+        receipt = {"run_id": "123", "confirmed_new_posts": 0,
+                   "planning_blocker_counts": {"no_eligible_content": 1},
+                   "step_outcomes": {"publish": "success"}}
+        verdict = health.check_publication_receipts([(NOW, {"id": 123, "status": "completed"})],
+            get=self.receipt_get({"penguen": receipt}), headers={})
+        self.assertEqual(verdict["blocked_platforms"], {"penguen": ["unknown"]})
+
     def test_youtube_step_failure_does_not_raise_meta_outage(self):
         receipt = {"run_id": "123", "confirmed_new_posts": 0,
                    "planning_blocker_counts": {}, "step_outcomes": {"publish": "success", "youtube_publish": "failure"}}
