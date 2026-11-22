@@ -15,7 +15,7 @@ import time
 import tempfile
 import zipfile
 from types import SimpleNamespace
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -216,7 +216,9 @@ def publish_existing_ig_intent(item, page, state):
                      route=item["route"], platform="instagram", video=item["name"], status="uncertain")
         save(STATE, state)
         return False
-    entry.update(status="done", post_id=str(post))
+    entry.update(status="done", post_id=str(post),
+                 published_at_utc=datetime.now(timezone.utc).isoformat(),
+                 publication_run_id=os.getenv("GITHUB_RUN_ID", ""))
     entry.pop("failure", None)
     save(STATE, state)
     print(json.dumps({"page": item["page"], "file": item["name"], "platform": "instagram",
@@ -2390,7 +2392,11 @@ def publish():
                         )
                     if not post:
                         raise RuntimeError("Publication has no post ID")
-                    state["entries"][key].update(status="done", post_id=str(post))
+                    state["entries"][key].update(
+                        status="done", post_id=str(post),
+                        published_at_utc=datetime.now(timezone.utc).isoformat(),
+                        publication_run_id=os.getenv("GITHUB_RUN_ID", ""),
+                    )
                     state["entries"][key].pop("failure", None)
                     print(json.dumps({"page": item["page"], "file": item["name"], "platform": platform, "post_id": str(post)}, ensure_ascii=False), flush=True)
                 except Exception as exc:
