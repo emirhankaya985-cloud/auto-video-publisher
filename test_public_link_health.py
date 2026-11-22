@@ -151,18 +151,18 @@ class PublicLinkHealthTests(unittest.TestCase):
                "NTFY_TOPIC_URL": "", "GITHUB_STEP_SUMMARY": "",
                "META_OUTAGE_REPEAT_ALERTS": ""}
 
-        with patch.object(health, "check_publisher", return_value=verdict), \\
-                patch.object(health, "blocked_route_alerts_acknowledged", return_value=True), \\
-                patch.object(health, "send_ntfy") as ntfy, \\
-                patch.object(health, "telegram_configured", return_value=False), \\
+        with patch.object(health, "check_publisher", return_value=verdict), \
+                patch.object(health, "blocked_route_alerts_acknowledged", return_value=True), \
+                patch.object(health, "send_ntfy") as ntfy, \
+                patch.object(health, "telegram_configured", return_value=False), \
                 patch.dict(os.environ, env), redirect_stdout(io.StringIO()):
             self.assertEqual(health.main(), 1)
         ntfy.assert_not_called()
 
-        with patch.object(health, "check_publisher", return_value=verdict), \\
-                patch.object(health, "blocked_route_alerts_acknowledged", return_value=False), \\
-                patch.object(health, "send_ntfy", return_value={"server_ack": True}) as ntfy, \\
-                patch.object(health, "telegram_configured", return_value=False), \\
+        with patch.object(health, "check_publisher", return_value=verdict), \
+                patch.object(health, "blocked_route_alerts_acknowledged", return_value=False), \
+                patch.object(health, "send_ntfy", return_value={"server_ack": True}) as ntfy, \
+                patch.object(health, "telegram_configured", return_value=False), \
                 patch.dict(os.environ, env), redirect_stdout(io.StringIO()):
             self.assertEqual(health.main(), 1)
         ntfy.assert_called_once()
