@@ -1,6 +1,7 @@
 """Credential-free tests for the Meta-only production health watchdog."""
 import io
 import os
+from pathlib import Path
 import unittest
 from contextlib import redirect_stdout
 from datetime import datetime, timezone
@@ -139,6 +140,32 @@ class PublicLinkHealthTests(unittest.TestCase):
             self.assertEqual(health.main(), 1)
         self.assertNotIn("BOT-TOKEN-SHOULD-NOT-LEAK", output.getvalue())
         self.assertIn("telegram_failed", output.getvalue())
+
+    def test_watchdog_suppresses_acknowledged_repeat_but_alerts_new_failure(self):
+        workflow = Path(".github/workflows/public_link_health.yml").read_text(encoding="utf-8")
+        self.assertNotIn("META_OUTAGE_REPEAT_ALERTS: 'true'", workflow)
+
+        verdict = {"status": "unhealthy", "reason": "publication_blocked",
+                   "blocked_routes": ["penguen"]}
+        env = {"CORRELATE_PUBLISHER_ALERTS": "true", "NTFY_TOPIC": "test-topic",
+               "NTFY_TOPIC_URL": "", "GITHUB_STEP_SUMMARY": "",
+               "META_OUTAGE_REPEAT_ALERTS": ""}
+
+        with patch.object(health, "check_publisher", return_value=verdict), \
+                patch.object(health, "blocked_route_alerts_acknowledged", return_value=True), \
+                patch.object(health, "send_ntfy") as ntfy, \
+                patch.object(health, "telegram_configured", return_value=False), \
+                patch.dict(os.environ, env), redirect_stdout(io.StringIO()):
+            self.assertEqual(health.main(), 1)
+        ntfy.assert_not_called()
+
+        with patch.object(health, "check_publisher", return_value=verdict), \
+                patch.object(health, "blocked_route_alerts_acknowledged", return_value=False), \
+                patch.object(health, "send_ntfy", return_value={"server_ack": True}) as ntfy, \
+                patch.object(health, "telegram_configured", return_value=False), \
+                patch.dict(os.environ, env), redirect_stdout(io.StringIO()):
+            self.assertEqual(health.main(), 1)
+        ntfy.assert_called_once()
 
     def test_repeating_outage_sends_both_channels_each_run_despite_prior_ack(self):
         for verdict in ({"status": "unhealthy", "reason": "publication_blocked", "blocked_routes": ["penguen"]},
