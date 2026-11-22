@@ -131,6 +131,15 @@ def caption_key(value):
     return hashlib.sha256(" ".join(value.split()).encode()).hexdigest()
 
 
+def toonzone_archived_id_blockers(slot, platforms, receipts):
+    """Return only destinations whose archived serial post is unverified."""
+    return [
+        platform for platform in platforms
+        if isinstance(receipts.get((slot, platform)), dict)
+        and receipts[(slot, platform)].get("reason") == "archived_id_not_in_live_history"
+    ]
+
+
 # Proven in production job logs and the 30 Oct GET-only diagnostic. Binding
 # includes the exact old intent, source and text hash; no heuristic association.
 _LEGACY_IG_CONTAINERS = {
@@ -1496,18 +1505,18 @@ def plan(audit=False):
                     break
                 if order and order[0] == 1 and 4 <= order[1] <= 12:
                     slot = f"S01E{order[1]:02d} Part{order[2]}"
-                    unresolved = [
-                        season1_receipts_by_part.get((slot, p), {})
-                        for p in platforms
-                    ]
-                    if any(row.get("reason") == "archived_id_not_in_live_history"
-                           for row in unresolved):
+                    held_platforms = toonzone_archived_id_blockers(
+                        slot, platforms, season1_receipts_by_part)
+                    if held_platforms:
+                        blocked_platforms.update(held_platforms)
                         report.append(
-                            "HELD: " + slot + " has archived DONE post IDs absent "
-                            "from current Meta history; verify original remote "
-                            "IDs independently before any further publication."
+                            "HELD: " + slot + " archived post ID is not visible in "
+                            "current Meta history for " + ",".join(held_platforms)
+                            + "; keep those destinations blocked. Other platforms "
+                            "may continue only from their own verified history."
                         )
-                        break
+                        if all(platform in blocked_platforms for platform in platforms):
+                            break
             available = [p for p in platforms if p not in blocked_platforms]
             route_target = due if (route == "film" and (film_ten_once or film_gap_once)) else target_count(route, now)
             if not available or all(counts[p] + planned_counts.get((route, p), 0) >= route_target for p in available):
@@ -2135,6 +2144,7 @@ def publish():
         with tempfile.TemporaryDirectory() as tmp:
             temp = Path(tmp)
             source_fingerprint = None
+            quality_diagnostic = None
             try:
                 video = download_verified_publication_video(item["id"], temp / "source.mp4")
                 from operational_enhancements import bind_source_integrity
@@ -2151,9 +2161,10 @@ def publish():
                     try:
                         quality = inspect_video(video)
                     except Exception as exc:
+                        quality_diagnostic = safe_failure_code(exc)
                         save(ROOT / 'quality' / (item['id'] + '.json'),
                              {'status': 'held', 'reason': 'quality_check_failed',
-                              'check_code': safe_failure_code(exc),
+                              'check_code': quality_diagnostic,
                               'source_id': item['id']})
                         raise RuntimeError('Local media quality gate held source') from None
                     save(ROOT / 'quality' / (item['id'] + '.json'), quality)
@@ -2189,15 +2200,20 @@ def publish():
                         status="ready",
                         failure={"reason": "source_or_cover_preparation_failed",
                                  "error_type": type(exc).__name__,
-                                 "media_diagnostic": ("missing_moov_atom"
-                                                      if isinstance(exc, MP4MissingMoov)
-                                                      else "N/A"),
+                                 "media_diagnostic": (
+                                     "missing_moov_atom"
+                                     if isinstance(exc, MP4MissingMoov)
+                                     else quality_diagnostic or "N/A"),
                                  "safe_to_repost": True},
                     )
                 for platform in item["platforms"]:
                     record_error("source_video", "source_or_cover_preparation_failed",
                                  route=item["route"], platform=platform,
-                                 video=item["name"], error=exc, safe_to_retry=True)
+                                 video=item["name"], error=exc, safe_to_retry=True,
+                                 media_diagnostic=(
+                                     "missing_moov_atom"
+                                     if isinstance(exc, MP4MissingMoov)
+                                     else quality_diagnostic or ""))
                 save(STATE, state)
                 continue
             if item.get("film_part8_strict_recheck") and source_fingerprint is None:
