@@ -34,6 +34,7 @@ on:
       - '.github/workflows/daily_stats.yml'
       - 'tracked_meta_routes.py'
       - 'public_link_health.py'
+      - 'test_public_link_health.py'
       - 'public_link_runtime.py'
       - 'youtube_main_bridge.py'
       - 'youtube_accepted_audit.py'
