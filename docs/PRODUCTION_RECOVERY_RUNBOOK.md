@@ -847,3 +847,11 @@ Run 42103999147: full exact Drive cover plus compact profile created 13739862-by
 - **Kanıt:** Post-merge watchdog [44943156727](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/44943156727) platform detayını ekledi. Güncel makbuzdaki `no_eligible_content` route/account kapsamındaydı; bu nedenle platformlara özgü bir hata olarak yorumlanamaz.
 - **Güvenli aksiyon:** Platform bazlı ve hesap-genel nedenleri birlikte göster. Hesap-genel blocker varsa `unknown` platform etiketini koru; bilinen Facebook/Instagram olaylarını da ayrıca listele. Sağlık eşiği ve alarm durumu değişmez.
 - **Test:** Route'a ait platform incident'leri yanında account-level blocker geldiğinde bilinmeyen kapsam da gösterilmeli. Yeni kod sosyal yazım veya durum sıfırlama yapmaz.
+
+## 22 Kasım 2026 — gecikmiş günlük rapor başarıyla oluştuğu halde nöbetçi kırmızı kaldı
+
+- **Kanıt:** Günlük rapor koşumu [44968258566](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/44968258566) 00:46Z'de tamamlandı ve `account-views-comparison` artifact'ında `day=2026-11-21`, `timezone=Europe/Istanbul` vardı. Nöbetçi [45022546038](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/45022546038) yalnız koşum zamanını 20:54–22:59Z aralığında aradığı için `missing_or_failed` dedi; bildirim kullanıcı tarafından sessize alınmıştı.
+- **Neden:** GitHub schedule 20:59Z zamanlamasından 3 saat 47 dakika sonra başladı; nöbetçi rapor artifact'ındaki hedef günü doğrulamıyordu.
+- **Güvenli aksiyon:** Zaman aralığından geç başlayan tamamlanmış schedule koşumunu ancak aynı run'ın doğrulanmış rapor artifact'ı beklenen Istanbul gününü gösterirse sağlıklı say. Artifact yok/bozuksa veya günü farklıysa kırmızı kal; artifact API okunamıyorsa `audit_unavailable` olarak bildir. Bildirim gönderme davranışını ve rapor workflow'unu değiştirme.
+- **Test:** Gecikmiş doğru gün artifact'ı sağlıklı; yanlış gün, eksik artifact ve artifact API hatası sağlıksız/unknown kalmalı. Yalnızca fixture kullanılır; canlı bildirim veya rapor koşumu tetiklenmez.
+- **Canlı doğrulama:** PR ve CI yeterli değildir. Sonraki sabah nöbetçisi `verified_report_run_id` ve `report_day` kaydını üretmeli; bunun için gerçek rapor veya alarm gönderilmez.

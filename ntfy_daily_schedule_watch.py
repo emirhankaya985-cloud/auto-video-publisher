@@ -3,9 +3,11 @@
 This code does not publish media, edit Drive, or alter any workflow schedule.
 """
 import json
+import io
 import os
 import re
 import sys
+import zipfile
 from datetime import datetime, timedelta, time, timezone
 
 import requests
@@ -16,6 +18,9 @@ from notification_dedup import should_send
 
 
 EXPECTED_REPOSITORY = "emirhankaya985-cloud/auto-video-publisher"
+REPORT_ARTIFACT = "account-views-comparison"
+REPORT_FILENAME = "account_views_comparison.json"
+REPORT_MAX_BYTES = 4 * 1024 * 1024
 
 
 def expected_window(now):
@@ -23,8 +28,8 @@ def expected_window(now):
     yesterday_utc = utc_now.date() - timedelta(days=1)
     due = datetime.combine(yesterday_utc, time(20, 59), timezone.utc)
     # The nightly GitHub schedule is 20:59 UTC. Ignore manual tests and
-    # unrelated runs. A two-hour tolerance allows ordinary queue latency,
-    # but a much later success would have measured a different local day.
+    # unrelated runs. A late run may still qualify only if its own report
+    # artifact proves it generated the expected Istanbul report day.
     return due - timedelta(minutes=5), due + timedelta(hours=2)
 
 
@@ -36,6 +41,54 @@ def _parse_utc(value):
         return result.astimezone(timezone.utc) if result.tzinfo else None
     except ValueError:
         return None
+
+
+def _run_has_expected_report(run, expected_day, *, get, headers):
+    """Verify a scheduled run by its report-day artifact, not run time alone."""
+    run_id = str(run.get("id", ""))
+    if not run_id.isdecimal():
+        return False
+    api = f"https://api.github.com/repos/{EXPECTED_REPOSITORY}"
+    artifacts_response = get(
+        f"{api}/actions/runs/{run_id}/artifacts", headers=headers,
+        params={"per_page": 100}, timeout=20, allow_redirects=False,
+    )
+    if artifacts_response.status_code != 200:
+        raise requests.RequestException("report_artifact_list_unavailable")
+    artifact_payload = artifacts_response.json()
+    if not isinstance(artifact_payload, dict):
+        raise ValueError("invalid_artifact_list")
+    artifacts = artifact_payload.get("artifacts")
+    if not isinstance(artifacts, list):
+        raise ValueError("invalid_artifact_list")
+    matches = [a for a in artifacts if isinstance(a, dict)
+               and a.get("name") == REPORT_ARTIFACT and not a.get("expired")]
+    if len(matches) != 1:
+        return False
+    archive_url = matches[0].get("archive_download_url")
+    if not isinstance(archive_url, str) or not archive_url.startswith(
+            "https://api.github.com/repos/"):
+        raise ValueError("invalid_artifact_url")
+    archive_response = get(
+        archive_url, headers=headers, timeout=45, allow_redirects=True)
+    if archive_response.status_code != 200:
+        raise requests.RequestException("report_artifact_download_unavailable")
+    archive = archive_response.content
+    if len(archive) > REPORT_MAX_BYTES:
+        raise ValueError("report_artifact_too_large")
+    try:
+        with zipfile.ZipFile(io.BytesIO(archive)) as bundle:
+            filenames = [name for name in bundle.namelist()
+                         if name.rsplit("/", 1)[-1] == REPORT_FILENAME]
+            if (len(filenames) != 1
+                    or bundle.getinfo(filenames[0]).file_size > REPORT_MAX_BYTES):
+                return False
+            report = json.loads(bundle.read(filenames[0]).decode("utf-8"))
+    except (zipfile.BadZipFile, UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    return (isinstance(report, dict)
+            and report.get("day") == expected_day
+            and report.get("timezone") == "Europe/Istanbul")
 
 
 def check_daily_run(*, now=None, get=requests.get, token=None):
@@ -60,18 +113,30 @@ def check_daily_run(*, now=None, get=requests.get, token=None):
         data = response.json()
         if not isinstance(data, dict) or not isinstance(data.get("workflow_runs"), list):
             return {"status": "audit_unavailable", "reason": "invalid_github_response"}
-        matching = []
+        candidates = []
+        expected_day = lower.date().isoformat()
         for run in data["workflow_runs"]:
             if not isinstance(run, dict):
                 return {"status": "audit_unavailable", "reason": "invalid_github_response"}
             stamp = _parse_utc(run.get("created_at"))
             if (stamp is not None and lower <= stamp <= upper and
                     run.get("event") == "schedule" and run.get("head_branch") == "main"):
-                matching.append(run)
-        if any(run.get("status") == "completed" and run.get("conclusion") == "success"
-               for run in matching):
-            return {"status": "healthy", "matched_runs": len(matching)}
-        return {"status": "missing_or_failed", "matched_runs": len(matching)}
+                candidates.append(run)
+            elif (stamp is not None and upper < stamp <= now.astimezone(timezone.utc)
+                    and run.get("event") == "schedule" and run.get("head_branch") == "main"
+                    and run.get("status") == "completed" and run.get("conclusion") == "success"):
+                candidates.append(run)
+        headers = {"Authorization": f"Bearer {token}",
+                   "Accept": "application/vnd.github+json",
+                   "X-GitHub-Api-Version": "2022-11-28"}
+        for run in candidates:
+            if run.get("status") != "completed" or run.get("conclusion") != "success":
+                continue
+            if _run_has_expected_report(run, expected_day, get=get, headers=headers):
+                return {"status": "healthy", "matched_runs": len(candidates),
+                        "verified_report_run_id": str(run["id"]),
+                        "report_day": expected_day}
+        return {"status": "missing_or_failed", "matched_runs": len(candidates)}
     except requests.RequestException:
         return {"status": "audit_unavailable", "reason": "github_request_failed"}
     except (TypeError, ValueError):
