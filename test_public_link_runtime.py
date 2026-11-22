@@ -138,6 +138,57 @@ class LinkRuntimeSafety(unittest.TestCase):
                 self.assertEqual(state["entries"][f"{route}:instagram:old"], old)
                 self.assertNotIn(f"{route}:facebook:old", state["entries"])
 
+    def test_penguen_silent_preupload_failure_is_skipped_for_next_safe_clip(self):
+        from contextlib import ExitStack
+        with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
+            root = Path(tmp)
+            day = datetime.now(ZoneInfo("Europe/Istanbul")).date().isoformat()
+            state = {"schema": 1, "entries": {}, "episode_days": {}}
+            for platform in ("facebook", "instagram"):
+                state["entries"][f"penguen:{platform}:silent"] = {
+                    "route": "penguen", "platform": platform, "file": "342.mp4",
+                    "status": "ready", "run_id": "123", "day": day,
+                    "failure": {"reason": "source_or_cover_preparation_failed",
+                                "media_diagnostic": "silent_audio_samples",
+                                "safe_to_repost": True},
+                }
+            original = json.loads(json.dumps(state["entries"]))
+            files = {"342.mp4": {"id": "silent", "name": "342.mp4"},
+                     "343.mp4": {"id": "clean", "name": "343.mp4"}}
+            replacements = {
+                "ROOT": root, "STATE": root / "state.json", "PLAN": root / "plan.json",
+                "ROUTES": {"penguen": ("humor", "Beyinsiz Penguen"),
+                           "tarladaki": ("humor", "Tarladaki Fasulye")},
+                "FOLDERS": {"humor": "folder"},
+            }
+            for key, value in replacements.items():
+                stack.enter_context(patch.object(runtime, key, value))
+            stack.enter_context(patch.dict(os.environ, {
+                "PUBLISH_ACCOUNT_SCOPE": "penguen", "GITHUB_RUN_ID": "456",
+                "GITHUB_STEP_SUMMARY": str(root / "summary.md")}))
+            stack.enter_context(patch.object(runtime, "restore", return_value=state))
+            stack.enter_context(patch.object(runtime, "apply_verified_migration"))
+            stack.enter_context(patch.object(runtime, "owned_humor_source", return_value=True))
+            stack.enter_context(patch.object(runtime, "load_meta_auth", return_value={"pages": [
+                {"page_name": "Beyinsiz Penguen", "instagram_id": "ig"},
+                {"page_name": "Tarladaki Fasulye", "instagram_id": "other"}]}))
+            stack.enter_context(patch.object(runtime, "inventory", return_value=files))
+            stack.enter_context(patch.object(runtime, "graph_rows", return_value=[]))
+            stack.enter_context(patch.object(runtime, "target_count", return_value=5))
+            stack.enter_context(patch.object(runtime, "seed_done", return_value=False))
+            stack.enter_context(patch.object(runtime, "copies", side_effect=lambda _r, item, _f, _t:
+                ({"facebook": f"caption {item['id']}",
+                  "instagram": f"caption {item['id']}"}, "matching-txt")))
+
+            runtime.plan()
+
+            planned = json.loads((root / "plan.json").read_text())
+            self.assertEqual([item["id"] for item in planned], ["clean"],
+                             (root / "summary.md").read_text())
+            self.assertEqual(set(planned[0]["platforms"]), {"facebook", "instagram"})
+            for key, row in original.items():
+                self.assertEqual(state["entries"][key], row)
+
     def test_local_visual_hold_with_ambiguous_caption_does_not_starve_fresh_humor(self):
         from contextlib import ExitStack
         with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
