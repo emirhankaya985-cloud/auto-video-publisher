@@ -863,3 +863,9 @@ Run 42103999147: full exact Drive cover plus compact profile created 13739862-by
 - **Penguen kanıtı:** [45034949436](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/45034949436) 342.mp4'ü Meta POST'tan önce iki platformda da tuttu. Kaynak MP4 salt okunur indirildi ve FFprobe ile H.264 High, 360×640, 30 FPS, 16.466 saniye, ses akışı yok olarak doğrulandı; `media_quality.inspect_video` `silent_audio_samples` verdi. Video akışları tam decode oldu; ses uydurulmadı, kalite kapısı düşürülmedi.
 - **Güvenli aksiyon:** Aynı gün sonraki Penguen planı bu pre-upload kaydını atlayıp sıradaki adayı normal kalite, kaynak bütünlüğü, history ve görsel tekrar kapılarından geçirir. Tanı kodu yalnızca izinli sınıflardan state ve hata makbuzuna yazılır; hiçbiri yayın izni vermez.
 - **Test / canlı durumu:** Platform kapsamı, tanı kodu redaksiyonu ve gönderimsiz kalite reddi için yerel regresyonlar eklendi. Bu testler canlı yayın kanıtı değildir; ToonZone Facebook/Instagram ayrışması ve Penguen'in sonraki güvenli adayı ancak normal schedule ile gerçek post ID'leri üzerinden doğrulanabilir.
+
+## 22 Kasım 2026 — yalnız kesin zamanlı yayın makbuzlarını arşivleme
+
+- **Güvenli aktarım:** Yayıncı yalnız gerçek sayısal post ID'si ve UTC zaman damgası kaydedilmiş aynı run makbuzlarını Neon'a aktarır. Eski/uncertain kayıtlar için zaman uydurulmaz; sabit hata kodları dışında ham hata metni yazılmaz.
+- **Tekilleştirme:** Kaynak hesap eşleşmesi route ve platform bazındadır; aynı account/post ID çakışmasında önceki satır güncellenmez. Eşleşmeyen hesap yalnızca atlanır.
+- **Canlı durum:** Kod ve CI geçişi Neon yazımının veya yeni sosyal paylaşımın gerçekleştiğini kanıtlamaz. İlk normal schedule sonrası gerçek post ID'si, UTC zamanı ve Neon satırı ayrı doğrulanmalıdır.
