@@ -112,6 +112,17 @@ class ErrorJournalTests(unittest.TestCase):
             self.assertEqual([r["stage"] for r in read_errors(f, run_id="915")],
                              ["drive_inventory"])
 
+    def test_media_diagnostic_is_allowlisted_and_machine_readable(self):
+        event = error_event("source_video", "source_or_cover_preparation_failed",
+                            route="penguen", platform="facebook", video="342.mp4",
+                            media_diagnostic="silent_audio_samples")
+        self.assertEqual(event["media_diagnostic"], "silent_audio_samples")
+        secret = error_event(
+            "source_video", "source_or_cover_preparation_failed",
+            media_diagnostic="signed-url?token=secret")
+        self.assertNotIn("media_diagnostic", secret)
+        self.assertNotIn("secret", json.dumps(secret))
+
 
 if __name__ == "__main__":
     unittest.main()
