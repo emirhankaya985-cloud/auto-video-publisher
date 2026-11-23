@@ -1131,6 +1131,13 @@ _CONFIRMED_UNREADABLE_SHARED_SOURCES = {
         "run_id": "42175366213",
         "sha256": "513d67961759f96a7e64196bf2adbe4d8ce01f0acb3b0257a5acce71a27ea1b0",
     },
+    # 23 Nov live run 45171317800 confirmed this exact Penguen MP4 has no
+    # audio samples. Keep the unchanged Drive object quarantined across days;
+    # a replacement upload has a different Drive ID and goes through all gates.
+    ("penguen", "14jz507WmoB-gAsSILcA6WT2LRJgHH1l0", "342.mp4"): {
+        "run_id": "45171317800",
+        "sha256": "c012a06a7207bb73895fbeba8493f8493534be07024227a13fe30499f62ea555",
+    },
     ("tarladaki", "1T3nTIgRJwmgeQOkCwZrvezl61tic3aI2", "278.mp4"): {
         "run_id": "42222196393",
         "sha256": "dba86d78a9590d17c129d80b49c62d8f0441cd1839c1b2a8c105c05ea0f983dd",

@@ -41,8 +41,8 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install --require-hashes -r requirements.txt
       - name: Install FFmpeg for real local video acceptance
-        timeout-minutes: 5
-        run: command -v ffmpeg && command -v ffprobe || (sudo apt-get update -qq && sudo apt-get install -y ffmpeg)
+        timeout-minutes: 12
+        run: command -v ffmpeg && command -v ffprobe || (sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends ffmpeg)
       - name: Validate new code with no cloud secrets, posting or notifications
         env:
           ADVANCED_DEDUPE_ENABLED: 'false'
