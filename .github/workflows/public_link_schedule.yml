@@ -38,6 +38,12 @@ on:
         required: true
         default: audit
         options: [audit, publish]
+      account_scope:
+        description: Run the standard six Meta accounts or ToonZone independently
+        type: choice
+        required: true
+        default: standard
+        options: [standard, toonzone]
 
 permissions:
   contents: read
@@ -52,7 +58,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Direct dispatch and one-time authorized marker audit all routes.
+        # Direct dispatch normally covers six accounts; ToonZone is selectable
+        # independently because its schedule uses a separate daily window.
         # Scheduled ticks instantiate ONLY route workers for that cron.
         account_scope: >-
           ${{ fromJSON(
@@ -61,6 +68,7 @@ jobs:
             github.event_name == 'push' && github.event.head_commit.message == 'ops: authorized-once-en-buyuk-saban-10parts-2026-11-10' && '["film"]' ||
             github.event_name == 'push' && github.event.head_commit.message == 'ops: authorized-once-en-buyuk-saban-10parts-ci-repair-2026-11-10' && '["film"]' ||
             github.event_name == 'push' && github.event.head_commit.message == 'ops: authorized-once-en-buyuk-saban-part6to10-2026-11-10' && '["film"]' ||
+            github.event_name == 'workflow_dispatch' && inputs.account_scope == 'toonzone' && '["toonzone"]' ||
             github.event_name != 'schedule' && '["tarladaki","penguen","gonle","daily_laugh","film","film_second"]' ||
             github.event.schedule == '7 6,9,12,15,18 * * *' && '["tarladaki"]' ||
             github.event.schedule == '37 6,9,12,15,18 * * *' && '["penguen","gonle"]' ||
