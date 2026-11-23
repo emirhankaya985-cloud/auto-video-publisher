@@ -50,6 +50,32 @@ class LocalPreparationHoldTests(unittest.TestCase):
             self.assertFalse(held('penguen', replacement, state,
                                   ['facebook', 'instagram'], '2026-11-24'))
 
+    def test_confirmed_penguen_414_silent_audio_is_quarantined_across_days(self):
+        source_id = '1_zCLAJJGTVrZ5h8HReMY3Vj-1q1rylga'
+        source_sha256 = '7526fb6ea06e3c4466dbbd7ed7bba8393beaab7a52de404a5cb00edf9919a931'
+        state = {'entries': {f'penguen:{p}:{source_id}': {
+            'route': 'penguen', 'platform': p, 'file': '414.mp4',
+            'day': '2026-11-23', 'run_id': '45240919761', 'status': 'ready',
+            'source_sha256': source_sha256,
+            'failure': {'reason': 'source_or_cover_preparation_failed',
+                        'media_diagnostic': 'silent_audio_samples',
+                        'safe_to_repost': True}
+        } for p in ('facebook', 'instagram')}}
+        before = copy.deepcopy(state)
+        item = {'id': source_id, 'name': '414.mp4'}
+        with patch.dict(os.environ, {'GITHUB_RUN_ID': '45250000000'}):
+            self.assertTrue(held('penguen', item, state,
+                                 ['facebook', 'instagram'], '2026-11-24'))
+        self.assertEqual(state, before)
+        changed_bytes = copy.deepcopy(state)
+        for row in changed_bytes['entries'].values():
+            row['source_sha256'] = 'f' * 64
+        with patch.dict(os.environ, {'GITHUB_RUN_ID': '45250000000'}):
+            self.assertFalse(held('penguen', item, changed_bytes,
+                                  ['facebook', 'instagram'], '2026-11-24'))
+            self.assertFalse(held('penguen', {'id': 'replacement', 'name': '414.mp4'},
+                                  state, ['facebook', 'instagram'], '2026-11-24'))
+
     def test_uncertain_missing_mismatched_current_and_serial_records_cannot_be_skipped(self):
         with patch.dict(os.environ, {'GITHUB_RUN_ID': '42160000000'}):
             item = {'id':'source195','name':'195.mp4'}
