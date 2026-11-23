@@ -869,3 +869,10 @@ Run 42103999147: full exact Drive cover plus compact profile created 13739862-by
 - **Güvenli aktarım:** Yayıncı yalnız gerçek sayısal post ID'si ve UTC zaman damgası kaydedilmiş aynı run makbuzlarını Neon'a aktarır. Eski/uncertain kayıtlar için zaman uydurulmaz; sabit hata kodları dışında ham hata metni yazılmaz.
 - **Tekilleştirme:** Kaynak hesap eşleşmesi route ve platform bazındadır; aynı account/post ID çakışmasında önceki satır güncellenmez. Eşleşmeyen hesap yalnızca atlanır.
 - **Canlı durum:** Kod ve CI geçişi Neon yazımının veya yeni sosyal paylaşımın gerçekleştiğini kanıtlamaz. İlk normal schedule sonrası gerçek post ID'si, UTC zamanı ve Neon satırı ayrı doğrulanmalıdır.
+
+## 23 Kasım 2026 — Penguen sessiz 342.mp4 gün sınırından sonra yeniden seçildi
+
+- **Kanıt:** Güncel `main` publisher run [45171317800](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/45171317800) MP4'ü Facebook ve Instagram için Meta POST'tan önce `silent_audio_samples` nedeniyle tuttu. Kaynak Drive ID'si `14jz507WmoB-gAsSILcA6WT2LRJgHH1l0`, SHA-256 `c012a06a7207bb73895fbeba8493f8493534be07024227a13fe30499f62ea555`; state'te hata olmasına rağmen iki kayıt `ready` kaldı.
+- **Neden:** Yerel hazırlık hataları normalde aynı İstanbul yayın günü boyunca atlanıyor. Bu exact Drive ID/hash kalıcı doğrulanmış-kaynak listesinde olmadığından sonraki takvim gününde tekrar seçilebilirdi.
+- **Güvenli düzeltme:** Yalnız bu exact Penguen Drive ID, dosya adı, başarısız run ve hash'i günler arası karantinaya al. Değiştirilmiş baytlar veya yeni Drive ID karantinaya miras kalmaz; kalite, tarihçe ve tekrar denetimleri yine çalışır. Eski yayın geçmişi ve intent kayıtları korunur.
+- **Test / canlı durumu:** `test_unordered_local_preparation_hold` içindeki üç test yerelde geçti; exact kaynak sonraki gün atlanıyor, hash veya Drive ID değişirse karantina uygulanmıyor. Düzeltmenin sonraki planlı publisher run'ında 342'yi atlayıp güvenli sıradaki adayı seçtiği henüz canlı doğrulanmadı.
