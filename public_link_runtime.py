@@ -1138,6 +1138,13 @@ _CONFIRMED_UNREADABLE_SHARED_SOURCES = {
         "run_id": "45171317800",
         "sha256": "c012a06a7207bb73895fbeba8493f8493534be07024227a13fe30499f62ea555",
     },
+    # Natural run 45240919761 confirmed this unchanged Penguen source is
+    # silent. Preserve this exact source across days; replacements with a new
+    # Drive ID or content hash still pass through the quality checks.
+    ("penguen", "1_zCLAJJGTVrZ5h8HReMY3Vj-1q1rylga", "414.mp4"): {
+        "run_id": "45240919761",
+        "sha256": "7526fb6ea06e3c4466dbbd7ed7bba8393beaab7a52de404a5cb00edf9919a931",
+    },
     ("tarladaki", "1T3nTIgRJwmgeQOkCwZrvezl61tic3aI2", "278.mp4"): {
         "run_id": "42222196393",
         "sha256": "dba86d78a9590d17c129d80b49c62d8f0441cd1839c1b2a8c105c05ea0f983dd",
