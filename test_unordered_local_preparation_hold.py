@@ -76,6 +76,32 @@ class LocalPreparationHoldTests(unittest.TestCase):
             self.assertFalse(held('penguen', {'id': 'replacement', 'name': '414.mp4'},
                                   state, ['facebook', 'instagram'], '2026-11-24'))
 
+    def test_tarladaki_560_fingerprint_frame_failure_is_held_across_days(self):
+        source_id = '1Zl7Uf_TgRSU71iGS4xeWH67KYXTxFiuQ'
+        source_sha256 = '1b14cb6c20f9be569d1742589e9472fab04bc899aaf28fb1f43061034d751582'
+        state = {'entries': {f'tarladaki:{p}:{source_id}': {
+            'route': 'tarladaki', 'platform': p, 'file': '560.mp4',
+            'day': '2026-11-24', 'run_id': '45449684883', 'status': 'ready',
+            'source_sha256': source_sha256,
+            'failure': {'reason': 'source_or_cover_preparation_failed',
+                        'error_type': 'RuntimeError',
+                        'safe_to_repost': True}
+        } for p in ('facebook', 'instagram')}}
+        before = copy.deepcopy(state)
+        item = {'id': source_id, 'name': '560.mp4'}
+        with patch.dict(os.environ, {'GITHUB_RUN_ID': '45460000000'}):
+            self.assertTrue(held('tarladaki', item, state,
+                                 ['facebook', 'instagram'], '2026-11-25'))
+        self.assertEqual(state, before)
+        changed_bytes = copy.deepcopy(state)
+        for row in changed_bytes['entries'].values():
+            row['source_sha256'] = 'f' * 64
+        with patch.dict(os.environ, {'GITHUB_RUN_ID': '45460000000'}):
+            self.assertFalse(held('tarladaki', item, changed_bytes,
+                                  ['facebook', 'instagram'], '2026-11-25'))
+            self.assertFalse(held('tarladaki', {'id': 'replacement', 'name': '560.mp4'},
+                                  state, ['facebook', 'instagram'], '2026-11-25'))
+
     def test_uncertain_missing_mismatched_current_and_serial_records_cannot_be_skipped(self):
         with patch.dict(os.environ, {'GITHUB_RUN_ID': '42160000000'}):
             item = {'id':'source195','name':'195.mp4'}

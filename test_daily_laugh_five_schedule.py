@@ -1,4 +1,4 @@
-"""Daily Laugh eight-video schedule: exact NY calendar-day and DST assertions."""
+"""Daily Laugh five-video schedule: exact NY calendar-day and DST assertions."""
 import unittest
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -14,19 +14,19 @@ from stats_reporter import ACCOUNT_TARGETS, publication_progress
 
 NY = ZoneInfo("America/New_York")
 TRT = ZoneInfo("Europe/Istanbul")
-NEW_HOURS = (8, 10, 12, 14, 16, 18, 20, 22)
+NEW_HOURS = (9, 12, 15, 18, 21)
 OLD_HOURS = (9, 12, 15, 18, 21)
 
 
-class DailyLaughEightSlotsTests(unittest.TestCase):
-    def test_eight_evenly_spaced_slots_begin_next_full_ny_day(self):
+class DailyLaughFiveSlotsTests(unittest.TestCase):
+    def test_five_slots_begin_next_full_ny_day(self):
         self.assertEqual(DAILY_LAUGH_CUTOVER_DATE, date(2026, 10, 20))
         self.assertEqual(DAILY_LAUGH_HOURS, NEW_HOURS)
         self.assertEqual(DAILY_LAUGH_LEGACY_HOURS, OLD_HOURS)
         self.assertEqual(daily_laugh_hours_for_date(date(2026, 10, 19)), OLD_HOURS)
         self.assertEqual(daily_laugh_hours_for_date(date(2026, 10, 20)), NEW_HOURS)
 
-    def test_all_eight_slots_are_open_on_october_20_in_new_york(self):
+    def test_all_five_slots_are_open_on_october_20_in_new_york(self):
         for hour in NEW_HOURS:
             ny = datetime(2026, 10, 20, hour, 0, tzinfo=NY)
             local = ny.astimezone(TRT)
@@ -36,7 +36,7 @@ class DailyLaughEightSlotsTests(unittest.TestCase):
                 self.assertIn(("daily_laugh", slot), routes_for_time(local + timedelta(minutes=29)))
                 self.assertNotIn(("daily_laugh", slot), routes_for_time(local + timedelta(minutes=30)))
 
-    def test_eight_slots_survive_us_dstu_transition(self):
+    def test_five_slots_survive_us_dstu_transition(self):
         for day in ((2026, 10, 20), (2026, 11, 8), (2027, 3, 14)):
             for hour in NEW_HOURS:
                 ny = datetime(*day, hour, tzinfo=NY)
@@ -53,18 +53,18 @@ class DailyLaughEightSlotsTests(unittest.TestCase):
         self.assertEqual(len(historic), 5)
         self.assertEqual(set(historic), {f"2026-10-19-{h:02d}-daily_laugh" for h in OLD_HOURS})
 
-    def test_first_daily_notification_moves_to_08_from_cutover(self):
+    def test_first_daily_notification_remains_at_09(self):
         self.assertTrue(is_first_daily_slot("daily_laugh", "2026-10-19-09-daily_laugh"))
-        self.assertFalse(is_first_daily_slot("daily_laugh", "2026-10-20-09-daily_laugh"))
-        self.assertTrue(is_first_daily_slot("daily_laugh", "2026-10-20-08-daily_laugh"))
-        self.assertFalse(is_first_daily_slot("daily_laugh", "2026-10-20-10-daily_laugh"))
+        self.assertTrue(is_first_daily_slot("daily_laugh", "2026-10-20-09-daily_laugh"))
+        self.assertFalse(is_first_daily_slot("daily_laugh", "2026-10-20-08-daily_laugh"))
+        self.assertFalse(is_first_daily_slot("daily_laugh", "2026-10-20-12-daily_laugh"))
 
-    def test_new_full_ny_day_has_exactly_eight_due_slots(self):
+    def test_new_full_ny_day_has_exactly_five_due_slots(self):
         now = datetime(2026, 10, 20, 23, 55, tzinfo=NY).astimezone(TRT)
         day_slots = [slot for _, route, slot in due_slots(now)
                      if route == "daily_laugh" and slot.startswith("2026-10-20-")]
-        self.assertEqual(len(day_slots), 8)
-        self.assertEqual(len(set(day_slots)), 8)
+        self.assertEqual(len(day_slots), 5)
+        self.assertEqual(len(set(day_slots)), 5)
 
     def test_legacy_publishers_are_manual_only_while_meta_cron_stays_active(self):
         root = Path(__file__).parent / ".github" / "workflows"
@@ -77,15 +77,15 @@ class DailyLaughEightSlotsTests(unittest.TestCase):
         self.assertNotIn("\n  schedule:", backup)
         self.assertIn("vars.AUTOMATION_ENABLED == 'true'", main)
         self.assertIn("  schedule:", active_meta)
-        self.assertIn("7 0,1,2,3,12,13,14,15,16,17,18,19,20,21,22,23 * * *", active_meta)
+        self.assertIn("7 1,2,13,14,16,17,19,20,22,23 * * *", active_meta)
         self.assertIn("7,17,27,37 9 * * *", active_meta)
         self.assertIn("matrix.account_scope", active_meta)
         self.assertIn("fail-fast: false", active_meta)
 
-    def test_daily_report_target_is_eight_without_historical_inflation(self):
+    def test_daily_report_target_is_five_without_historical_inflation(self):
         name = "😂 Daily Laugh Lab"
-        self.assertEqual(ACCOUNT_TARGETS[name][0], 8)
-        self.assertEqual(8 * len(ACCOUNT_TARGETS[name][3]), 24)
+        self.assertEqual(ACCOUNT_TARGETS[name][0], 5)
+        self.assertEqual(5 * len(ACCOUNT_TARGETS[name][3]), 15)
         # No Drive available => report progress unknown, never invent counts.
         self.assertIsNone(publication_progress(None, name, "2026-10-19"))
         self.assertIsNone(publication_progress(None, name, "2026-10-20"))

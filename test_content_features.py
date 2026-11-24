@@ -55,7 +55,7 @@ class StockTests(unittest.TestCase):
             rows = build_stock(
                 {'daily_laugh': files, 'gonle': files}, {'entries': {}},
                 {'daily_laugh': ('daily_laugh', 'Daily Laugh'), 'gonle': ('gonle', 'Gönle')},
-                {'daily_laugh': 8, 'gonle': 5}, generated_caption_dirs={'daily_laugh': captions},
+                {'daily_laugh': 5, 'gonle': 5}, generated_caption_dirs={'daily_laugh': captions},
             )
             self.assertEqual([(r['remaining'], r['missing_txt']) for r in rows],
                              [(1, 1), (1, 1), (0, 2), (0, 2)])

@@ -107,7 +107,7 @@ def test_first_snapshot_is_labeled_na_but_failed_metric_is_unavailable():
 
 
 def test_daily_targets_and_film_fanout_match_requested_scope():
-    assert [ACCOUNT_TARGETS[name][0] for name in ACCOUNT_TARGETS] == [5, 5, 5, 8, 5, 4]
+    assert [ACCOUNT_TARGETS[name][0] for name in ACCOUNT_TARGETS] == [5, 5, 5, 5, 5, 4]
     assert ACCOUNT_TARGETS["🎬 Film Mağarası + Filmmagrasi"][3] == ("fb_film_1", "fb_film_2", "ig")
     assert any(account == "❤️ Gönle Düşen" for account, *_rest in YOUTUBE_TARGETS)
 

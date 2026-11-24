@@ -1009,8 +1009,12 @@ def target_count(route, now):
         slots = slots_for_route(document, route, now, slots)
     if os.getenv("COMPLETE_DAY_DATE") == now.date().isoformat():
         # The second Film page still lacked the already-confirmed Part 6 at cutover.
-        return len(slots) + (1 if route == "film_second" and now.date().isoformat() == "2026-10-23" else 0)
-    return sum((h, m) <= (clock.hour, clock.minute) for h, m in slots)
+        due = len(slots) + (1 if route == "film_second" and now.date().isoformat() == "2026-10-23" else 0)
+    else:
+        due = sum((h, m) <= (clock.hour, clock.minute) for h, m in slots)
+    # Adaptive or one-shot schedules cannot exceed the owner's five-video
+    # Daily Laugh daily target.
+    return min(5, due) if route == "daily_laugh" else due
 
 
 def apply_verified_migration(state):
@@ -1144,6 +1148,14 @@ _CONFIRMED_UNREADABLE_SHARED_SOURCES = {
     ("penguen", "1_zCLAJJGTVrZ5h8HReMY3Vj-1q1rylga", "414.mp4"): {
         "run_id": "45240919761",
         "sha256": "7526fb6ea06e3c4466dbbd7ed7bba8393beaab7a52de404a5cb00edf9919a931",
+    },
+    # 24 Nov natural run 45449684883 could not decode an exact visual
+    # fingerprint frame for this Tarladaki source before POST. Hold only this
+    # unchanged Drive ID/hash across days; this does not claim the full video
+    # is corrupt, and a new upload identity still passes normal quality gates.
+    ("tarladaki", "1Zl7Uf_TgRSU71iGS4xeWH67KYXTxFiuQ", "560.mp4"): {
+        "run_id": "45449684883",
+        "sha256": "1b14cb6c20f9be569d1742589e9472fab04bc899aaf28fb1f43061034d751582",
     },
     ("tarladaki", "1T3nTIgRJwmgeQOkCwZrvezl61tic3aI2", "278.mp4"): {
         "run_id": "42222196393",
@@ -1949,7 +1961,7 @@ def plan(audit=False):
     save(PLAN, plans)
     from content_stock import build_stock, stock_markdown
     stocks = build_stock(catalogs, state, ROUTES,
-                         {r: (4 if r == 'toonzone' else 8 if r == 'daily_laugh' else 5)
+                         {r: (4 if r == 'toonzone' else 5)
                           for r in ROUTES}, unavailable=unavailable_catalogs,
                          generated_caption_dirs=generated_caption_dirs)
     save(ROOT / 'content-stock.json', {'measured_at': now.isoformat(), 'accounts': stocks})
