@@ -39,8 +39,9 @@ jobs:
           mkdir -p source reset-backup active
           : > /tmp/state-artifacts.tsv
           for artifact_name in "link-state-result-${RESET_ROUTE}" "link-state-intent-${RESET_ROUTE}"; do
+            if [[ "${artifact_name}" == *-result-* ]]; then artifact_priority=1; else artifact_priority=0; fi
             gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts?name=${artifact_name}&per_page=100" \
-              --jq --arg artifact_name "${artifact_name}" '.artifacts[] | select(.expired == false) | [.workflow_run.id, (if ($artifact_name | contains("-result")) then 1 else 0 end), .id] | @tsv' \
+              --jq ".artifacts[] | select(.expired == false) | [.workflow_run.id, ${artifact_priority}, .id] | @tsv" \
               >> /tmp/state-artifacts.tsv || true
           done
           if [[ -s /tmp/state-artifacts.tsv ]]; then
@@ -49,8 +50,9 @@ jobs:
             : > /tmp/state-artifacts.tsv
             # Migration fallback for accounts that do not yet have scoped receipts.
             for artifact_name in link-state-result link-state-intent; do
+              if [[ "${artifact_name}" == *-result* ]]; then artifact_priority=1; else artifact_priority=0; fi
               gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts?name=${artifact_name}&per_page=100" \
-              --jq --arg artifact_name "${artifact_name}" '.artifacts[] | select(.expired == false) | [.workflow_run.id, (if ($artifact_name | contains("-result")) then 1 else 0 end), .id] | @tsv' \
+                --jq ".artifacts[] | select(.expired == false) | [.workflow_run.id, ${artifact_priority}, .id] | @tsv" \
                 >> /tmp/state-artifacts.tsv || true
             done
             [[ -s /tmp/state-artifacts.tsv ]] || { echo "No recoverable prior state artifact; refusing reset."; exit 1; }

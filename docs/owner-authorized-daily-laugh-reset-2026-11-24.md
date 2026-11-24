@@ -11,3 +11,5 @@ This marker authorizes exactly one operational reset for the daily_laugh account
 - This resets the publisher's active receipt count; historical analytics and published platform posts remain.
 
 No content-publishing workflow is authorized by this marker.
+
+The initial reset workflow stopped before changing any state because its artifact lookup command failed. This corrected workflow may perform the same single authorized reset once; no other account is in scope.
