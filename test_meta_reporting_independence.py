@@ -81,8 +81,8 @@ class ReportingIndependenceTests(unittest.TestCase):
             report = stats_reporter.build_report(now)
         self.assertIn("🎬 Yayın: 1/5", report)
         self.assertIn("✅ Tamamlanan: 1", report)
-        self.assertIn("❌ Eksik: 31", report)
-        self.assertIn("Platform gönderi hedefi: 69 | Eksik gönderi: 67", report)
+        self.assertIn("❌ Eksik: 28", report)
+        self.assertIn("Platform gönderi hedefi: 63 | Eksik gönderi: 61", report)
 
     def test_meta_only_collects_no_youtube_stats(self):
         now = datetime(2026, 10, 24, 23, 59, tzinfo=ZoneInfo("Europe/Istanbul"))

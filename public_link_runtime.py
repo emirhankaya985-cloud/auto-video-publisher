@@ -1961,7 +1961,7 @@ def plan(audit=False):
     save(PLAN, plans)
     from content_stock import build_stock, stock_markdown
     stocks = build_stock(catalogs, state, ROUTES,
-                         {r: (4 if r == 'toonzone' else 8 if r == 'daily_laugh' else 5)
+                         {r: (4 if r == 'toonzone' else 5)
                           for r in ROUTES}, unavailable=unavailable_catalogs,
                          generated_caption_dirs=generated_caption_dirs)
     save(ROOT / 'content-stock.json', {'measured_at': now.isoformat(), 'accounts': stocks})
