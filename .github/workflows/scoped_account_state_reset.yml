@@ -1,0 +1,89 @@
+name: Scoped account state reset
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/owner-authorized-daily-laugh-reset-2026-11-24.md'
+  workflow_dispatch:
+    inputs:
+      account_scope:
+        description: Reset active confirmed-post counts for one unordered account
+        type: choice
+        required: true
+        options: [daily_laugh, tarladaki, penguen, gonle]
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: scoped-state-reset-${{ github.event_name == 'push' && 'daily_laugh' || inputs.account_scope }}
+  cancel-in-progress: false
+
+jobs:
+  reset:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_REPOSITORY: ${{ github.repository }}
+      RESET_ROUTE: ${{ github.event_name == 'push' && 'daily_laugh' || inputs.account_scope }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch latest account state and preserve backup
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p source reset-backup active
+          : > /tmp/state-artifacts.tsv
+          for artifact_name in "link-state-result-${RESET_ROUTE}" "link-state-intent-${RESET_ROUTE}"; do
+            gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts?name=${artifact_name}&per_page=100" \
+              --jq --arg artifact_name "${artifact_name}" '.artifacts[] | select(.expired == false) | [.workflow_run.id, (if ($artifact_name | contains("-result")) then 1 else 0 end), .id] | @tsv' \
+              >> /tmp/state-artifacts.tsv || true
+          done
+          if [[ -s /tmp/state-artifacts.tsv ]]; then
+            source_id="$(sort -k1,1nr -k2,2nr -k3,3nr /tmp/state-artifacts.tsv | head -n1 | cut -f3)"
+          else
+            : > /tmp/state-artifacts.tsv
+            # Migration fallback for accounts that do not yet have scoped receipts.
+            for artifact_name in link-state-result link-state-intent; do
+              gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts?name=${artifact_name}&per_page=100" \
+              --jq --arg artifact_name "${artifact_name}" '.artifacts[] | select(.expired == false) | [.workflow_run.id, (if ($artifact_name | contains("-result")) then 1 else 0 end), .id] | @tsv' \
+                >> /tmp/state-artifacts.tsv || true
+            done
+            [[ -s /tmp/state-artifacts.tsv ]] || { echo "No recoverable prior state artifact; refusing reset."; exit 1; }
+            source_id="$(sort -k1,1nr -k2,2nr -k3,3nr /tmp/state-artifacts.tsv | head -n1 | cut -f3)"
+          fi
+          [[ -n "${source_id}" ]] || { echo "Could not resolve source artifact."; exit 1; }
+          curl --fail --silent --show-error --location \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${source_id}/zip" \
+            --output source/state.zip
+          unzip -q source/state.zip -d source/unpacked
+          mapfile -t state_files < <(find source/unpacked -type f -name state.json)
+          [[ "${#state_files[@]}" -eq 1 ]] || { echo "Expected exactly one state.json; refusing reset."; exit 1; }
+          cp "${state_files[0]}" reset-backup/state-before-reset.json
+      - name: Reset only the selected account's active confirmed ledger
+        run: |
+          python scripts/reset_account_state.py \
+            --route "${RESET_ROUTE}" \
+            --input reset-backup/state-before-reset.json \
+            --output active/state.json \
+            --report reset-backup/reset-report.json
+      - name: Archive original and publish new scoped state receipt
+        uses: actions/upload-artifact@v4
+        with:
+          name: reset-backup-${{ env.RESET_ROUTE }}-${{ github.run_id }}
+          path: reset-backup/
+          if-no-files-found: error
+          retention-days: 90
+      - name: Save reset state as latest scoped result
+        uses: actions/upload-artifact@v4
+        with:
+          name: link-state-result-${{ env.RESET_ROUTE }}
+          path: active/state.json
+          if-no-files-found: error
+          retention-days: 90
