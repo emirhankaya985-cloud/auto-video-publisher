@@ -21,7 +21,7 @@ from telegram_notifications import send_telegram, telegram_configured
 
 ISTANBUL = ZoneInfo("Europe/Istanbul")
 NEW_YORK = ZoneInfo("America/New_York")
-TARGETS = {"toonzone": ("ToonZone", 4), "daily_laugh": ("Daily Laugh Lab", 8)}
+TARGETS = {"toonzone": ("ToonZone", 4), "daily_laugh": ("Daily Laugh Lab", 5)}
 WORKFLOW_URL = (
     "https://github.com/emirhankaya985-cloud/auto-video-publisher/"
     "actions/workflows/tracked_meta_routes.yml"

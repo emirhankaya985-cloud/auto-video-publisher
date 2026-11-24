@@ -26,7 +26,7 @@ def load_runtime():
     for name in ("TARLADAKI_HOURS", "PENGUEN_HOURS", "GONLE_HOURS"):
         setattr(scheduled, name, (9, 12, 15, 18, 21))
     scheduled.FILM_HOURS = (10, 12, 14, 16, 18)
-    scheduled.daily_laugh_hours_for_date = lambda day: (8, 10, 12, 14, 16, 18, 20, 22)
+    scheduled.daily_laugh_hours_for_date = lambda day: (9, 12, 15, 18, 21)
     scheduled.platform_content_from_txt = Mock(return_value=(None, None, "FB from TXT", "IG from TXT", True))
     auth = types.ModuleType("meta_auth_loader")
     auth.load_meta_auth = Mock(return_value={"pages": []})
@@ -297,7 +297,7 @@ class LinkRuntimeSafety(unittest.TestCase):
         now = datetime(2026, 11, 1, 9, 0, tzinfo=ZoneInfo("Europe/Istanbul"))
         with patch.dict(os.environ, {"COMPLETE_DAY_DATE": "2026-11-01"}):
             expected = {"tarladaki": 5, "penguen": 5, "gonle": 5,
-                        "daily_laugh": 8, "film": 5, "film_second": 5, "toonzone": 4}
+                        "daily_laugh": 5, "film": 5, "film_second": 5, "toonzone": 4}
             self.assertEqual({r: runtime.target_count(r, now) for r in expected}, expected)
 
     def test_humor_uncertain_ig_does_not_block_independent_facebook_or_clear_intent(self):
@@ -863,10 +863,16 @@ class LinkRuntimeSafety(unittest.TestCase):
         row = {"timestamp": "2026-10-24T06:00:00Z"}
         self.assertEqual(runtime.publication_day("daily_laugh", row), "2026-10-24")
 
-    def test_catchup_preserves_daily_laugh_eight_target(self):
+    def test_catchup_preserves_daily_laugh_five_target(self):
         with patch.dict(os.environ, {"COMPLETE_DAY_DATE": "2026-10-23"}):
-            self.assertEqual(runtime.target_count("daily_laugh", datetime(2026, 10, 23, 9, tzinfo=runtime.TR)), 8)
+            self.assertEqual(runtime.target_count("daily_laugh", datetime(2026, 10, 23, 9, tzinfo=runtime.TR)), 5)
             self.assertEqual(runtime.target_count("film_second", datetime(2026, 10, 23, 9, tzinfo=runtime.TR)), 6)
+
+    def test_adaptive_daily_laugh_schedule_cannot_exceed_five_video_target(self):
+        long_hours = tuple(range(8))
+        with patch.dict(os.environ, {"ADAPTIVE_SCHEDULE_ENABLED": "false"}), \
+             patch.object(runtime, "daily_laugh_hours_for_date", return_value=long_hours):
+            self.assertEqual(runtime.target_count("daily_laugh", datetime(2026, 10, 23, 23, 59, tzinfo=runtime.TR)), 5)
 
     def test_daily_reused_txt_has_distinct_video_reference(self):
         with tempfile.TemporaryDirectory() as tmp:

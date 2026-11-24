@@ -99,7 +99,7 @@ def status_table(*, now=None, state=None, configured=False):
         for h, m in slots:
             stamp = clock.replace(hour=h, minute=m, second=0, microsecond=0).astimezone(TR)
             times.append(stamp.strftime('%H:%M') + ('(+1)' if stamp.date() > now.date() else '(-1)' if stamp.date() < now.date() else ''))
-        # Daily Laugh has eight slots: wrap instead of a very wide phone row.
+        # Daily Laugh has five slots; keep room for future route-specific detail.
         for start in range(0, len(times), 4):
             hours.append(f'{name if start == 0 else "":<14} ' + ' '.join(times[start:start+4]))
     return (f'<b>Yayın durumu — {now:%d.%m.%Y %H:%M} TR</b>\n'

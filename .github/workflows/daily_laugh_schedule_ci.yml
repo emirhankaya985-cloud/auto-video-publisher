@@ -1,4 +1,4 @@
-name: Daily Laugh 8-video schedule tests
+name: Daily Laugh five-video schedule tests
 
 on:
   pull_request:
@@ -8,7 +8,7 @@ on:
       - 'test_toonzone_schedule.py'
       - 'test_scheduled_multi_publisher.py'
       - 'stats_reporter.py'
-      - 'test_daily_laugh_eight_schedule.py'
+      - 'test_daily_laugh_five_schedule.py'
       - 'test_stats_reporter.py'
       - '.github/workflows/omnichannel_schedule.yml'
       - '.github/workflows/cloud_schedule_backup.yml'

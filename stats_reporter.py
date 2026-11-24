@@ -59,7 +59,7 @@ ACCOUNT_TARGETS = {
     "🌱 Tarladaki Fasulye": (5, "tarladaki", "DRIVE_FOLDER_ID", ("yt1", "fb", "ig")),
     "🐧 Beyinsiz Penguen": (5, "penguen", "DRIVE_FOLDER_ID", ("yt2", "fb", "ig")),
     "❤️ Gönle Düşen": (5, "gonle", "GONLE_DUSEN_DRIVE_FOLDER_ID", ("fb", "ig")),
-    "😂 Daily Laugh Lab": (8, "daily_laugh", "DAILY_LAUGH_DRIVE_FOLDER_ID", ("fb", "ig", "yt_daily")),
+    "😂 Daily Laugh Lab": (5, "daily_laugh", "DAILY_LAUGH_DRIVE_FOLDER_ID", ("fb", "ig", "yt_daily")),
     "🎬 Film Mağarası + Filmmagrasi": (5, "film", "FILM_DRIVE_FOLDER_ID", ("fb_film_1", "fb_film_2", "ig")),
     "📺 ToonZone": (4, "toonzone", "TOONZONE_DRIVE_FOLDER_ID", ("fb", "ig")),
 }

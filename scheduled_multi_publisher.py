@@ -148,7 +148,8 @@ _LAST_PLATFORM_PUBLISH_AT = {}
 # historical hours would be replayed as catch-up uploads on deployment day.
 DAILY_LAUGH_CUTOVER_DATE = date(2026, 10, 20)
 DAILY_LAUGH_LEGACY_HOURS = (9, 12, 15, 18, 21)
-DAILY_LAUGH_HOURS = (8, 10, 12, 14, 16, 18, 20, 22)
+# Keep the configured daily target at five videos, spaced across New York day.
+DAILY_LAUGH_HOURS = (9, 12, 15, 18, 21)
 
 
 def daily_laugh_hours_for_date(day):

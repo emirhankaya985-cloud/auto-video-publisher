@@ -92,7 +92,7 @@ def youtube_posts(route, ledger, cutoff):
     if identity.get("status") != "verified" or identity.get("channel_id") != channel:
         raise ValueError("unexpected YouTube channel identity")
     # Prioritize recent runs. Fifty candidates cover several days even for
-    # accounts on an eight-video quota, and fit one videos.list request.
+    # accounts on a five-video quota, and fit one videos.list request.
     candidates = {}
     for row in ledger.values():
         if not isinstance(row, dict) or row.get("route") != route:
