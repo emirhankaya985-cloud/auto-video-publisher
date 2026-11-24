@@ -40,21 +40,21 @@ jobs:
           : > /tmp/state-artifacts.tsv
           for artifact_name in "link-state-result-${RESET_ROUTE}" "link-state-intent-${RESET_ROUTE}"; do
             gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts?name=${artifact_name}&per_page=100" \
-              --jq '.artifacts[] | select(.expired == false) | [.workflow_run.id, .id] | @tsv' \
+              --jq --arg artifact_name "${artifact_name}" '.artifacts[] | select(.expired == false) | [.workflow_run.id, (if $artifact_name == "link-state-result-'"${RESET_ROUTE}"'" then 1 else 0 end), .id] | @tsv' \
               >> /tmp/state-artifacts.tsv || true
           done
           if [[ -s /tmp/state-artifacts.tsv ]]; then
-            source_id="$(sort -nr /tmp/state-artifacts.tsv | head -n1 | cut -f2)"
+            source_id="$(sort -k1,1nr -k2,2nr -k3,3nr /tmp/state-artifacts.tsv | head -n1 | cut -f3)"
           else
             : > /tmp/state-artifacts.tsv
             # Migration fallback for accounts that do not yet have scoped receipts.
             for artifact_name in link-state-result link-state-intent; do
               gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts?name=${artifact_name}&per_page=100" \
-                --jq '.artifacts[] | select(.expired == false) | [.workflow_run.id, .id] | @tsv' \
+                --jq --arg artifact_name "${artifact_name}" '.artifacts[] | select(.expired == false) | [.workflow_run.id, (if $artifact_name == "link-state-result" then 1 else 0 end), .id] | @tsv' \
                 >> /tmp/state-artifacts.tsv || true
             done
             [[ -s /tmp/state-artifacts.tsv ]] || { echo "No recoverable prior state artifact; refusing reset."; exit 1; }
-            source_id="$(sort -nr /tmp/state-artifacts.tsv | head -n1 | cut -f2)"
+            source_id="$(sort -k1,1nr -k2,2nr -k3,3nr /tmp/state-artifacts.tsv | head -n1 | cut -f3)"
           fi
           [[ -n "${source_id}" ]] || { echo "Could not resolve source artifact."; exit 1; }
           curl --fail --silent --show-error --location \
