@@ -21,6 +21,22 @@ FILM_PAGE_ID = "1239298989276639"
 FILM_IG_ID = "17841477990224124"
 FB_PART17_ID = "1435010394958762"
 OUTPUT = Path("film17-readonly/result.json")
+SAFE_VALUE_ERROR_CODES = frozenset({
+    "invalid_film_state",
+    "film17_source_ledger_missing",
+    "film17_immutable_proof_mismatch",
+    "film17_owner_not_pinned",
+    "film17_history_unavailable",
+    "trusted_readonly_scope_required",
+    "film17_ig_identity_unverified",
+})
+
+
+def safe_failure_reason(exc):
+    """Expose only an allowlisted internal error code, never provider text."""
+    if isinstance(exc, ValueError) and str(exc) in SAFE_VALUE_ERROR_CODES:
+        return str(exc)
+    return type(exc).__name__
 
 
 def archive_binding(state):
@@ -155,6 +171,7 @@ def main():
         report = reconcile(restore(), chosen[0])
     except Exception as exc:
         report = {"schema": 1, "status": "blocked", "reason": type(exc).__name__,
+                  "reason_code": safe_failure_reason(exc),
                   "provider_writes": 0, "state_mutations": 0,
                   "reupload_authorized": False}
     OUTPUT.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
