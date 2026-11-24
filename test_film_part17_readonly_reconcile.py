@@ -18,6 +18,8 @@ CAPTION = (
     "👇 Bu unutulmaz sahne hakkında ne düşünüyorsun? Yorumlarda buluşalım!\n\n"
     "#AbsürtMizah #Nostalji #Yeşilçam #YeşilçamKlasikleri #KlasikTürkFilmleri"
 )
+CURRENT_FAILED_CONTAINER_ID = "17908115514599675"
+CURRENT_RECOVERY_RUN_ID = "44726585950"
 
 
 def fake_json(data, status=200):
@@ -35,10 +37,22 @@ class Film17ReadonlyTests(unittest.TestCase):
         self.entry = {
             "route": "film", "platform": "instagram", "file": FILM17_FILENAME,
             "source_sha256": FILM17_SOURCE_SHA256, "caption_hash": FILM17_CAPTION_HASH,
-            "publish_caption": CAPTION, "run_id": FILM17_ORIGIN_RUN,
+            "publish_caption": CAPTION, "run_id": CURRENT_RECOVERY_RUN_ID,
             "status": "uncertain", "post_id": None,
+            "prepublish_retry_count": 1,
+            "expired_container_recovery": {
+                "container_id": FILM17_CONTAINER_ID,
+                "source_id": FILM17_SOURCE_ID,
+                "source_sha256": FILM17_SOURCE_SHA256,
+                "origin_run_id": FILM17_ORIGIN_RUN,
+                "terminal_status": "EXPIRED",
+                "no_media_publish_after_failed_binary_upload": True,
+                "live_history_checked": True,
+            },
             "failure": {"reason": "invalid_media_or_graph_request",
-                        "container_id": FILM17_CONTAINER_ID,
+                        "stage": "Instagram ikili video aktarımı",
+                        "container_id": CURRENT_FAILED_CONTAINER_ID,
+                        "post_write_action": "reconcile_with_remote_history_before_any_retry",
                         "http_status": 400, "safe_to_repost": False},
         }
         self.state = {"schema": 1,
@@ -49,8 +63,8 @@ class Film17ReadonlyTests(unittest.TestCase):
         self.assertTrue(url.startswith("https://graph.facebook.com/v24.0/"))
         self.assertEqual(kwargs["headers"]["Authorization"], "Bearer PRIVATE_TOKEN")
         self.assertFalse(kwargs["allow_redirects"])
-        if url.endswith(FILM17_CONTAINER_ID):
-            return fake_json({"id": FILM17_CONTAINER_ID, "status_code": "EXPIRED"})
+        if url.endswith(CURRENT_FAILED_CONTAINER_ID):
+            return fake_json({"id": CURRENT_FAILED_CONTAINER_ID, "status_code": "IN_PROGRESS"})
         if url.endswith("18198712345670000"):
             return fake_json({"id": "18198712345670000", "caption": CAPTION,
                               "username": "film_magrasi", "media_type": "VIDEO",
@@ -69,17 +83,21 @@ class Film17ReadonlyTests(unittest.TestCase):
         self.assertFalse(result["original_source_binary_verified_by_meta"])
         self.assertFalse(result["reupload_authorized"])
         self.assertEqual(result["old_container_status"], "EXPIRED")
+        self.assertEqual(result["current_failed_container_id"], CURRENT_FAILED_CONTAINER_ID)
+        self.assertEqual(result["current_failed_container_status"], "IN_PROGRESS")
+        self.assertEqual(result["next_action"], "preserve_hold_and_reconcile_original_source")
         self.assertEqual(repr(self.state), self.old)
         self.assertNotIn("PRIVATE_TOKEN", str(result))
 
     def test_original_container_published_cannot_imply_original_film_bytes(self):
         def published_status_get(url, **kwargs):
-            if url.endswith(FILM17_CONTAINER_ID):
-                return fake_json({"id": FILM17_CONTAINER_ID, "status_code": "PUBLISHED"})
+            if url.endswith(CURRENT_FAILED_CONTAINER_ID):
+                return fake_json({"id": CURRENT_FAILED_CONTAINER_ID, "status_code": "EXPIRED"})
             return self.get(url, **kwargs)
         report = a.reconcile(self.state, self.page,
                              get=published_status_get, rows=[])
-        self.assertEqual(report["old_container_status"], "PUBLISHED")
+        self.assertEqual(report["old_container_status"], "EXPIRED")
+        self.assertEqual(report["current_failed_container_status"], "EXPIRED")
         self.assertEqual(report["status"], "uncertain_no_matching_live_caption")
         self.assertFalse(report["original_source_binary_verified_by_meta"])
         self.assertFalse(report["reupload_authorized"])
@@ -90,7 +108,7 @@ class Film17ReadonlyTests(unittest.TestCase):
         self.assertEqual(result["status"], "uncertain_no_matching_live_caption")
         self.assertFalse(result["reupload_authorized"])
         self.assertIsNone(result["instagram_candidate_post_id"])
-        self.assertEqual(result["next_action"], "normal_publisher_exact_expired_container_gate")
+        self.assertEqual(result["next_action"], "preserve_hold_and_reconcile_original_source")
         self.assertTrue(result["next_action_requires_fresh_live_checks"])
 
     def test_two_caption_matches_remain_ambiguous(self):
@@ -128,10 +146,17 @@ class Film17ReadonlyTests(unittest.TestCase):
         self.assertEqual(a.safe_failure_reason(RuntimeError("private detail")),
                          "RuntimeError")
 
+    def test_wrong_current_container_fails_before_api_call(self):
+        self.entry["failure"]["container_id"] = "not-a-platform-id"
+        get = Mock()
+        with self.assertRaises(ValueError):
+            a.reconcile(self.state, self.page, get=get, rows=[])
+        get.assert_not_called()
+
     def test_unique_caption_but_wrong_username_not_live_owner_proof(self):
         def get(url, **kwargs):
-            if url.endswith(FILM17_CONTAINER_ID):
-                return fake_json({"id": FILM17_CONTAINER_ID, "status_code": "EXPIRED"})
+            if url.endswith(CURRENT_FAILED_CONTAINER_ID):
+                return fake_json({"id": CURRENT_FAILED_CONTAINER_ID, "status_code": "EXPIRED"})
             return fake_json({"id": "18198712345670000", "caption": CAPTION,
                               "username": "somebody_else", "media_type": "VIDEO"})
         result = a.reconcile(self.state, self.page, get=get, rows=[self.row()])

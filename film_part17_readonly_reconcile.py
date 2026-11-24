@@ -29,6 +29,7 @@ SAFE_VALUE_ERROR_CODES = frozenset({
     "film17_history_unavailable",
     "trusted_readonly_scope_required",
     "film17_ig_identity_unverified",
+    "film17_recovery_transition_mismatch",
 })
 
 
@@ -47,18 +48,34 @@ def archive_binding(state):
     if not isinstance(row, dict):
         raise ValueError("film17_source_ledger_missing")
     failure = row.get("failure", {})
+    recovery = row.get("expired_container_recovery", {})
     if (row.get("route") != "film" or row.get("platform") != "instagram"
             or row.get("file") != FILM17_FILENAME
             or row.get("source_sha256") != FILM17_SOURCE_SHA256
             or row.get("caption_hash") != FILM17_CAPTION_HASH
             or caption_digest(row.get("publish_caption")) != FILM17_CAPTION_HASH
-            or row.get("run_id") != FILM17_ORIGIN_RUN
             or row.get("status") != "uncertain" or row.get("post_id")
             or not isinstance(failure, dict)
-            or failure.get("container_id") != FILM17_CONTAINER_ID
+            or not isinstance(recovery, dict)
+            or recovery.get("container_id") != FILM17_CONTAINER_ID
+            or recovery.get("source_id") != FILM17_SOURCE_ID
+            or recovery.get("source_sha256") != FILM17_SOURCE_SHA256
+            or recovery.get("origin_run_id") != FILM17_ORIGIN_RUN
+            or recovery.get("terminal_status") != "EXPIRED"
+            or recovery.get("no_media_publish_after_failed_binary_upload") is not True
+            or recovery.get("live_history_checked") is not True
+            or row.get("prepublish_retry_count") != 1
+            or not str(row.get("run_id", "")).isdecimal()
+            or row.get("run_id") == FILM17_ORIGIN_RUN
+            or row.get("container_publish_attempted")
+            or failure.get("reason") != "invalid_media_or_graph_request"
+            or failure.get("stage") != "Instagram ikili video aktarımı"
+            or not str(failure.get("container_id", "")).isdecimal()
+            or failure.get("container_id") == FILM17_CONTAINER_ID
+            or failure.get("post_write_action") != "reconcile_with_remote_history_before_any_retry"
             or failure.get("http_status") != 400
             or failure.get("safe_to_repost") is not False):
-        raise ValueError("film17_immutable_proof_mismatch")
+        raise ValueError("film17_recovery_transition_mismatch")
     return row
 
 
@@ -66,14 +83,15 @@ def reconcile(state, page, *, get=None, rows=None):
     """No state changes or publish release, even if no match is found."""
     from requests import get as default_get
     get = get or default_get
-    archive_binding(state)
+    row = archive_binding(state)
     if (not isinstance(page, dict)
             or str(page.get("page_id")) != FILM_PAGE_ID
             or str(page.get("instagram_id")) != FILM_IG_ID
             or not page.get("page_token")):
         raise ValueError("film17_owner_not_pinned")
+    current_container_id = row["failure"]["container_id"]
     container, err = read_json(
-        get, "https://graph.facebook.com/v24.0/" + FILM17_CONTAINER_ID,
+        get, "https://graph.facebook.com/v24.0/" + current_container_id,
         page["page_token"], "status_code,status")
     container_status = container.get("status_code") if container else "unavailable"
     if container_status not in {"EXPIRED", "PUBLISHED", "FINISHED", "ERROR", "IN_PROGRESS", "unavailable"}:
@@ -136,13 +154,13 @@ def reconcile(state, page, *, get=None, rows=None):
         "live_caption_candidates": len(matches),
         "live_unique_media_owner_verified": owner_verified,
         "direct_read_failure": direct_failure,
-        "old_container_status": container_status,
+        "old_container_status": row["expired_container_recovery"]["terminal_status"],
+        "current_failed_container_id": current_container_id,
+        "current_failed_container_status": container_status,
         "container_read_error": (err or {}).get("reason"),
-        "next_action": (
-            "normal_publisher_exact_expired_container_gate"
-            if container_status == "EXPIRED" and not matches
-            else "preserve_hold_and_reconcile_original_source"
-        ),
+        # The exact-once prepublish retry has already been consumed. A
+        # terminal failed container cannot authorize another attempt here.
+        "next_action": "preserve_hold_and_reconcile_original_source",
         "next_action_requires_fresh_live_checks": True,
         "original_source_binary_verified_by_meta": False,
         "reupload_authorized": False,
