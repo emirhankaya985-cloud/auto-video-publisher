@@ -120,6 +120,14 @@ class Film17ReadonlyTests(unittest.TestCase):
             a.reconcile(self.state, bad, get=get, rows=[])
         get.assert_not_called()
 
+    def test_failure_reason_exposes_only_allowlisted_internal_codes(self):
+        self.assertEqual(a.safe_failure_reason(ValueError("film17_history_unavailable")),
+                         "film17_history_unavailable")
+        self.assertEqual(a.safe_failure_reason(ValueError("secret-bearing provider text")),
+                         "ValueError")
+        self.assertEqual(a.safe_failure_reason(RuntimeError("private detail")),
+                         "RuntimeError")
+
     def test_unique_caption_but_wrong_username_not_live_owner_proof(self):
         def get(url, **kwargs):
             if url.endswith(FILM17_CONTAINER_ID):
