@@ -4,6 +4,7 @@ import os
 import tempfile
 import unittest
 import zipfile
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -84,32 +85,36 @@ class AssistantTests(unittest.TestCase):
         load = Mock(return_value={"latest_comparison": {"measured_at": "2026-10-27T23:42:00+03:00"}, "report_run": 123})
         model, sender = Mock(return_value="Gerçek kayıt özeti"), Mock()
         worker = Worker(str(Path(directory) / "state.sqlite3"), evidence_loader=load, model=model, sender=sender)
-        self.addCleanup(worker.db.close)
         return worker, load, model, sender
+
+    @contextmanager
+    def worker_context(self, directory):
+        result = self.worker(directory)
+        try:
+            yield result
+        finally:
+            result[0].db.close()
 
     def update(self, uid=1, owner=987654321, chat=123456789, text="Dün nasıl?"):
         return {"update_id": uid, "message": {"from": {"id": owner}, "chat": {"id": chat}, "text": text}}
 
     def test_unauthorized_chat_or_sender_cannot_access_data(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            worker, load, model, sender = self.worker(tmp)
+        with tempfile.TemporaryDirectory() as tmp, self.worker_context(tmp) as (worker, load, model, sender):
             worker.handle(self.update(owner=111))
             worker.handle(self.update(uid=2, chat=111))
             load.assert_not_called(); model.assert_not_called(); sender.assert_not_called()
 
     def test_duplicate_and_restart_do_not_resend(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            worker, load, model, sender = self.worker(tmp)
+        with tempfile.TemporaryDirectory() as tmp, self.worker_context(tmp) as (worker, load, model, sender):
             worker.handle(self.update())
             worker.handle(self.update())
-            worker2, load2, model2, sender2 = self.worker(tmp)
-            worker2.handle(self.update())
-            self.assertEqual(sender.call_count, 1)
-            sender2.assert_not_called()
+            with self.worker_context(tmp) as (worker2, load2, model2, sender2):
+                worker2.handle(self.update())
+                self.assertEqual(sender.call_count, 1)
+                sender2.assert_not_called()
 
     def test_uncertain_delivery_never_replayed(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            worker, load, model, sender = self.worker(tmp)
+        with tempfile.TemporaryDirectory() as tmp, self.worker_context(tmp) as (worker, load, model, sender):
             sender.side_effect = RuntimeError("send timeout")
             with self.assertRaises(RuntimeError):
                 worker.handle(self.update())
@@ -117,24 +122,21 @@ class AssistantTests(unittest.TestCase):
             self.assertEqual(sender.call_count, 1)
 
     def test_no_evidence_no_model_and_explicit_fallback(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            worker, load, model, sender = self.worker(tmp)
+        with tempfile.TemporaryDirectory() as tmp, self.worker_context(tmp) as (worker, load, model, sender):
             load.side_effect = RuntimeError("unavailable")
             worker.handle(self.update())
             model.assert_not_called()
             self.assertIn("tahmin etmedim", sender.call_args.args[1])
 
     def test_status_does_not_call_model_or_claim_live_measurement(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            worker, load, model, sender = self.worker(tmp)
+        with tempfile.TemporaryDirectory() as tmp, self.worker_context(tmp) as (worker, load, model, sender):
             worker.handle(self.update(text="/durum"))
             model.assert_not_called()
             self.assertIn("2026-10-27", sender.call_args.args[1])
             self.assertIn("canlı anlık izlenme değildir", sender.call_args.args[1])
 
     def test_conversation_bounded_and_reset_preserves_offset(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            worker, load, model, sender = self.worker(tmp)
+        with tempfile.TemporaryDirectory() as tmp, self.worker_context(tmp) as (worker, load, model, sender):
             for uid in range(1, 6):
                 worker.handle(self.update(uid))
             self.assertEqual(worker.db.execute("SELECT COUNT(*) FROM conversation").fetchone()[0], 6)
@@ -143,8 +145,7 @@ class AssistantTests(unittest.TestCase):
             self.assertEqual(worker.db.execute("SELECT COUNT(*) FROM conversation").fetchone()[0], 0)
 
     def test_active_webhook_is_never_deleted(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            worker, *_ = self.worker(tmp)
+        with tempfile.TemporaryDirectory() as tmp, self.worker_context(tmp) as (worker, *_):
             session = Mock()
             session.get.return_value = Mock(status_code=200)
             session.get.return_value.json.return_value = {"ok": True, "result": {"url": "https://existing.invalid"}}

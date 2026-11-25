@@ -5,7 +5,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
-from contextlib import redirect_stdout
+from contextlib import closing, redirect_stdout
 from unittest.mock import Mock, patch
 
 import telegram_status_inbox as inbox
@@ -30,7 +30,7 @@ class InboxTests(unittest.TestCase):
                 patch.object(inbox, 'send_telegram') as send:
             inbox.prepare(session=session)
             send.assert_not_called()
-            with sqlite3.connect(Path(temp)/'telegram.sqlite3') as db:
+            with closing(sqlite3.connect(Path(temp)/'telegram.sqlite3')) as db:
                 self.assertEqual(db.execute("SELECT value FROM state WHERE key='offset'").fetchone()[0], '6')
             reserved = json.loads((Path(temp)/'reserved-replies.json').read_text())
             self.assertEqual(len(reserved), 1)
@@ -53,7 +53,7 @@ class InboxTests(unittest.TestCase):
             inbox.prepare(session=session)
             send.assert_not_called()
             load.assert_called_once_with(session=session)
-            with sqlite3.connect(Path(temp)/'telegram.sqlite3') as db:
+            with closing(sqlite3.connect(Path(temp)/'telegram.sqlite3')) as db:
                 self.assertEqual(db.execute("SELECT value FROM state WHERE key='offset'").fetchone()[0], '7')
             inbox.send()
             from telegram_notifications import STATISTICS_KEYBOARD
@@ -74,7 +74,7 @@ class InboxTests(unittest.TestCase):
              patch.object(inbox, "send_telegram") as sender:
             inbox.prepare(session=session)
             sender.assert_not_called()
-            with sqlite3.connect(Path(temp)/"telegram.sqlite3") as db:
+            with closing(sqlite3.connect(Path(temp)/"telegram.sqlite3")) as db:
                 self.assertEqual(db.execute("SELECT value FROM state WHERE key='offset'").fetchone()[0], "11")
             reserved = json.loads((Path(temp)/"reserved-replies.json").read_text())
             self.assertEqual(len(reserved), 2)

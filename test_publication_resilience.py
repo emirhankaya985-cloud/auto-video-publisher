@@ -256,13 +256,13 @@ class PublicationResilienceTests(unittest.TestCase):
             if failed_stage == "finish":
                 calls.append(response({"success": True}))
             calls.append(response({"success": False}))
-            with self.subTest(stage=failed_stage), tempfile.NamedTemporaryFile() as video:
-                video.write(b"data")
-                video.flush()
+            with self.subTest(stage=failed_stage), tempfile.TemporaryDirectory() as temp_dir:
+                video = Path(temp_dir) / "video.mp4"
+                video.write_bytes(b"data")
                 with patch.object(cloud.requests, "post", side_effect=calls) as post:
                     with self.assertRaises(cloud.MetaAPIError):
                         cloud.upload_facebook_reel({"page_id": "123", "page_token": "test"},
-                                                   video.name, "caption")
+                                                   str(video), "caption")
                 self.assertEqual(post.call_count, len(calls))
 
 
