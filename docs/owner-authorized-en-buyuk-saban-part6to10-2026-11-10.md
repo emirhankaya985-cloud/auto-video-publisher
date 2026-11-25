@@ -1,0 +1,5 @@
+# Film Mağarası — missing En Büyük Şaban Parts 6–10, owner authorization
+
+Owner requested all incomplete social media fixes after the 10-part release accidentally stopped at Part 5 because the planner used the normal five-daily-item cap. Previous successful run **42875553852** has ten confirmed real post IDs, one per platform for exact Part 1, 2, 3, 4, 5. Nothing in this marker may repost those files or any existing video.
+
+Authorize ONE first-attempt main-branch push in Istanbul on 10 November 2026 to publish only canonical `En_Buyuk_Saban_Part_6.mp4` ... `En_Buyuk_Saban_Part_10.mp4` with each matching TXT on primary Film Mağarası Facebook and linked Instagram, maximum five new parts per platform. Run existing verified Page/rights, current remote history, exact Drive file IDs/content integrity, serial ordering, source dedupe and append-only publication ledger gates before Meta POST. A provider rejection or uncertain outcome must halt downstream parts rather than force retries. All other accounts and ordinary scheduled quotas remain unaffected. YouTube stays disabled. Evidence requires 10 new platform post IDs, not merely a green run.

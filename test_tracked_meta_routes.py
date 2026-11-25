@@ -53,12 +53,12 @@ class TrackedRoutesTests(unittest.TestCase):
         self.assertEqual(result["status"], "behind")
         self.assertEqual(result["missing"], {"facebook": 0, "instagram": 1})
 
-    def test_daily_laugh_previous_new_york_day_has_eight_per_platform(self):
+    def test_daily_laugh_previous_new_york_day_has_five_per_platform(self):
         # At 08:40 Istanbul in summer, NY is 01:40: check yesterday,
         # NOT the zero-post day just beginning in New York.
         result = watch.check_route(
             "daily_laugh", now=DAILY_TIME, page_loader=lambda: ACCOUNTS,
-            history_reader=reader(8, 7, "2026-10-26T17:00:00Z",
+            history_reader=reader(5, 4, "2026-10-26T17:00:00Z",
                                   "2026-10-26T17:05:00Z"),
             paused=lambda route: False,
         )
@@ -170,14 +170,14 @@ class TrackedRoutesTests(unittest.TestCase):
         self.assertIn("instagram: 1 eksik", tg.call_args.args[1])
         self.assertNotIn("private-topic", output.getvalue())
 
-    def test_unknown_meta_read_alert_does_not_claim_eight_missing_videos(self):
+    def test_unknown_meta_read_alert_does_not_claim_five_missing_videos(self):
         output = io.StringIO()
         with (
             patch.dict(os.environ, {"TARGET_ROUTE": "daily_laugh", "GITHUB_STEP_SUMMARY": "",
                                      "NTFY_TOPIC": "", "NTFY_TOPIC_URL": ""}),
             patch.object(watch, "check_route", return_value={
                 "route": "daily_laugh", "status": "unknown", "day": "2026-10-30",
-                "target_per_platform": 8, "reason": "meta_read_failed"}),
+                "target_per_platform": 5, "reason": "meta_read_failed"}),
             patch.object(watch, "telegram_configured", return_value=True),
             patch.object(watch, "send_telegram", return_value=True) as tg,
             redirect_stdout(output),
@@ -245,17 +245,24 @@ class TrackedRoutesTests(unittest.TestCase):
                     }, clear=True), \
                      patch.object(watch, "Path", side_effect=lambda p: Path(folder) / p), \
                      patch.object(watch, "check_route", return_value=verdict), \
-                     patch.object(watch, "send_ntfy") as ntfy, \
-                     patch.object(watch, "send_telegram") as telegram, \
-                     patch.object(watch, "telegram_configured") as configured, \
+                     patch.object(watch, "send_ntfy", return_value=True) as ntfy, \
+                     patch.object(watch, "send_telegram", return_value=True) as telegram, \
+                     patch.object(watch, "telegram_configured", return_value=True) as configured, \
                      redirect_stdout(capture):
                     self.assertEqual(watch.main(), 1)
-                ntfy.assert_not_called()
-                telegram.assert_not_called()
-                configured.assert_not_called()
+                if status == "behind":
+                    ntfy.assert_called_once()
+                    telegram.assert_called_once()
+                    configured.assert_called_once()
+                    self.assertIn("instagram: 1 eksik", telegram.call_args.args[1])
+                    self.assertNotIn('"quiet_by_owner"', capture.getvalue())
+                else:
+                    ntfy.assert_not_called()
+                    telegram.assert_not_called()
+                    configured.assert_not_called()
+                    self.assertIn('"quiet_by_owner"', capture.getvalue())
                 saved = json.loads((Path(folder) / "target-verdict.json").read_text())
                 self.assertEqual(saved, verdict)
-                self.assertIn('"quiet_by_owner"', capture.getvalue())
                 self.assertNotIn("unused", capture.getvalue())
 
     def test_meta_target_workflow_uses_owner_quiet_flag(self):

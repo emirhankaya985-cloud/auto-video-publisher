@@ -4,27 +4,31 @@ import os
 
 from ntfy_notifications import send_ntfy
 from telegram_notifications import send_telegram, telegram_configured
+from notification_dedup import mark_result, should_send
 
 
 def notify_failure():
-    if os.getenv("QUIET_FAILURE_NOTIFICATIONS") == "true":
-        print(json.dumps({"state": "silenced_by_owner", "alert_sent": False}), flush=True)
-        return 0
+    # Critical workflow failures must not be silenced by a success-notification
+    # preference. The quiet flag is retained for backwards-compatible workflows.
     if not (os.getenv("NTFY_TOPIC_URL", "").strip() or
             os.getenv("NTFY_TOPIC", "").strip() or telegram_configured()):
-        print(json.dumps({"state": "skipped", "reason": "ntfy_secret_missing"}), flush=True)
+        print(json.dumps({"state": "skipped", "reason": "notification_secret_missing"}), flush=True)
         return 0
 
     server_url = os.getenv("GITHUB_SERVER_URL", "https://github.com")
     repository = os.getenv("GITHUB_REPOSITORY", "")
     run_id = os.getenv("GITHUB_RUN_ID", "")
-    # Only allow the expected GitHub.com host and this known repository.
     click = None
     if (server_url == "https://github.com" and
             repository in {"emirhankaya-AFK/auto-video-publisher",
                            "emirhankaya985-cloud/auto-video-publisher"} and run_id.isdecimal()):
         click = f"https://github.com/{repository}/actions/runs/{run_id}"
     title = "🚨 Gün sonu raporu başarısız"
+    workflow = os.getenv("GITHUB_WORKFLOW", "daily-stats-report")
+    dedup_key = "|".join((repository, workflow, title))
+    if not should_send(dedup_key):
+        print(json.dumps({"state": "duplicate_suppressed", "alert_sent": False}), flush=True)
+        return 0
     body = ("⚠️ Sosyal medya günlük rapor işi başarısız oldu. "
             "Bu bildirim yalnızca iş hatasını belirtir; eksik izlenmeleri sıfır saymayın. "
             "Ayrıntı için GitHub Actions kaydını inceleyin.")
@@ -49,12 +53,13 @@ def notify_failure():
     state = ("failure_alert_server_acknowledged" if ntfy_ack else
              "failure_alert_telegram_acknowledged" if telegram_ack else
              "failure_alert_not_delivered")
+    delivered = ntfy_ack or telegram_ack
+    mark_result(dedup_key, delivered, None if delivered else "notification_delivery_failed")
     print(json.dumps({
         "state": state, "server_ack": ntfy_ack, "telegram_server_ack": telegram_ack,
         "http_status": http_status, "phone_delivery_verified": False,
     }, sort_keys=True), flush=True)
-    return 0 if (ntfy_ack or telegram_ack) else 1
-
+    return 0 if delivered else 1
 
 
 if __name__ == "__main__":

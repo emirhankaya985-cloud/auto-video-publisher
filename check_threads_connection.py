@@ -31,8 +31,20 @@ def safe_provider_failure(exc):
                 result["graph_subcode"] = subcode
         except Exception:
             pass
-    if result.get("http_status") == 401 and result.get("graph_code") == 190:
-        result["reason"] = "threads_token_reauthorization_required"
+    # Official Graph error subcodes narrow the failure. Neither 463 nor 467
+    # proves a specific revocation event; both may mean expired/invalid token.
+    # A 190 without a subcode must not be falsely labeled "expired".
+    if result.get("graph_code") == 190 and result.get("http_status") in (400, 401, 403):
+        subcode = result.get("graph_subcode")
+        result["reason"] = {
+            458: "threads_app_authorization_missing",
+            459: "threads_user_checkpoint_required",
+            460: "threads_password_changed_reauthorization_required",
+            463: "threads_token_expired_or_invalid",
+            467: "threads_token_invalid_or_revoked",
+        }.get(subcode, "threads_token_reauthorization_required")
+    elif result.get("graph_code") in (10, 200) and result.get("http_status") in (400, 401, 403):
+        result["reason"] = "threads_scope_or_permission_denied"
     elif result.get("http_status") in (401, 403):
         result["reason"] = "threads_authorization_denied"
     return result
@@ -61,9 +73,9 @@ def main():
         try:
             identity = verify_route(route)
         except Exception as exc:
-            if selected != "all":
-                raise
-            # Account-specific failures must not prevent other GET-only checks.
+            # Even a single-account probe must persist a sanitized failed
+            # receipt before returning nonzero, never silently lose evidence.
+            # Account-specific failures do not abort the other GET-only checks.
             evidence = safe_provider_failure(exc)
             safe_status = "; ".join(f"{key}={value}" for key, value in evidence.items())
             print(f"FAIL: route={route}; {safe_status}; no post.", flush=True)
@@ -88,7 +100,8 @@ def main():
     Path("threads-connection-readonly.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     if failures:
-        raise RuntimeError("Threads read-only verification failed for routes: " + ", ".join(failures))
+        raise RuntimeError("Threads read-only verification failed for routes: "
+                           + ", ".join(failures) + " (token/ID review required)")
 
 
 if __name__ == "__main__":

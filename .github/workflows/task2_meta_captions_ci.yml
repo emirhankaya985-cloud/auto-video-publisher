@@ -1,0 +1,48 @@
+name: Task 2 Meta fixed TXT and publication safety — no network
+
+on:
+  pull_request:
+    paths:
+      - 'account_fixed_txt.py'
+      - 'expired_ig_container_recovery.py'
+      - 'test_expired_ig_container_recovery.py'
+      - 'test_film_part17_expired_recovery.py'
+      - 'public_link_runtime.py'
+      - 'telegram_publish_report.py'
+      - 'test_publish_error_only_notifications.py'
+      - '.github/workflows/public_link_schedule.yml'
+      - 'test_account_fixed_txt.py'
+      - 'test_public_link_runtime.py'
+      - '.github/workflows/task2_meta_captions_ci.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'account_fixed_txt.py'
+      - 'expired_ig_container_recovery.py'
+      - 'test_expired_ig_container_recovery.py'
+      - 'test_film_part17_expired_recovery.py'
+      - 'public_link_runtime.py'
+      - 'telegram_publish_report.py'
+      - 'test_publish_error_only_notifications.py'
+      - '.github/workflows/public_link_schedule.yml'
+      - 'test_account_fixed_txt.py'
+      - '.github/workflows/task2_meta_captions_ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  mocked-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - run: pip install --require-hashes -r requirements.txt
+      - run: pip install gdown==6.4.2
+      - name: Compile fixed caption guards
+        run: python -m py_compile account_fixed_txt.py public_link_runtime.py test_account_fixed_txt.py
+      - name: Run no-network caption and Meta safety regressions
+        run: python -m unittest -v test_account_fixed_txt.py test_public_link_runtime.py test_expired_ig_container_recovery.py test_film_part17_expired_recovery.py test_publish_error_only_notifications.py test_telegram_publish_report.py

@@ -1,0 +1,48 @@
+name: Migrate retained analytics history to Neon
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Start with a read-only dry run; choose apply only after reviewing its report
+        required: true
+        default: dry-run
+        type: choice
+        options:
+          - dry-run
+          - apply
+      max_runs:
+        description: Maximum successful daily-report runs to inspect (up to 100)
+        required: false
+        default: "100"
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: neon-analytics-history-migration
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - name: Install locked dependencies
+        run: pip install --require-hashes -r requirements.txt
+      - name: Classify and deduplicate retained artifacts
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          DASHBOARD_MIGRATION_RUNS: ${{ inputs.max_runs }}
+          DASHBOARD_MIGRATION_MODE: ${{ inputs.mode }}
+          DASHBOARD_INGEST_URL: ${{ secrets.DASHBOARD_INGEST_URL }}
+          DASHBOARD_INGEST_TOKEN: ${{ secrets.DASHBOARD_INGEST_TOKEN }}
+          DASHBOARD_MIGRATION_REPORT: migration-report.json
+        run: python dashboard_history_migrate.py

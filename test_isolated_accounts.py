@@ -5,7 +5,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from merge_account_states import merge_account_states, read_scoped_results
+from merge_account_states import (merge_account_states, read_scoped_results,
+                                  write_empty_merge_report, SCOPES)
 from public_link_runtime import account_scope, owned_humor_source
 
 
@@ -14,6 +15,15 @@ def state(entries=None):
 
 
 class IsolatedAccountTests(unittest.TestCase):
+    def test_empty_merge_report_marks_all_scopes_missing_and_unverified(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "merge-account-report.json"
+            write_empty_merge_report(path)
+            report = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(report["merged_accounts"], [])
+        self.assertEqual(report["missing_accounts"], list(SCOPES))
+        self.assertFalse(report["publication_verified"])
+
     def test_invalid_scope_fails_closed(self):
         with patch.dict("os.environ", {"PUBLISH_ACCOUNT_SCOPE": "unknown"}):
             with self.assertRaises(RuntimeError):

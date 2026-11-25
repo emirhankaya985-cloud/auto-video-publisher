@@ -35,6 +35,7 @@ class YouTubeInventorySafetyTests(unittest.TestCase):
         def check(route):
             if route == "channel1":
                 return {"status": "youtube_api_rejected", "http_status": 403,
+                        "api_reasons": ["insufficientPermissions", "SECRET_TOKEN"],
                         "provider_body": "SECRET_TOKEN",
                         "oauth_url": "https://private.invalid?token=SECRET_TOKEN"}
             if route == "channel2":
@@ -44,10 +45,22 @@ class YouTubeInventorySafetyTests(unittest.TestCase):
         outcome = probe_all(checker=check)
         self.assertEqual(outcome["status"], "auth_or_identity_incomplete")
         self.assertEqual(outcome["accounts"][0]["http_status"], 403)
-        self.assertEqual(outcome["accounts"][0]["upload_scope_in_file"], "N/A")
+        self.assertEqual(outcome["accounts"][0]["api_reasons"], ["insufficientPermissions"])
+        self.assertEqual(outcome["accounts"][0]["upload_scope_in_file"], "scope_not_recorded_in_token_json")
         self.assertFalse(outcome["accounts"][1]["expected_channel_id_matched"])
         self.assertNotIn("SECRET_TOKEN", json.dumps(outcome))
         self.assertNotIn("private.invalid", json.dumps(outcome))
+
+    def test_absent_scope_in_token_json_is_not_called_permission_failure(self):
+        report = probe_all(checker=lambda target: {
+            "status": "authorization_or_connection_failed",
+            "error_type": "RefreshError",
+        })
+        self.assertTrue(all(x["upload_scope_in_file"] == "scope_not_recorded_in_token_json"
+                            for x in report["accounts"]))
+        self.assertEqual(report["safe_failure_kind_counts"], {"oauth_refresh_rejected": 4})
+        self.assertEqual(report["provider_writes"], 0)
+        self.assertNotIn("N/A", str(report))
 
     def test_four_live_auth_failures_distinguish_refresh_from_network_safely(self):
         results = {

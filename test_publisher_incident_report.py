@@ -1,10 +1,39 @@
 """Old mistakes stay covered by tests, without exposing private API responses."""
 import unittest
 
-from publisher_incident_report import build_incident_report
+from publisher_incident_report import build_incident_report, blocked_due_publication
 
 
 class IncidentReportTests(unittest.TestCase):
+    def test_due_empty_queue_fails_only_live_publish(self):
+        summary = build_incident_report({'entries': {}}, '300',
+            plan_text='No eligible unpublished item below the daily target.')
+        self.assertTrue(blocked_due_publication(summary, publishing_allowed=True))
+        self.assertFalse(blocked_due_publication(summary, publishing_allowed=False))
+        self.assertFalse(blocked_due_publication(
+            build_incident_report({'entries': {}}, '300', plan_text='NOT DUE'),
+            publishing_allowed=True))
+        summary['confirmed_new_posts'] = 1
+        self.assertFalse(blocked_due_publication(summary, publishing_allowed=True))
+
+    def test_zero_post_reasons_stay_distinct_in_artifact(self):
+        text = ("QUARANTINE: exact source failed local MP4 preparation in a prior run; no blind media retry.\n"
+                "QUARANTINE: proven local-only visual duplicate; look for next unique clip.\n"
+                "HELD: 326.mp4 instagram has an uncertain previous intent.\n"
+                "No eligible unpublished item below the daily target.\n")
+        result = build_incident_report({'entries': {}}, '300', plan_text=text)
+        self.assertEqual(result['confirmed_new_posts'], 0)
+        self.assertEqual(result['no_post_signals'], {
+            'no_eligible_content': 1, 'local_quality_quarantine': 1,
+            'visual_duplicate_hold': 1, 'uncertain_previous_intent': 1,
+        })
+
+    def test_confirmed_post_does_not_claim_no_post_signals(self):
+        state = {'entries': {'x': {'run_id': '300', 'status': 'done',
+                                  'post_id': '123', 'route': 'film', 'platform': 'facebook'}}}
+        result = build_incident_report(state, '300', plan_text='No eligible unpublished item below the daily target.')
+        self.assertEqual(result['no_post_signals'], {})
+
     def test_visual_hold_remains_visible_without_breaking_incident_writer(self):
         result = build_incident_report({'entries': {'x': {
             'run_id': '300', 'status': 'held', 'route': 'film', 'platform': 'facebook',
@@ -72,6 +101,20 @@ class IncidentReportTests(unittest.TestCase):
         )
         self.assertTrue(result["state_available"])
         self.assertEqual(result["incidents"], [])
+
+    def test_delivery_failure_is_explicitly_separate_from_verified_publish(self):
+        state = {"entries": {"ig": {
+            "run_id": "777", "status": "done", "route": "film",
+            "platform": "instagram", "post_id": "18000000000000",
+        }}}
+        r = build_incident_report(state, "777", step_outcomes={
+            "publish": "success", "post_verification": "success", "notify": "failure",
+        })
+        self.assertEqual(r["confirmed_new_posts"], 1)
+        self.assertEqual(r["unverified_done_entries"], 0)
+        self.assertEqual(r["step_outcomes"]["publish"], "success")
+        self.assertEqual(r["step_outcomes"]["notify"], "failure")
+        self.assertEqual(r["uncertain_pending_reconciliation"], 0)
 
     def test_invalid_runid_never_attributes_old_upload_to_new_run(self):
         with self.assertRaises(ValueError):

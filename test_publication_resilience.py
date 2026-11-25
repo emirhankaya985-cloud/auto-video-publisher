@@ -108,11 +108,17 @@ class PublicationResilienceTests(unittest.TestCase):
                              "pending": dict(base, status="uncertain", post_id="222")}}
         self.assertEqual(runtime.ledger_daily_count(state, "gonle", "facebook", "2026-10-27"), 1)
 
-    def test_due_empty_queue_warns_once_per_day_but_not_before_slot_or_during_audit(self):
-        for due, audit in ((1, False), (0, False), (1, True)):
-            with self.subTest(due=due, audit=audit), tempfile.TemporaryDirectory() as tmp:
+    def test_due_empty_queue_journals_every_tick_but_not_before_slot_or_during_audit(self):
+        for due, audit, held in ((1, False, False), (1, False, True),
+                                 (0, False, True), (1, True, True)):
+            with self.subTest(due=due, audit=audit, held=held), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
-                state = {"schema": 1, "entries": {}, "episode_days": {}}
+                entries = {"gonle:facebook:old": {
+                    "route": "gonle", "platform": "facebook", "status": "uncertain",
+                    "file": "old.mp4", "caption_hash": "old",
+                }} if held else {}
+                original_entries = json.loads(json.dumps(entries))
+                state = {"schema": 1, "entries": entries, "episode_days": {}}
                 with patch.dict(os.environ, {"GITHUB_RUN_ID": "999", "GITHUB_STEP_SUMMARY": str(root / "summary.md")}), \
                         patch.object(runtime, "ROOT", root), \
                         patch.object(runtime, "STATE", root / "state.json"), \
@@ -130,11 +136,13 @@ class PublicationResilienceTests(unittest.TestCase):
                     runtime.plan(audit=audit)
                     runtime.plan(audit=audit)
                 if due and not audit:
-                    journal.assert_called_once_with("planning_queue", "no_eligible_content",
-                                                    route="gonle", safe_to_retry=True)
+                    self.assertEqual(journal.call_count, 2)
+                    for event in journal.call_args_list:
+                        self.assertEqual(event.args, ("planning_queue", "no_eligible_content"))
+                        self.assertEqual(event.kwargs, {"route": "gonle", "safe_to_retry": True})
                 else:
                     journal.assert_not_called()
-                self.assertEqual(state["entries"], {})
+                self.assertEqual(state["entries"], original_entries)
 
     def test_account_discovery_recovers_transient_reads_without_posting(self):
         for first in (OSError("private-url"), response({}, 503),
@@ -248,13 +256,13 @@ class PublicationResilienceTests(unittest.TestCase):
             if failed_stage == "finish":
                 calls.append(response({"success": True}))
             calls.append(response({"success": False}))
-            with self.subTest(stage=failed_stage), tempfile.NamedTemporaryFile() as video:
-                video.write(b"data")
-                video.flush()
+            with self.subTest(stage=failed_stage), tempfile.TemporaryDirectory() as temp_dir:
+                video = Path(temp_dir) / "video.mp4"
+                video.write_bytes(b"data")
                 with patch.object(cloud.requests, "post", side_effect=calls) as post:
                     with self.assertRaises(cloud.MetaAPIError):
                         cloud.upload_facebook_reel({"page_id": "123", "page_token": "test"},
-                                                   video.name, "caption")
+                                                   str(video), "caption")
                 self.assertEqual(post.call_count, len(calls))
 
 

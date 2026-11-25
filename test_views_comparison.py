@@ -27,6 +27,19 @@ def compare(records=None, current=None, platforms=None, delayed=False, account="
 
 
 class ViewComparisonTests(unittest.TestCase):
+    def test_implausibly_empty_facebook_library_is_unavailable(self):
+        videos = [{"id": str(i), "views": 0, "created_time": "2026-10-01T00:00:00Z"}
+                  for i in range(75)]
+        with patch.object(stats_reporter, "graph_pages", return_value=videos):
+            with self.assertRaisesRegex(RuntimeError, "tutarsız"):
+                stats_reporter.facebook_video_snapshot({"page_id": "1", "page_token": "test"})
+
+    def test_small_new_facebook_library_can_have_zero_views(self):
+        videos = [{"id": str(i), "views": 0} for i in range(4)]
+        with patch.object(stats_reporter, "graph_pages", return_value=videos):
+            self.assertEqual(len(stats_reporter.facebook_video_snapshot(
+                {"page_id": "1", "page_token": "test"})), 4)
+
     def test_actual_day_and_week_percentages_use_their_own_cumulative_baseline(self):
         data = compare()
         row = data["accounts"][0]
@@ -71,14 +84,14 @@ class ViewComparisonTests(unittest.TestCase):
     def test_small_positive_growth_is_not_rounded_to_apparent_zero(self):
         self.assertEqual(percentage(0.0025), "+0,0025%")
 
-    def test_partial_telegram_delivery_fails_without_resending_accepted_part(self):
+    def test_complete_report_sends_no_notification(self):
         report = ViewReport("short report", compare())
-        with patch.object(stats_reporter, "send_ntfy", return_value={"http_status": 200}), \
+        with patch.object(stats_reporter, "send_ntfy") as ntfy, \
                 patch.object(stats_reporter, "telegram_configured", return_value=True), \
-                patch.object(stats_reporter, "send_telegram", side_effect=[{"server_ack": True}, RuntimeError("failed")]) as send:
-            with self.assertRaisesRegex(RuntimeError, "incomplete"):
-                stats_reporter.notify(report)
-        self.assertEqual(send.call_count, 2)
+                patch.object(stats_reporter, "send_telegram") as telegram:
+            stats_reporter.notify(report)
+        ntfy.assert_not_called()
+        telegram.assert_not_called()
 
     def test_missing_platform_cannot_masquerade_as_complete_account_growth(self):
         data = compare(platforms=["Facebook", "Instagram"])
@@ -118,6 +131,22 @@ class ViewComparisonTests(unittest.TestCase):
         self.assertIsNone(compare(rows)["accounts"][0]["daily"]["percent"])
         self.assertIsNone(compare(delayed=True)["accounts"][0]["daily"]["percent"])
 
+    def test_delayed_measurement_reports_only_real_sample_interval(self):
+        data = compare(delayed=True)
+        part = data["accounts"][0]["platforms"][0]
+        self.assertIsNone(part["daily"]["delta"])
+        self.assertEqual(part["sample_window"], {"baseline": 100, "delta": 25, "hours": 19.2})
+        self.assertIn("Ölçüm arası fark (takvim günü değil)", telegram_tables(data)[1][1])
+        self.assertIn("+25 (19,2 saat)", telegram_tables(data)[1][1])
+
+    def test_delayed_measurement_rejects_stale_or_unverified_window(self):
+        data = build_comparison(
+            {("account", "Facebook"): {"123": {"views": 125}}},
+            history("2026-10-26", 100), {"account": ["Facebook"]},
+            date(2026, 10, 27), "2026-10-29T18:30:00+03:00", delayed=True)
+        self.assertNotIn("sample_window", data["accounts"][0]["platforms"][0])
+        self.assertIsNone(data["accounts"][0]["daily"]["delta"])
+
     def test_html_escapes_labels_and_keeps_three_bounded_parts_for_six_accounts(self):
         names = list(stats_reporter.ACCOUNT_TARGETS)
         names[0] += " <tag>&"
@@ -132,18 +161,20 @@ class ViewComparisonTests(unittest.TestCase):
             self.assertNotIn("<tag>", text)
         self.assertIn("&lt;tag&gt;&amp;", messages[0][1])
 
-    def test_notify_sends_three_detailed_messages_instead_of_truncated_compact_body(self):
-        report = ViewReport("short report", compare())
+    def test_error_report_sends_one_plain_digest_without_keyboard(self):
+        data = compare()
+        data["collection_errors"] = ["account / Instagram: HTTP 403"]
+        report = ViewReport("short report", data)
         with patch.dict(os.environ, {"TELEGRAM_STATUS_INBOX_ENABLED": "true"}), \
                 patch.object(stats_reporter, "send_ntfy", return_value={"http_status": 200}), \
                 patch.object(stats_reporter, "telegram_configured", return_value=True), \
                 patch.object(stats_reporter, "send_telegram", return_value={"server_ack": True}) as send:
             stats_reporter.notify(report)
-        self.assertEqual(send.call_count, 3)
-        self.assertTrue(all(c.kwargs["parse_mode"] == "HTML" for c in send.call_args_list))
-        from telegram_notifications import STATISTICS_KEYBOARD
-        self.assertEqual(send.call_args_list[0].kwargs["reply_markup"], STATISTICS_KEYBOARD)
-        self.assertTrue(all("reply_markup" not in c.kwargs for c in send.call_args_list[1:]))
+        self.assertEqual(send.call_count, 1)
+        self.assertNotIn("reply_markup", send.call_args.kwargs)
+        self.assertNotIn("parse_mode", send.call_args.kwargs)
+        self.assertIn("account — Instagram", send.call_args.args[1])
+        self.assertIn("HTTP 403", send.call_args.args[1])
 
     def test_html_transport_adds_parse_mode_and_refuses_truncated_markup(self):
         env = {"TELEGRAM_BOT_TOKEN": "123456:abcdefghijklmnopqrstuvwx", "TELEGRAM_CHAT_ID": "123456789"}

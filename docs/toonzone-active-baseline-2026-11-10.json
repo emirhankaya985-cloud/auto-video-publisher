@@ -1,0 +1,47 @@
+{
+  "schema": 1,
+  "route": "toonzone",
+  "scope": "instagram_and_facebook_publication",
+  "record_type": "owner_confirmed_relaunch_baseline",
+  "recorded_date": "2026-11-10",
+  "season": 1,
+  "completed_episodes": [
+    1,
+    2,
+    3
+  ],
+  "completed_parts_per_episode": [
+    1,
+    2,
+    3,
+    4
+  ],
+  "completed_status": "owner_reported_published_not_reverified_by_api",
+  "next_to_publish": {
+    "season": 1,
+    "episode": 4,
+    "part": 1
+  },
+  "subsequent_order": "S01E04 Part1 → Part2 → Part3 → Part4, then each next episode in ascending order",
+  "post_episode3_cleanup": {
+    "responsible": "owner",
+    "state": "owner_will_delete_old_posts_later",
+    "remote_absence_verified": false,
+    "all_legacy_intents_reconciled": false,
+    "owner_cleanup_must_precede_relaunch": false
+  },
+  "publish_hold": true,
+  "meta_cross_engagement_unchanged": true,
+  "unrelated_accounts_unchanged": true,
+  "notes": "This active owner baseline is separate from old Meta post receipts. The old generic ToonZone publisher remains held to avoid double writers; new owner-approved isolated relaunch will proceed without waiting for owner to delete old profile posts, after explicit new workflow authorisation. Acceptance requires real new Meta IDs and read-only provider verification.",
+  "publish_hold_reason": "legacy_main_publisher_hold_only_to_prevent_conflicting_parallel_writes",
+  "relaunch_track": {
+    "status": "pending_workflow_tests_and_kickoff",
+    "campaign": "toonzone-owner-relaunch-2026-11-10-s01e04",
+    "owner_explicitly_approved_before_cleanup": true,
+    "next": "S01E04 Part1",
+    "separate_immutable_ledger": true,
+    "do_not_erase_old_posts_or_receipts": true,
+    "requires_original_png_and_live_provider_id": true
+  }
+}

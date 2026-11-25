@@ -25,7 +25,7 @@ jobs:
     # Default enabled after explicit owner approval; variable=false is a kill switch.
     if: vars.META_REPORTING_ENABLED != 'false'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 35
     steps:
       - name: Kodlari Cek
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -36,6 +36,7 @@ jobs:
       - name: Bagimliliklari Yukle
         run: pip install --require-hashes -r requirements.txt
       - name: Istatistikleri Telefona Gonder
+        timeout-minutes: 28
         env:
 
           META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
@@ -73,7 +74,15 @@ jobs:
           NVIDIA_AI_ENABLED: ${{ vars.NVIDIA_AI_ENABLED }}
           NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
           NVIDIA_MODEL: ${{ vars.NVIDIA_MODEL || 'nvidia/nemotron-3.5-super-vl-120b-a12b' }}
-        run: python stats_reporter.py
+        run: python -u stats_reporter.py
+      - name: Record separate, non-blocking Neon archive transfer
+        if: success()
+        run: |
+          # The archive upload happens below. After this entire report job
+          # succeeds, dashboard_archive_sync.yml gets a workflow_run event.
+          # Never POST twice: the independent sync owns Neon/HTTP ingestion.
+          echo "archive_sync=pending_independent_workflow_run"
+          echo "Neon arşiv aktarımı ayrı bir işte yürütülür; bu adım veri yazıldığı anlamına gelmez." >> "$GITHUB_STEP_SUMMARY"
       - name: Recommend posting hours from verified historical IDs (no schedule changes)
         if: success()
         continue-on-error: true
@@ -120,7 +129,13 @@ jobs:
           path: link-runtime/publication_progress.json
           if-no-files-found: warn
           retention-days: 90
-      - name: Persist failure without phone alert (owner quiet mode)
+      - name: Resolve prior report incident after a clean run
+        if: success()
+        env:
+          DATABASE_URL: ${{ secrets.DASHBOARD_DATABASE_URL }}
+          NOTIFICATION_INCIDENT_KEY: "${{ github.repository }}|${{ github.workflow }}|🚨 Gün sonu raporu başarısız"
+        run: python notification_dedup.py resolve
+      - name: Send failure alert only (deduplicated)
         if: ${{ failure() }}
         continue-on-error: true
         env:
@@ -128,5 +143,5 @@ jobs:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          QUIET_FAILURE_NOTIFICATIONS: 'true'
+          DATABASE_URL: ${{ secrets.DASHBOARD_DATABASE_URL }}
         run: python ntfy_report_failure_alert.py

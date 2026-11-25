@@ -26,7 +26,7 @@ def load_runtime():
     for name in ("TARLADAKI_HOURS", "PENGUEN_HOURS", "GONLE_HOURS"):
         setattr(scheduled, name, (9, 12, 15, 18, 21))
     scheduled.FILM_HOURS = (10, 12, 14, 16, 18)
-    scheduled.daily_laugh_hours_for_date = lambda day: (8, 10, 12, 14, 16, 18, 20, 22)
+    scheduled.daily_laugh_hours_for_date = lambda day: (9, 12, 15, 18, 21)
     scheduled.platform_content_from_txt = Mock(return_value=(None, None, "FB from TXT", "IG from TXT", True))
     auth = types.ModuleType("meta_auth_loader")
     auth.load_meta_auth = Mock(return_value={"pages": []})
@@ -77,6 +77,19 @@ class LinkRuntimeSafety(unittest.TestCase):
         integrity.start()
         self.addCleanup(integrity.stop)
 
+    def test_toonzone_archived_id_gap_blocks_only_its_platform(self):
+        slot = "S01E04 Part1"
+        receipts = {
+            (slot, "facebook"): {"reason": None},
+            (slot, "instagram"): {
+                "reason": "archived_id_not_in_live_history"},
+        }
+        self.assertEqual(
+            runtime.toonzone_archived_id_blockers(
+                slot, ["facebook", "instagram"], receipts),
+            ["instagram"],
+        )
+
     def test_unordered_ig_quarantine_requires_exact_prepublish_source_proof(self):
         row = {"route": "tarladaki", "platform": "instagram", "file": "192.mp4",
                "caption_hash": "hash", "status": "uncertain",
@@ -124,6 +137,98 @@ class LinkRuntimeSafety(unittest.TestCase):
                 self.assertEqual(set(plans[0]["platforms"]), {"facebook", "instagram"})
                 self.assertEqual(state["entries"][f"{route}:instagram:old"], old)
                 self.assertNotIn(f"{route}:facebook:old", state["entries"])
+
+    def test_penguen_silent_preupload_failure_is_skipped_for_next_safe_clip(self):
+        from contextlib import ExitStack
+        with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
+            root = Path(tmp)
+            day = datetime.now(ZoneInfo("Europe/Istanbul")).date().isoformat()
+            state = {"schema": 1, "entries": {}, "episode_days": {}}
+            for platform in ("facebook", "instagram"):
+                state["entries"][f"penguen:{platform}:silent"] = {
+                    "route": "penguen", "platform": platform, "file": "342.mp4",
+                    "status": "ready", "run_id": "123", "day": day,
+                    "failure": {"reason": "source_or_cover_preparation_failed",
+                                "media_diagnostic": "silent_audio_samples",
+                                "safe_to_repost": True},
+                }
+            original = json.loads(json.dumps(state["entries"]))
+            files = {"342.mp4": {"id": "silent", "name": "342.mp4"},
+                     "343.mp4": {"id": "clean", "name": "343.mp4"}}
+            replacements = {
+                "ROOT": root, "STATE": root / "state.json", "PLAN": root / "plan.json",
+                "ROUTES": {"penguen": ("humor", "Beyinsiz Penguen"),
+                           "tarladaki": ("humor", "Tarladaki Fasulye")},
+                "FOLDERS": {"humor": "folder"},
+            }
+            for key, value in replacements.items():
+                stack.enter_context(patch.object(runtime, key, value))
+            stack.enter_context(patch.dict(os.environ, {
+                "PUBLISH_ACCOUNT_SCOPE": "penguen", "GITHUB_RUN_ID": "456",
+                "GITHUB_STEP_SUMMARY": str(root / "summary.md")}))
+            stack.enter_context(patch.object(runtime, "restore", return_value=state))
+            stack.enter_context(patch.object(runtime, "apply_verified_migration"))
+            stack.enter_context(patch.object(runtime, "owned_humor_source", return_value=True))
+            stack.enter_context(patch.object(runtime, "load_meta_auth", return_value={"pages": [
+                {"page_name": "Beyinsiz Penguen", "instagram_id": "ig"},
+                {"page_name": "Tarladaki Fasulye", "instagram_id": "other"}]}))
+            stack.enter_context(patch.object(runtime, "inventory", return_value=files))
+            stack.enter_context(patch.object(runtime, "graph_rows", return_value=[]))
+            stack.enter_context(patch.object(runtime, "target_count", return_value=5))
+            stack.enter_context(patch.object(runtime, "seed_done", return_value=False))
+            stack.enter_context(patch.object(runtime, "copies", side_effect=lambda _r, item, _f, _t:
+                ({"facebook": f"caption {item['id']}",
+                  "instagram": f"caption {item['id']}"}, "matching-txt")))
+
+            runtime.plan()
+
+            planned = json.loads((root / "plan.json").read_text())
+            self.assertEqual([item["id"] for item in planned], ["clean"],
+                             (root / "summary.md").read_text())
+            self.assertEqual(set(planned[0]["platforms"]), {"facebook", "instagram"})
+            for key, row in original.items():
+                self.assertEqual(state["entries"][key], row)
+
+    def test_local_visual_hold_with_ambiguous_caption_does_not_starve_fresh_humor(self):
+        from contextlib import ExitStack
+        with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
+            root = Path(tmp)
+            state = {"schema": 1, "episode_days": {}, "entries": {}}
+            for p in ("facebook", "instagram"):
+                state["entries"][f"penguen:{p}:old"] = {
+                    "route": "penguen", "platform": p, "file": "404.mp4",
+                    "caption_hash": runtime.caption_key("reused"), "status": "held",
+                    "failure": {"reason": "visual_duplicate_review", "external_post_attempted": False,
+                                "safe_to_repost": False, "conflicting_platforms": ["facebook", "instagram"]}}
+            old_entries = json.loads(json.dumps(state["entries"]))
+            files = {n: {"id": i, "name": n} for n, i in (("404.mp4", "old"), ("405.mp4", "new"))}
+            replacements = {"ROOT": root, "STATE": root / "state.json", "PLAN": root / "plan.json",
+                            "ROUTES": {"penguen": ("humor", "Beyinsiz Penguen"),
+                                       "tarladaki": ("humor", "Tarladaki Fasulye")},
+                            "FOLDERS": {"humor": "folder"}}
+            for k, v in replacements.items(): stack.enter_context(patch.object(runtime, k, v))
+            stack.enter_context(patch.dict(os.environ, {"PUBLISH_ACCOUNT_SCOPE": "penguen",
+                "GITHUB_RUN_ID": "456", "GITHUB_STEP_SUMMARY": str(root / "summary.md")}))
+            stack.enter_context(patch.object(runtime, "owned_humor_source", return_value=True))
+            stack.enter_context(patch.object(runtime, "restore", return_value=state))
+            stack.enter_context(patch.object(runtime, "apply_verified_migration"))
+            stack.enter_context(patch.object(runtime, "load_meta_auth", return_value={"pages": [
+                {"page_name": "Beyinsiz Penguen", "instagram_id": "ig"},
+                {"page_name": "Tarladaki Fasulye", "instagram_id": "other"}]}))
+            stack.enter_context(patch.object(runtime, "inventory", return_value=files))
+            history = [{"id": str(i), "description": "reused", "caption": "reused",
+                        "created_time": "2026-01-01T12:00:00Z"} for i in (101, 102)]
+            stack.enter_context(patch.object(runtime, "graph_rows", side_effect=lambda page, p:
+                history if page["page_name"] == "Beyinsiz Penguen" else []))
+            stack.enter_context(patch.object(runtime, "target_count", return_value=5))
+            stack.enter_context(patch.object(runtime, "seed_done", return_value=False))
+            stack.enter_context(patch.object(runtime, "copies", side_effect=lambda r, item, f, t:
+                ({"facebook": "reused" if item["id"] == "old" else "fresh",
+                  "instagram": "reused" if item["id"] == "old" else "fresh"}, "matching-txt")))
+            runtime.plan()
+            self.assertEqual([p["id"] for p in json.loads((root / "plan.json").read_text())], ["new"])
+            for key, row in old_entries.items():
+                self.assertEqual(state["entries"][key], row)
 
     def test_film_second_batch_holds_same_caption_from_different_drive_ids(self):
         # Production evidence: Bickin_Part_1.mp4 and Bickin_Part_1 (1).mp4
@@ -192,7 +297,7 @@ class LinkRuntimeSafety(unittest.TestCase):
         now = datetime(2026, 11, 1, 9, 0, tzinfo=ZoneInfo("Europe/Istanbul"))
         with patch.dict(os.environ, {"COMPLETE_DAY_DATE": "2026-11-01"}):
             expected = {"tarladaki": 5, "penguen": 5, "gonle": 5,
-                        "daily_laugh": 8, "film": 5, "film_second": 5, "toonzone": 4}
+                        "daily_laugh": 5, "film": 5, "film_second": 5, "toonzone": 4}
             self.assertEqual({r: runtime.target_count(r, now) for r in expected}, expected)
 
     def test_humor_uncertain_ig_does_not_block_independent_facebook_or_clear_intent(self):
@@ -758,10 +863,16 @@ class LinkRuntimeSafety(unittest.TestCase):
         row = {"timestamp": "2026-10-24T06:00:00Z"}
         self.assertEqual(runtime.publication_day("daily_laugh", row), "2026-10-24")
 
-    def test_catchup_preserves_daily_laugh_eight_target(self):
+    def test_catchup_preserves_daily_laugh_five_target(self):
         with patch.dict(os.environ, {"COMPLETE_DAY_DATE": "2026-10-23"}):
-            self.assertEqual(runtime.target_count("daily_laugh", datetime(2026, 10, 23, 9, tzinfo=runtime.TR)), 8)
+            self.assertEqual(runtime.target_count("daily_laugh", datetime(2026, 10, 23, 9, tzinfo=runtime.TR)), 5)
             self.assertEqual(runtime.target_count("film_second", datetime(2026, 10, 23, 9, tzinfo=runtime.TR)), 6)
+
+    def test_adaptive_daily_laugh_schedule_cannot_exceed_five_video_target(self):
+        long_hours = tuple(range(8))
+        with patch.dict(os.environ, {"ADAPTIVE_SCHEDULE_ENABLED": "false"}), \
+             patch.object(runtime, "daily_laugh_hours_for_date", return_value=long_hours):
+            self.assertEqual(runtime.target_count("daily_laugh", datetime(2026, 10, 23, 23, 59, tzinfo=runtime.TR)), 5)
 
     def test_daily_reused_txt_has_distinct_video_reference(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -915,16 +1026,19 @@ class LinkRuntimeSafety(unittest.TestCase):
                     runtime.plan()
                 self.assertEqual(json.loads((root / "plan.json").read_text()), [])
                 self.assertEqual(caption_mock.call_count, 1)
-                self.assertEqual(runtime.record_error.call_count, 1)
-                self.assertEqual(runtime.record_error.call_args.args[:2],
-                                 ("previous_intent_hold", "unreconciled_previous_intent"))
+                self.assertEqual([c.args[:2] for c in runtime.record_error.call_args_list], [
+                    ("previous_intent_hold", "unreconciled_previous_intent"),
+                    ("planning_queue", "no_eligible_content"),
+                ])
                 state = json.loads((root / "state.json").read_text())
                 self.assertTrue(state["entries"]["toonzone:facebook:a"].get("hold_alerted_at"))
                 # The same unresolved old intent must remain blocked, but
                 # half-hourly runs must not send duplicate phone alerts.
                 runtime.record_error.reset_mock()
-                runtime.plan()
-                runtime.record_error.assert_not_called()
+                with patch.object(runtime, "target_count", return_value=4):
+                    runtime.plan()
+                runtime.record_error.assert_called_once_with(
+                    "planning_queue", "no_eligible_content", route="toonzone", safe_to_retry=True)
                 self.assertEqual(json.loads((root / "plan.json").read_text()), [])
 
     def test_old_film_binary_http400_is_safely_reconciled_before_one_alternate_retry(self):
@@ -1009,9 +1123,11 @@ class LinkRuntimeSafety(unittest.TestCase):
                 runtime.plan()
             self.assertEqual(json.loads((root / "plan.json").read_text()), [])
             self.assertEqual(old["entries"]["film:instagram:vid"]["status"], "uncertain")
-            self.assertEqual(runtime.record_error.call_count, 1)
-            self.assertEqual(runtime.record_error.call_args.args[:2],
-                             ("previous_intent_hold", "unreconciled_previous_intent"))
+            self.assertEqual([c.args[:2] for c in runtime.record_error.call_args_list], [
+                ("previous_intent_hold", "unreconciled_previous_intent"),
+                ("planning_queue", "no_eligible_content"),
+                ("planning_queue", "no_eligible_content"),
+            ])
 
     def test_invalid_mp4_codec_metadata_blocks_upload_before_meta(self):
         with patch.object(runtime, "probe", return_value={"streams": [], "format": {"duration": "10"}}):
@@ -1097,6 +1213,55 @@ class LinkRuntimeSafety(unittest.TestCase):
             self.assertEqual(entries["daily_laugh:instagram:vid"]["status"], "ready")
             self.assertEqual(entries["daily_laugh:instagram:vid"]["failure"]["reason"], "media_preparation_failed")
             facebook.assert_called_once()
+            instagram.assert_not_called()
+
+    def test_quality_rejection_persists_exact_safe_diagnostic_without_post(self):
+        runtime.record_error.reset_mock()
+        self.addCleanup(runtime.record_error.reset_mock)
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            state_path, plan_path = root / "state.json", root / "plan.json"
+            item = {"page": "Beyinsiz Penguen", "route": "penguen", "id": "vid",
+                    "name": "342.mp4", "platforms": ["facebook", "instagram"],
+                    "captions": {"facebook": "fb text", "instagram": "ig text"}}
+            runtime.save(state_path, {"entries": {
+                "penguen:facebook:vid": {"route": "penguen", "platform": "facebook",
+                                           "status": "intent", "file": "342.mp4"},
+                "penguen:instagram:vid": {"route": "penguen", "platform": "instagram",
+                                             "status": "intent", "file": "342.mp4"},
+            }})
+            runtime.save(plan_path, [item])
+            def download(_id, path):
+                path.write_bytes(b"source")
+                return path
+            with patch.dict(os.environ, {"GITHUB_RUN_ID": "123",
+                                          "MEDIA_QUALITY_ENABLED": "true",
+                                          "ADVANCED_DEDUPE_ENABLED": "false"}), \
+                    patch.object(runtime, "ROOT", root), \
+                    patch.object(runtime, "STATE", state_path), \
+                    patch.object(runtime, "PLAN", plan_path), \
+                    patch.object(runtime, "download_verified_publication_video",
+                                 side_effect=download), \
+                    patch.object(runtime, "load_meta_auth", return_value={"pages": [
+                        {"page_name": "Beyinsiz Penguen", "page_token": "test"}]}), \
+                    patch("media_quality.inspect_video",
+                          side_effect=RuntimeError("silent_audio_samples")), \
+                    patch.object(runtime, "upload_facebook_reel") as facebook, \
+                    patch.object(runtime, "upload_instagram_reel") as instagram:
+                with self.assertRaises(SystemExit):
+                    runtime.publish()
+            entries = json.loads(state_path.read_text())["entries"]
+            self.assertEqual(entries["penguen:facebook:vid"]["status"], "ready")
+            self.assertEqual(entries["penguen:instagram:vid"]["status"], "ready")
+            for platform in ("facebook", "instagram"):
+                self.assertEqual(
+                    entries[f"penguen:{platform}:vid"]["failure"]["media_diagnostic"],
+                    "silent_audio_samples")
+            error_events = [call.kwargs for call in runtime.record_error.call_args_list]
+            self.assertEqual(len(error_events), 2)
+            self.assertTrue(all(event["media_diagnostic"] == "silent_audio_samples"
+                                for event in error_events))
+            facebook.assert_not_called()
             instagram.assert_not_called()
 
     def test_known_ig_binary_400_queues_only_one_strict_profile_retry(self):
@@ -1470,7 +1635,18 @@ class LinkRuntimeSafety(unittest.TestCase):
             ig.assert_not_called()
             entries = json.loads((root / 'state.json').read_text())['entries']
             self.assertTrue(all(r['status'] == 'ready' for r in entries.values()))
-            self.assertEqual(json.loads((root / 'quality/v.json').read_text())['status'], 'held')
+            quality = json.loads((root / 'quality/v.json').read_text())
+            self.assertEqual(quality['status'], 'held')
+            self.assertEqual(quality['check_code'], 'black_screen_samples')
+
+    def test_quality_failure_report_redacts_unrecognized_exception_details(self):
+        from media_quality import safe_failure_code
+        self.assertEqual(safe_failure_code(RuntimeError('silent_audio_samples')),
+                         'silent_audio_samples')
+        self.assertEqual(safe_failure_code(RuntimeError('private path /secret/video.mp4')),
+                         'quality_check_failed')
+        self.assertEqual(safe_failure_code(ValueError('private provider detail')),
+                         'quality_check_failed')
 
 
     def test_daily_laugh_caption_collision_skips_old_and_plans_new_without_duplicate(self):

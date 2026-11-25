@@ -811,9 +811,9 @@ class RouteTests(unittest.TestCase):
         # 09:00 New York is 16:00 Turkey while DST is active.
         now = datetime(2026, 10, 11, 16, 0)
         self.assertIn(("daily_laugh", "2026-10-11-09-daily_laugh"), routes_for_time(now))
-        # New 08:00 New York slot becomes 16:00 Turkey after US DST ends.
-        standard = datetime(2026, 11, 8, 16, 0)
-        self.assertIn(("daily_laugh", "2026-11-08-08-daily_laugh"), routes_for_time(standard))
+        # The 09:00 New York slot becomes 17:00 Turkey after US DST ends.
+        standard = datetime(2026, 11, 8, 17, 0)
+        self.assertIn(("daily_laugh", "2026-11-08-09-daily_laugh"), routes_for_time(standard))
 
     def test_delayed_cron_stays_within_current_slot(self):
         with patch.dict("os.environ", {"ENABLE_FILM_ROUTES": "true"}, clear=True):

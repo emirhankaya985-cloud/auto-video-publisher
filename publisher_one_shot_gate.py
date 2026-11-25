@@ -32,12 +32,75 @@ NOV9_CATCHUP_MARKER = "docs/owner-authorized-catchup-2026-11-09.md"
 NOV9_CATCHUP_SUBJECT = "ops: owner-authorized-once-meta-catchup-2026-11-09"
 NOV9_CATCHUP_DATE = "2026-11-09"
 
+# Owner 20 Nov urgent repair: one ordinary due-slot pass across verified routes.
+# This does not override daily targets, serial order, rights or POST dedupe.
+NOV20_REPAIR_MARKER = "docs/owner-authorized-meta-repair-2026-11-20.md"
+NOV20_REPAIR_SUBJECT = "ops: authorized-once-meta-repair-2026-11-20"
+NOV20_REPAIR_DATE = "2026-11-20"
+
+
 # Owner-requested urgent Film Mağarası original Bıçkın 8 recovery.
 # Only an ADDED unique marker commit on 10 November can launch real Meta
 # publishing; failed rechecks may not be rerun as another authorization.
 FILM_PART8_MARKER = "docs/owner-authorized-film-part8-2026-11-10.md"
 FILM_PART8_SUBJECT = "ops: authorized-once-film-bickin8-2026-11-10"
 FILM_PART8_DATE = "2026-11-10"
+
+# Exact owner authorization for ten distinct En Buyuk Saban parts on Film's
+# primary Facebook and Instagram routes. No automatic reruns or other accounts.
+FILM_TEN_MARKER = "docs/owner-authorized-en-buyuk-saban-10parts-2026-11-10.md"
+FILM_TEN_SUBJECT = "ops: authorized-once-en-buyuk-saban-10parts-2026-11-10"
+FILM_TEN_DATE = "2026-11-10"
+# The owner requested completing the five unposted film parts after verified
+# run 42875553852 published only Part 1-5 per platform (10 Meta posts).
+FILM_GAP_MARKER = "docs/owner-authorized-en-buyuk-saban-part6to10-2026-11-10.md"
+FILM_GAP_SUBJECT = "ops: authorized-once-en-buyuk-saban-part6to10-2026-11-10"
+FILM_GAP_DATE = "2026-11-10"
+
+
+def is_film_gap_once(event, ref, subject, added_paths, *, today=None, run_attempt=None):
+    if today is None:
+        today = datetime.now(timezone(timedelta(hours=3))).date().isoformat()
+    if run_attempt is None:
+        run_attempt = os.getenv("GITHUB_RUN_ATTEMPT", "1")
+    return (event == "push" and ref == "refs/heads/main"
+            and subject == FILM_GAP_SUBJECT
+            and FILM_GAP_MARKER in added_paths
+            and today == FILM_GAP_DATE and str(run_attempt) == "1")
+
+# The original owner run 42874839556 STOPPED in the no-write verify step:
+# planning, intent archive and Meta publish were all skipped. One distinct
+# first-attempt repair marker may deliver the same unfulfilled owner request.
+FILM_TEN_REPAIR_MARKER = "docs/owner-authorized-en-buyuk-saban-10parts-ci-repair-2026-11-10.md"
+FILM_TEN_REPAIR_SUBJECT = "ops: authorized-once-en-buyuk-saban-10parts-ci-repair-2026-11-10"
+
+
+def is_film_ten_once(event, ref, subject, added_paths, *, today=None, run_attempt=None):
+    if today is None:
+        today = datetime.now(timezone(timedelta(hours=3))).date().isoformat()
+    if run_attempt is None:
+        run_attempt = os.getenv("GITHUB_RUN_ATTEMPT", "1")
+    return (event == "push" and ref == "refs/heads/main"
+            and subject == FILM_TEN_SUBJECT and FILM_TEN_MARKER in added_paths
+            and today == FILM_TEN_DATE and str(run_attempt) == "1")
+
+def is_film_ten_repair_once(event, ref, subject, added_paths, *, today=None, run_attempt=None):
+    if today is None:
+        today = datetime.now(timezone(timedelta(hours=3))).date().isoformat()
+    if run_attempt is None:
+        run_attempt = os.getenv("GITHUB_RUN_ATTEMPT", "1")
+    return (event == "push" and ref == "refs/heads/main"
+            and subject == FILM_TEN_REPAIR_SUBJECT
+            and FILM_TEN_REPAIR_MARKER in added_paths
+            and today == FILM_TEN_DATE and str(run_attempt) == "1")
+
+
+def is_any_film_ten_once(event, ref, subject, added_paths, *, today=None, run_attempt=None):
+    return (is_film_ten_once(event, ref, subject, added_paths,
+                             today=today, run_attempt=run_attempt)
+            or is_film_ten_repair_once(event, ref, subject, added_paths,
+                                       today=today, run_attempt=run_attempt))
+
 
 def is_film_part8_once(event, ref, subject, added_paths, *, today=None, run_attempt=None):
     if today is None:
@@ -104,6 +167,18 @@ def is_nov7_catchup_push(event, ref, subject, added_paths, *, today=None, run_at
             and today == NOV7_CATCHUP_DATE and str(run_attempt) == "1")
 
 
+def is_nov20_repair_push(event, ref, subject, added_paths, *, today=None, run_attempt=None):
+    """One newly added owner marker; no recurring or full-day quota release."""
+    if today is None:
+        today = datetime.now(timezone(timedelta(hours=3))).date().isoformat()
+    if run_attempt is None:
+        run_attempt = os.getenv("GITHUB_RUN_ATTEMPT", "1")
+    return (event == "push" and ref == "refs/heads/main"
+            and subject == NOV20_REPAIR_SUBJECT
+            and NOV20_REPAIR_MARKER in added_paths
+            and today == NOV20_REPAIR_DATE and str(run_attempt) == "1")
+
+
 def is_v4_recovery_push(event, ref, subject, added_paths):
     return (event == "push" and ref == "refs/heads/main"
             and subject == IG_V4_SUBJECT
@@ -130,7 +205,10 @@ def determine_mode(event, ref, subject="", added_paths=(), requested_mode="audit
                    or is_today_catchup_push(event, ref, subject, added_paths)
                    or is_nov7_catchup_push(event, ref, subject, added_paths)
                    or is_nov9_catchup_push(event, ref, subject, added_paths)
-                   or is_film_part8_once(event, ref, subject, added_paths))
+                   or is_nov20_repair_push(event, ref, subject, added_paths)
+                   or is_film_part8_once(event, ref, subject, added_paths)
+                   or is_any_film_ten_once(event, ref, subject, added_paths)
+                   or is_film_gap_once(event, ref, subject, added_paths))
         return "publish" if normal or rescue or v4 or catchup else "audit"
     return "audit"
 
@@ -165,6 +243,12 @@ def main():
     with Path(output).open("a", encoding="utf-8") as stream:
         stream.write(f"mode={mode}\npublish_allowed={'true' if mode == 'publish' else 'false'}\n")
         stream.write(f"recovery_only={'true' if rescue else 'false'}\n")
+        stream.write("film_ten_parts_once="
+                     + ("true" if is_any_film_ten_once(event, os.getenv("GITHUB_REF", ""),
+                                                  subject, added) else "false") + "\n")
+        stream.write("film_gap_once="
+                     + ("true" if is_film_gap_once(event, os.getenv("GITHUB_REF", ""),
+                                                  subject, added) else "false") + "\n")
     print(f"Publisher decision: {mode}; event={event}; reason=checked_commit_and_existing_gates")
     return 0
 

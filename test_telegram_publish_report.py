@@ -3,6 +3,7 @@ import json
 import os
 import tempfile
 import unittest
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from unittest.mock import patch, Mock
 
@@ -14,6 +15,66 @@ report.record_error = Mock()
 
 
 class TelegramPublishReportTests(unittest.TestCase):
+    def test_fresh_stock_context_is_candidate_only_and_route_scoped(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "content-stock.json"
+            now = datetime(2026, 11, 18, 12, tzinfo=timezone.utc)
+            path.write_text(json.dumps({"measured_at": now.isoformat(), "accounts": [
+                {"route": "daily_laugh", "platform": "facebook", "remaining": 0, "held": 9},
+                {"route": "penguen", "platform": "instagram", "remaining": 20, "held": 1},
+            ]}), encoding="utf-8")
+            lines = report.stock_context_for_routes({"daily_laugh"}, path=path, now=now)
+            self.assertEqual(len(lines), 1)
+            self.assertIn("0 aday, 9 bekleyen", lines[0])
+            self.assertIn("kontrolünden geçmelidir", lines[0])
+            self.assertNotIn("Penguen", lines[0])
+
+    def test_stale_or_bad_stock_cannot_appear_in_alert(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "content-stock.json"
+            now = datetime(2026, 11, 18, 12, tzinfo=timezone.utc)
+            path.write_text(json.dumps({"measured_at": (now - timedelta(hours=3)).isoformat(),
+                                         "accounts": [{"route": "daily_laugh", "platform": "facebook",
+                                                       "remaining": 0, "held": 9}]}), encoding="utf-8")
+            self.assertEqual(report.stock_context_for_routes({"daily_laugh"}, path=path, now=now), [])
+            path.write_text("not json", encoding="utf-8")
+            self.assertEqual(report.stock_context_for_routes({"daily_laugh"}, path=path, now=now), [])
+
+    def test_queue_deficit_is_actionable_even_if_repreparation_is_safe(self):
+        event = {"run_id": "333", "route": "penguen", "platform": "unknown",
+                 "stage": "planning_queue", "reason": "no_eligible_content",
+                 "retry_policy": "pre_upload_only"}
+        with tempfile.TemporaryDirectory() as folder, \
+                patch.object(report, "STATE_PATH", Path(folder) / "missing.json"), \
+                patch.object(report, "read_errors", return_value=[event]), \
+                patch.object(report, "telegram_configured", return_value=True), \
+                patch.object(report, "send_telegram", return_value={"server_ack": True}) as send, \
+                patch.dict(os.environ, {"GITHUB_RUN_ID": "333", "PLAN_STEP_OUTCOME": "success",
+                    "PUBLISH_STEP_OUTCOME": "success", "PUBLISH_ALERTS_ONLY": "true", "PUBLISH_ALERT_MODE": ""}):
+            self.assertEqual(report.main(), 0)
+        send.assert_called_once()
+        self.assertIn("no_eligible_content", send.call_args.args[1])
+
+    def test_daily_account_deficit_restores_scoped_history_and_deduplicates(self):
+        history = {"schema": 1, "records": {}}
+        events = [{"route": "penguen", "reason": "no_eligible_content", "platform": "unknown"},
+                  {"route": "penguen", "reason": "credentials_or_permissions", "platform": "instagram"}]
+        first = datetime(2026, 11, 20, 12, tzinfo=timezone.utc)
+        planned = []
+        def capture(path, value):
+            if path == report.alert_history.PREPARED:
+                planned.append(value["messages"])
+        with patch.object(report.alert_history, "restore", return_value=history) as restore, \
+                patch.object(report.alert_history, "save", side_effect=capture), \
+                patch.object(report.alert_history, "now_utc", side_effect=[first, first + timedelta(hours=1), first + timedelta(days=1)]), \
+                patch.dict(os.environ, {"PUBLISH_ACCOUNT_SCOPE": "penguen", "GITHUB_OUTPUT": ""}):
+            for run_id in ("333", "334", "335"):
+                report._prepare_durable([("🚨 Müdahale gerektiren Meta hataları", "blocked")], [], events,
+                    {"entries": {}}, run_id, telegram_on=True, ntfy_on=False, base_failures=0, category="nothing_to_report")
+        self.assertEqual([len(messages) for messages in planned], [1, 0, 1])
+        restore.assert_called_with(names=("link-alert-intent-penguen", "link-alert-result-penguen"))
+        self.assertEqual(len(planned[0][0]["keys"]), 2)  # Auth incident is preserved beside the queue deficit.
+
     def test_empty_scheduled_poll_is_silent(self):
         self.assertEqual(
             report.publication_summary({"entries": {}}, "12345"), (None, "nothing_to_report")

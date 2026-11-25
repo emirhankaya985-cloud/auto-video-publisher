@@ -58,6 +58,58 @@ class UnresolvedRemoteProbeTests(unittest.TestCase):
         self.assertNotIn("private.mp4", str(summary))
         self.assertNotIn("penguen", str(summary))
 
+    def test_tarladaki192_and_film17_retained_with_distinct_facebook_evidence(self):
+        from unresolved_live_probe import critical_ig_intent_evidence, CRITICAL_IG_INTENTS
+        from hashlib import sha256
+        import copy
+        state = {"entries": {}}
+        remote = []
+        for route, (filename, origin, container) in CRITICAL_IG_INTENTS.items():
+            source = "SOURCE_" + route
+            key = f"{route}:instagram:{source}"
+            state["entries"][key] = {
+                "route": route, "platform": "instagram", "status": "uncertain",
+                "file": filename, "run_id": origin, "post_id": None,
+                "failure": {"container_id": container},
+                "source_sha256": "a" * 64 if route == "film" else None}
+            state["entries"][f"{route}:facebook:{source}"] = {
+                "route": route, "platform": "facebook", "status": "done",
+                "post_id": "123456789", "file": filename}
+            remote.append({"route": route, "platform": "instagram",
+                           "reason": "caption_candidate_requires_source_proof",
+                           "candidate_post_id": "987654321",
+                           "existing_container_phase": "EXPIRED",
+                           "source_evidence": {"entry_fingerprint": sha256(
+                               key.encode()).hexdigest()[:16]}})
+        before = copy.deepcopy(state)
+        result = critical_ig_intent_evidence(state, remote)
+        self.assertEqual(state, before)
+        self.assertEqual(set(result), {"tarladaki", "film"})
+        for route in result:
+            self.assertFalse(result[route]["safe_to_repost"])
+            self.assertFalse(result[route]["instagram_post_confirmed"])
+            self.assertTrue(result[route]["facebook_sibling_done"])
+            self.assertEqual(result[route]["container_phase"], "EXPIRED")
+            self.assertEqual(result[route]["status"], "held_requires_exact_ig_source_proof")
+            self.assertEqual(result[route]["unverified_caption_candidate_id"], "987654321")
+        self.assertFalse(result["tarladaki"]["original_sha256_present"])
+        self.assertTrue(result["film"]["original_sha256_present"])
+        self.assertNotIn("123456789", str(result))
+
+    def test_ig_missing_or_duplicate_ledger_or_remote_proof_is_never_released(self):
+        from unresolved_live_probe import critical_ig_intent_evidence, CRITICAL_IG_INTENTS
+        file, run, container = CRITICAL_IG_INTENTS["tarladaki"]
+        state = {"entries": {"tarladaki:instagram:SOURCE": {
+            "route": "tarladaki", "platform": "instagram", "status": "uncertain",
+            "file": file, "run_id": run, "failure": {"container_id": container}}}}
+        evidence = critical_ig_intent_evidence(state, [])
+        self.assertEqual(evidence["tarladaki"]["status"], "blocked_remote_evidence_unavailable")
+        self.assertEqual(evidence["film"]["status"], "blocked_original_ig_ledger_not_unique")
+        self.assertFalse(evidence["tarladaki"]["safe_to_repost"])
+        state["entries"]["tarladaki:instagram:DUP"] = dict(state["entries"]["tarladaki:instagram:SOURCE"])
+        duplicate = critical_ig_intent_evidence(state, [])
+        self.assertEqual(duplicate["tarladaki"]["status"], "blocked_original_ig_ledger_not_unique")
+
     def test_missing_page_is_unavailable_not_permission_to_repost(self):
         with patch("public_link_runtime.ROUTES", {"film": ("film", "Film Mağarası")}):
             rows = remote_evidence(self.source(), {},

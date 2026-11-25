@@ -110,6 +110,57 @@ class OperationsTests(unittest.TestCase):
         self.assertEqual(state, original)
         self.assertEqual(calls, [('film', 'instagram')])
 
+    def test_provider_exact_video_receipt_requires_owner_caption_and_type(self):
+        from publication_operations import exact_provider_video_verified
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        stamp = now.isoformat()
+        page = {'page_id': '321', 'instagram_id': '654'}
+        fb = {'id': '100', 'description': 'original', 'from': {'id': '321'},
+              'length': 180, 'created_time': stamp}
+        self.assertTrue(exact_provider_video_verified(fb, page=page, platform='facebook',
+                          post_id='100', caption='original', now=now))
+        for field, value in (('id', '200'), ('description', 'wrong'),
+                             ('from', {'id': '999'}), ('length', None),
+                             ('length', 0), ('created_time', 'broken')) :
+            wrong = dict(fb, **{field: value})
+            with self.subTest(field=field):
+                self.assertFalse(exact_provider_video_verified(
+                    wrong, page=page, platform='facebook', post_id='100',
+                    caption='original', now=now))
+        ig = {'id': '200', 'caption': 'original', 'owner': {'id': '654'},
+              'media_type': 'VIDEO', 'timestamp': stamp}
+        self.assertTrue(exact_provider_video_verified(ig, page=page, platform='instagram',
+                         post_id='200', caption='original', now=now))
+        self.assertFalse(exact_provider_video_verified(
+            dict(ig, media_type='IMAGE'), page=page, platform='instagram',
+            post_id='200', caption='original', now=now))
+        self.assertFalse(exact_provider_video_verified(
+            dict(ig, owner={'id': '999'}), page=page, platform='instagram',
+            post_id='200', caption='original', now=now))
+
+    def test_delayed_bounded_feed_can_resolve_only_proven_original_post(self):
+        state = dict(schema=1, entries={'a': dict(entry(1, post='100'),
+             publish_caption='original', source_sha256='a' * 64)})
+        before = copy.deepcopy(state)
+        calls = []
+        def exact(route, platform, post_id, row):
+            calls.append((route, platform, post_id, row['publish_caption']))
+            return True
+        result = verify_publications(state, '123', lambda *args: [], read_exact=exact)
+        self.assertEqual(result[0]['status'], 'verified')
+        self.assertEqual(result[0]['reason'], 'exact_provider_video_id_owner_caption')
+        self.assertEqual(calls, [('film', 'instagram', '100', 'original')])
+        self.assertEqual(before, state)
+        held = verify_publications(
+            state, '123', lambda *args: [], read_exact=lambda *args: False)
+        self.assertEqual(held[0]['status'], 'unverified')
+        self.assertEqual(held[0]['reason'], 'not_observed_in_history_no_repost')
+        failed = verify_publications(
+            state, '123', lambda *args: [],
+            read_exact=lambda *args: (_ for _ in ()).throw(RuntimeError('provider error')))
+        self.assertEqual(failed[0]['status'], 'unverified')
+
     def test_unresolved_remote_audit_never_resolves_by_caption_alone(self):
         from publication_operations import _caption_digest as caption_key
         original = dict(schema=1, entries={

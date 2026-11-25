@@ -66,6 +66,28 @@ class EngagementTests(unittest.TestCase):
                 self.assertNotIn("private access token", report_text)
                 self.assertEqual(json.loads(report_text)["planned"], 0)
 
+    def test_only_readonly_source_race_is_eligible_for_nonfatal_diagnostic(self):
+        self.assertTrue(m.readonly_source_not_ready(
+            ValueError("source result unavailable")))
+        self.assertTrue(m.readonly_source_not_ready(
+            ValueError("no recent completed publisher run")))
+        self.assertFalse(m.readonly_source_not_ready(
+            ValueError("invalid or stale source run")))
+        self.assertFalse(m.readonly_source_not_ready(
+            RuntimeError("Meta account access denied")))
+
+    def test_source_not_ready_marker_preserves_report_without_claiming_success(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            destination = Path(tmp) / "report.json"
+            destination.write_text('{"planned": 0}', encoding="utf-8")
+            with patch.object(m, "REPORT", destination):
+                m.mark_source_not_ready_report()
+            report = json.loads(destination.read_text(encoding="utf-8"))
+        self.assertEqual(report["runtime_status"], "source_not_ready")
+        self.assertFalse(report["writes_retried"])
+        self.assertEqual(report["engagement_posts_sent"], 0)
+        self.assertEqual(report["planned"], 0)
+
     def setUp(self):
         p = patch.object(m, "account_enabled", return_value=True)
         p.start()
@@ -109,6 +131,21 @@ class EngagementTests(unittest.TestCase):
                          ["Beyinsiz Penguen"])
         self.assertNotIn("private-token", json.dumps(health))
         self.assertNotIn('"999"', json.dumps(health))
+
+    def test_owner_like_counts_only_after_verifiable_api_ack(self):
+        aa = actors()
+        own = task("like", "instagram", "33", "33")
+        ledger = {"schema": 1, "actions": {m.key(own): {
+            **own, "run_id": "500", "at": NOW.isoformat(),
+            "status": "reserved", "api_ack": False,
+        }}}
+        health = m.verified_like_coverage(aa, ledger)["instagram"]
+        self.assertEqual(health["confirmed_self_like_count_in_retained_ledger"], 0)
+        ledger["actions"][m.key(own)].update(status="accepted", api_ack=True)
+        health = m.verified_like_coverage(aa, ledger)["instagram"]
+        self.assertEqual(health["confirmed_self_like_count_in_retained_ledger"], 1)
+        self.assertEqual(health["confirmed_cross_like_count_in_retained_ledger"], 0)
+        self.assertEqual(health["confirmed_like_count_in_retained_ledger"], 1)
 
     def test_like_coverage_does_not_count_unverified_history_as_success(self):
         aa = actors()
@@ -442,6 +479,75 @@ class EngagementTests(unittest.TestCase):
             post.assert_not_called()
         self.assertEqual(ledger["actions"][m.key(t)]["status"],"blocked_actor")
 
+    def test_definite_cross_page_permission_denial_holds_original_post_only(self):
+        first = task("like", actor="22", owner="11")
+        next_page = dict(first, actor="55")
+        owner_self = dict(first, actor="11")
+        aa = actors()
+        aa[("facebook", "55")] = dict(aa[("facebook", "22")], id="55")
+        ledger = reserved(first)
+        ledger["actions"].update(reserved(next_page)["actions"])
+        ledger["actions"].update(reserved(owner_self)["actions"])
+        with patch.object(m, "verified_media", return_value=None), \
+             patch.object(m, "perform", side_effect=[
+                 m.GraphFailure(403, 200, definite=True), {"api_ack": True}
+             ]) as post:
+            m.execute([first, next_page, owner_self], aa, ledger, "200",
+                      persist=Mock(), sleep=Mock())
+            self.assertEqual(post.call_count, 2)
+        hold_key = "facebook/like/cross_post/123"
+        self.assertIn(hold_key, ledger["provider_holds"])
+        self.assertEqual(ledger["provider_holds"][hold_key]["http_status"], 403)
+        self.assertEqual(ledger["actions"][m.key(first)]["status"], "rejected")
+        self.assertEqual(ledger["actions"][m.key(next_page)]["status"], "provider_permission_hold")
+        self.assertEqual(ledger["actions"][m.key(owner_self)]["status"], "accepted")
+        self.assertNotIn("facebook/like", ledger["provider_holds"])
+
+        # The 7-day ledger cleanup must never reauthorize a denied target.
+        ledger["actions"][m.key(first)]["at"] = (NOW - timedelta(days=9)).isoformat()
+        ledger["actions"][m.key(next_page)]["at"] = (NOW - timedelta(days=9)).isoformat()
+        ledger["actions"][m.key(owner_self)]["at"] = (NOW - timedelta(days=9)).isoformat()
+        with patch.dict(m.os.environ, {"META_CROSS_REPOST_ENABLED": "false"}):
+            planned, report = m.build_plan(
+                [dict(platform="facebook", post_id="123", owner="11")],
+                aa, ledger, "201", "100", now=NOW)
+        likes = [row for row in planned if row["operation"] == "like"]
+        self.assertEqual([row["actor"] for row in likes], ["11"])
+        self.assertEqual(sum(r["status"] == "provider_permission_hold" for r in report), 2)
+        with patch.dict(m.os.environ, {"META_CROSS_REPOST_ENABLED": "false"}):
+            other, _ = m.build_plan(
+                [dict(platform="facebook", post_id="124", owner="11")],
+                aa, ledger, "202", "100", now=NOW)
+        self.assertEqual({a["actor"] for a in other if a["operation"] == "like"},
+                         {"11", "22", "55"})
+
+    def test_provider_denial_hold_never_assumed_for_self_like_or_other_code(self):
+        for actor, http, code in (("11", 403, 200), ("22", 400, 100),
+                                  ("22", 503, 200)):
+            t = task(actor=actor)
+            ledger = reserved(t)
+            with patch.object(m, "verified_media", return_value=None), \
+                 patch.object(m, "perform",
+                              side_effect=m.GraphFailure(http, code, definite=True)):
+                m.execute([t], actors(), ledger, "200", persist=Mock(), sleep=Mock())
+            self.assertNotIn("facebook/like/cross_post/123",
+                             ledger.get("provider_holds", {}))
+
+    def test_migrated_403_200_hold_survives_old_receipt_pruning(self):
+        t = task()
+        ledger = reserved(t)
+        ledger["actions"][m.key(t)].update(
+            status="rejected", graph_code=200, http_status=403,
+            at=(NOW - timedelta(days=8)).isoformat())
+        with patch.dict(m.os.environ, {"META_CROSS_REPOST_ENABLED": "false"}):
+            planned, report = m.build_plan(
+                [dict(platform="facebook", post_id="123", owner="11")],
+                actors(), ledger, "201", "100", now=NOW)
+        self.assertTrue(any(row["status"] == "provider_permission_hold" for row in report))
+        self.assertIn("facebook/like/cross_post/123", ledger["provider_holds"])
+        self.assertNotIn(m.key(t), ledger["actions"])
+        self.assertFalse(any(a["actor"] == "22" and a["operation"] == "like" for a in planned))
+
     def test_policy_block_stops_other_actors_without_more_posts(self):
         one=task("repost");two=dict(one,actor="11")
         ledger=reserved(one);ledger["actions"].update(reserved(two)["actions"])
@@ -598,6 +704,43 @@ class EngagementTests(unittest.TestCase):
         self.assertEqual(skipped, [])
         self.assertEqual(len(visited), 1)
 
+    def test_modern_matrix_no_post_verify_failure_can_be_skipped_readonly(self):
+        data = self.fallback_fixture()
+        stages = data["actions/runs/101/jobs?per_page=100"]["jobs"][0]["steps"]
+        for row in stages:
+            if row["name"] == "Install media runtime only after Meta preflight passed":
+                row["conclusion"] = "success"
+            if row["name"] == "Verify state, account and caption safety without API writes":
+                row["conclusion"] = "failure"
+        data["actions/runs/101/jobs?per_page=100"]["jobs"][0]["name"] = "meta (film)"
+        data["actions/runs/101/jobs?per_page=100"]["jobs"].append({
+            "name": "merge-account-receipts", "status": "completed",
+            "conclusion": "failure", "run_id": 101, "steps": []})
+        data["actions/runs/101/jobs?per_page=100"]["total_count"] = 2
+        rid, skipped, visited = self.choose_fallback(data)
+        self.assertEqual(rid, "100")
+        self.assertEqual(skipped, ["101"])
+
+        for change in ("plan_ran", "intent_started", "publish_started", "merge_success",
+                       "wrong_job", "wrong_archive_count"):
+            case = copy.deepcopy(data)
+            job = case["actions/runs/101/jobs?per_page=100"]["jobs"][0]
+            byname = {x["name"]: x for x in job["steps"]}
+            if change == "plan_ran":
+                byname["Check public folders, captions, histories and prepare intent"]["conclusion"] = "success"
+            if change == "intent_started":
+                byname["Persist intent before any Meta upload"]["conclusion"] = "success"
+            if change == "publish_started":
+                byname["Publish explicitly planned Meta videos"]["conclusion"] = "success"
+            if change == "merge_success":
+                case["actions/runs/101/jobs?per_page=100"]["jobs"][1]["conclusion"] = "success"
+            if change == "wrong_job":
+                job["name"] = "meta (foreign)"
+            if change == "wrong_archive_count":
+                case["actions/runs/101/jobs?per_page=100"]["total_count"] = 1
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                self.choose_fallback(case)
+
     def test_fallback_never_skips_expired_duplicate_or_intent_artifact(self):
         for artifacts in (
             [{"name": "link-state-result", "expired": True}],
@@ -667,6 +810,26 @@ class EngagementTests(unittest.TestCase):
                     choose.assert_not_called()
                 save.assert_not_called()
                 post.assert_not_called()
+
+    def test_focused_readonly_health_gets_fail_closed_source_fallback(self):
+        with patch.dict(m.os.environ, {
+                "GITHUB_REPOSITORY": m.REPO, "GITHUB_RUN_ID": "200",
+                "SOURCE_RUN_ID": "latest", "ENGAGEMENT_MODE": "dry_run",
+                "GITHUB_EVENT_NAME": "workflow_dispatch", "ENGAGEMENT_SCOPE": "recent_window",
+                "META_CROSS_ENGAGEMENT_ENABLED": "false",
+                "META_AUDIT_FOCUS": "Film Mağarası"}), \
+             patch("sys.argv", ["meta_cross_engagement.py", "plan"]), \
+             patch.object(m, "load_meta_auth", return_value={}), \
+             patch.object(m, "accounts", return_value=actors()), \
+             patch.object(m, "latest_source_id", return_value="100") as choose, \
+             patch.object(m, "restore", return_value={"schema": 1, "actions": {}}), \
+             patch.object(m, "read_source", side_effect=ValueError("stopped before plan")), \
+             patch.object(m, "save") as save, patch.object(m, "perform") as post:
+            with self.assertRaisesRegex(ValueError, "stopped before plan"):
+                m.main()
+            self.assertTrue(choose.call_args.kwargs["allow_prestate_fallback"])
+            save.assert_not_called()
+            post.assert_not_called()
 
     def test_unavailable_provenance_stops_batch_before_claiming(self):
         state={"entries":{"a":dict(status="done",run_id="99",day="2026-10-30",
@@ -754,6 +917,102 @@ class EngagementTests(unittest.TestCase):
         self.assertEqual(planned[0]["owner"], "55")
         self.assertNotEqual(planned[0]["actor"], planned[0]["owner"])
         self.assertFalse(any(t["operation"] in ("save", "repost") for t in planned))
+
+
+    def test_account_batch_rotates_one_target_but_covers_all_native_platform_posts(self):
+        aa = actors()
+        for platform, identity in (("facebook", "55"), ("instagram", "66")):
+            aa[(platform, identity)] = dict(platform=platform, id=identity,
+                name="ToonZone", grants=set(GRANTS), token="token", owner_page="55")
+        posts = [
+            dict(platform="instagram", post_id="901", owner="66"),
+            dict(platform="instagram", post_id="902", owner="66"),
+            dict(platform="facebook", post_id="903", owner="55"),
+            dict(platform="facebook", post_id="904", owner="11"),
+        ]
+        ledger = {"schema": 1, "actions": {}}
+        with patch.object(m, "verified_media", return_value=None) as check, \
+             patch.dict(m.os.environ, {"META_CROSS_REPOST_ENABLED": "false"}):
+            planned, _ = m.build_account_batch(posts, aa, ledger, "200", "100", now=NOW)
+        self.assertEqual(len(planned), 9)
+        self.assertEqual(check.call_count, 3)
+        self.assertEqual({t["operation"] for t in planned}, {"like"})
+        self.assertEqual({t["owner"] for t in planned}, {"55", "66"})
+        self.assertEqual({t["platform"] for t in planned}, {"facebook", "instagram"})
+        self.assertEqual(sum(t["actor"] == t["owner"] for t in planned), 3)
+        self.assertEqual(len(ledger["actions"]), len(planned))
+        self.assertTrue(all(x["status"] == "reserved" for x in ledger["actions"].values()))
+        # Intent/accepted receipts are never replayed; next tick selects another account.
+        for record in ledger["actions"].values():
+            record.update(status="accepted", api_ack=True)
+        with patch.object(m, "verified_media", return_value=None):
+            next_batch, _ = m.build_account_batch(posts, aa, ledger, "201", "100",
+                                                   now=NOW + timedelta(minutes=15))
+        self.assertEqual(len(next_batch), 3)
+        self.assertEqual({x["owner"] for x in next_batch}, {"11"})
+        self.assertEqual(sum(x["actor"] == x["owner"] for x in next_batch), 1)
+
+    def test_exact_rolling_24h_uses_meta_publication_time_for_both_platforms(self):
+        for platform, owner, actor in (("facebook", "11", "22"),
+                                       ("instagram", "33", "44")):
+            t = task("like", platform, actor, owner)
+            stamp_key = "created_time" if platform == "facebook" else "timestamp"
+            owner_key = "from" if platform == "facebook" else "owner"
+            base = {"id": "123", owner_key: {"id": owner}}
+            if platform == "instagram":
+                base["media_type"] = "VIDEO"
+            for age, accepted in ((timedelta(hours=23), True),
+                                  (timedelta(hours=24), True),
+                                  (timedelta(hours=24, seconds=1), False),
+                                  (-timedelta(seconds=1), False)):
+                payload = dict(base, **{stamp_key: (NOW - age).isoformat()})
+                with self.subTest(platform=platform, age=str(age)), \
+                     patch.object(m, "graph", return_value=payload) as graph:
+                    if accepted:
+                        m.verified_media(t, actors(), recent_now=NOW)
+                    else:
+                        with self.assertRaisesRegex(ValueError, "outside_recent_24h_window"):
+                            m.verified_media(t, actors(), recent_now=NOW)
+                    self.assertIn(stamp_key, graph.call_args.args[3]["fields"])
+            with patch.object(m, "graph", return_value=base):
+                with self.assertRaisesRegex(ValueError, "invalid timestamp"):
+                    m.verified_media(t, actors(), recent_now=NOW)
+
+    def test_account_batch_fails_closed_for_post_older_than_24h(self):
+        aa = actors()
+        post = {"platform": "instagram", "post_id": "123", "owner": "33"}
+        ledger = {"schema": 1, "actions": {}}
+        body = {"id": "123", "owner": {"id": "33"}, "media_type": "VIDEO",
+                "timestamp": (NOW - timedelta(hours=25)).isoformat()}
+        with patch.object(m, "graph", return_value=body), \
+             patch.object(m, "perform") as writer:
+            planned, report = m.build_account_batch([post], aa, ledger,
+                                                    "200", "100", now=NOW)
+        writer.assert_not_called()
+        self.assertEqual(planned, [])
+        self.assertEqual(ledger["actions"], {})
+        self.assertIn("source_preflight_failed", {r["status"] for r in report})
+
+    def test_account_batch_skips_invalid_source_and_does_not_write_in_plan(self):
+        aa = actors()
+        aa[("instagram", "55")] = dict(platform="instagram", id="55",
+            name="ToonZone", grants=set(GRANTS), token="token", owner_page="55")
+        posts = [dict(platform="instagram", post_id="101", owner="55"),
+                 dict(platform="instagram", post_id="102", owner="55")]
+        ledger = {"schema": 1, "actions": {}}
+        def verify(t, _, *, recent_now=None):
+            self.assertEqual(recent_now, NOW)
+            if t["post_id"] == "101":
+                raise ValueError("source_owner_mismatch")
+        with patch.object(m, "verified_media", side_effect=verify), \
+             patch.object(m, "perform") as writer, \
+             patch.dict(m.os.environ, {"META_CROSS_REPOST_ENABLED": "false"}):
+            planned, report = m.build_account_batch(posts, aa, ledger, "200", "100", now=NOW)
+            writer.assert_not_called()
+        self.assertEqual(len(planned), 3)
+        self.assertEqual({t["post_id"] for t in planned}, {"102"})
+        self.assertIn("source_preflight_failed", {x["status"] for x in report})
+
 
 
 if __name__ == "__main__":

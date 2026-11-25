@@ -114,7 +114,50 @@ def restore_backup(source, destination):
         out.write(raw)
 
 
-def verify_publications(state, run_id, read_history):
+def exact_provider_video_verified(payload, *, page, platform, post_id, caption, now=None):
+    """A provider video node proves original publication only with full identity.
+
+    A matching caption or API success alone is insufficient. No write path.
+    """
+    if (not isinstance(payload, dict) or not str(post_id).isdecimal()
+            or str(payload.get('id') or '') != str(post_id)
+            or not isinstance(caption, str) or not caption.strip()):
+        return False
+    now = now or datetime.now(timezone.utc)
+    date_value = payload.get('created_time') if platform == 'facebook' else payload.get('timestamp')
+    try:
+        when = datetime.fromisoformat(str(date_value).replace('Z', '+00:00'))
+        if when.tzinfo is None:
+            return False
+        age = (now - when.astimezone(timezone.utc)).total_seconds()
+        if not -600 <= age <= 172800:
+            return False
+    except (ValueError, TypeError, AttributeError):
+        return False
+    if platform == 'facebook':
+        origin = payload.get('from')
+        length = payload.get('length')
+        if (not isinstance(origin, dict)
+                or str(origin.get('id') or '') != str(page.get('page_id') or '')
+                or payload.get('description') != caption
+                or isinstance(length, bool)
+                or not isinstance(length, (int, float, str))):
+            return False
+        try:
+            return 0 < float(length) < 10800
+        except (ValueError, TypeError):
+            return False
+    if platform == 'instagram':
+        origin = payload.get('owner')
+        if not isinstance(origin, dict):
+            return False
+        return (str(origin.get('id') or '') == str(page.get('instagram_id') or '')
+                and payload.get('caption') == caption
+                and payload.get('media_type') == 'VIDEO')
+    return False
+
+
+def verify_publications(state, run_id, read_history, read_exact=None):
     """Check exact post IDs in the expected account's video history, GET only.
 
     Missing from a bounded history means unverified, never absent/deleted or
@@ -145,12 +188,21 @@ def verify_publications(state, run_id, read_history):
                 status, reason = 'verified', 'expected_account_video_history'
             else:
                 reason = 'not_observed_in_history_no_repost'
+            # Only a confirmed original post ID, exact Page owner, original
+            # caption, video type and recent timestamp may bridge a moving
+            # or lagging /videos feed. Any API rejection remains HELD.
+            if status != 'verified' and read_exact is not None:
+                try:
+                    if read_exact(route, platform, post_id, row) is True:
+                        status, reason = 'verified', 'exact_provider_video_id_owner_caption'
+                except Exception:
+                    pass
         result.append(dict(key=key, post_id=post_id, status=status, reason=reason))
     return result
 
 
-def verify_publications_with_retry(state, run_id, read_history, *, sleep=time.sleep):
-    results = verify_publications(state, run_id, read_history)
+def verify_publications_with_retry(state, run_id, read_history, *, read_exact=None, sleep=time.sleep):
+    results = verify_publications(state, run_id, read_history, read_exact=read_exact)
     retryable = {'history_unavailable', 'not_observed_in_history_no_repost'}
     for delay in (5, 15):
         pending = {row['key']: state['entries'][row['key']] for row in results
@@ -159,7 +211,7 @@ def verify_publications_with_retry(state, run_id, read_history, *, sleep=time.sl
             break
         sleep(delay)
         updated = {row['key']: row for row in verify_publications(
-            {**state, 'entries': pending}, run_id, read_history
+            {**state, 'entries': pending}, run_id, read_history, read_exact=read_exact
         )}
         results = [updated.get(row['key'], row) for row in results]
     return results
@@ -330,8 +382,36 @@ def main():
             if pages is None:
                 pages = {p['page_name']: p for p in load_meta_auth()['pages']}
             return graph_rows(pages[ROUTES[route][1]], platform)
+        def exact_receipt(route, platform, post_id, row):
+            # Read-only direct Graph GET for a provider-acknowledged ID. The
+            # token belongs to the original Page, never another actor.
+            import requests
+            from cloud_omnichannel_publisher import GRAPH_API_VERSION
+            from publisher_recovery import read_with_retry
+            nonlocal pages
+            if pages is None:
+                pages = {p['page_name']: p for p in load_meta_auth()['pages']}
+            page = pages[ROUTES[route][1]]
+            fields = ('id,description,from,length,created_time'
+                      if platform == 'facebook'
+                      else 'id,caption,owner,media_type,timestamp')
+            response = read_with_retry(
+                requests.get,
+                f"https://graph.facebook.com/{GRAPH_API_VERSION}/{post_id}",
+                headers={"Authorization": "Bearer " + page['page_token']},
+                params={"fields": fields}, timeout=20,
+                allow_redirects=False, graph_read=True)
+            try:
+                payload = response.json()
+            finally:
+                response.close()
+            if response.status_code != 200 or not isinstance(payload, dict) or payload.get('error'):
+                return False
+            return exact_provider_video_verified(
+                payload, page=page, platform=platform, post_id=post_id,
+                caption=row.get('publish_caption'))
         report['verification'] = verify_publications_with_retry(
-            state, os.environ['GITHUB_RUN_ID'], history
+            state, os.environ['GITHUB_RUN_ID'], history, read_exact=exact_receipt
         )
         def container_phase(route, container_id):
             import requests

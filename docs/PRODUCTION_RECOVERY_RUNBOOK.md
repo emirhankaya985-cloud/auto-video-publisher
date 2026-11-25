@@ -784,3 +784,102 @@ Run 42103999147: full exact Drive cover plus compact profile created 13739862-by
 - **Buna rağmen güncel canlı durum:** [42525957157](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/42525957157) gerçek Meta GET denetiminde bu 20 eski media ID'nin **hiçbiri** canlı 31 Reel listesinde görünmüyor. Her birinde `HTTP 400 Graph 100/33` (ayrıca `owner` olmadan iki alan varyantıyla); bilinen güncel video için kontrol GET `200`. Bu yanıt tek başına gönderilerin silinmesini, gizlenmesini veya izin kaybını ayırt edemez.
 - **Ayrım:** `historical_publish_receipts_matching_ledger = 20` **geçmiş resmî yayın kabulü**, `current_live_verified_by_historical_receipts = 0` **bugünkü canlı erişim kanıtı yok** demektir. `held_live_history_mismatch`, `safe_to_reserve=false` ve `publish=skipped` **aynen korunur**. Eski `done` kayıtları silinmez/sıfırlanmaz, Meta'ya kör tekrar POST atılmaz.
 - **Sonraki teknik çözüm eşiği:** Kullanıcının Reel bağlantılarını kendi Instagram hesabında açarak etkin olduklarını teyit etmesi ya da Meta'nın resmî `/{ig-user-id}/media` / ID GET görünürlüğünün geri gelmesi; o zamana kadar `20/20 aktif` iddiası yapılmaz.
+
+## 18 Kasım 2026 — Facebook görüntülenme sayacında gerçek dışı sıfırlar
+
+- **Kanıt:** [17 Kasım günlük rapor koşumu](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/44182163233) içinde 75–205 videolu dört Facebook hesabı için toplam 0–4 `views` görüldü. Aynı koşumda Film ikinci Facebook sayfası 44 milyondan fazla görüntülenme verdi. Bu fark tek başına gerçek erişim düşüşünün kanıtı değildir; kullanılan Graph `views` alanının bazı sayfalarda uygun sayacı vermediği olasıdır.
+- **Güvenli aksiyon:** Çok sayıda videoda neredeyse tüm sayaçlar sıfırsa koleksiyon istatistiği `N/A` olur ve hata nedeni rapora girer. Yanlış toplam, düşüş veya sahte yüzde üretilmez; yayın ve tekrar gönderim akışı etkilenmez. API kapsamı ve doğru Reel metriği ayrıca doğrulanmalıdır.
+- **Test:** `test_views_comparison.py` içindeki büyük sıfır kütüphanesi ve küçük yeni kütüphane senaryoları. [Düzeltme PR #294](https://github.com/emirhankaya985-cloud/auto-video-publisher/pull/294). CI ve sonraki planlı raporda sonuç ayrıca kontrol edilecek; üretim kabulü henüz verilmedi.
+
+## 18 Kasım 2026 — sıfır beğeni ve sıfır gönderinin sessiz başarı görünmesi
+
+- **Kanıt:** [Meta beğeni koşumu](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/44371349559) 15 kaynak gönderi inceledi, 0 uygun beğeni planladı ve eski alındı kodu `no_accepted_likes_no_message` döndürdü. [Daily Laugh yayın koşumu](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/44363584664) başarılı job sonucuna rağmen 0 yeni gönderi ve `no_eligible_content=1` verdi. Bu iki yeşil iş gerçek etkileşim veya yayın kanıtı değildir.
+- **Düzeltme:** [PR #295](https://github.com/emirhankaya985-cloud/auto-video-publisher/pull/295) beğeni yapılmadığında hiç deneme yapılmaması ile planlanan işlemin doğrulanmamasını ayrı Telegram metniyle bildirir; aynı kategoriyi İstanbul gününde en çok bir kez uyarır. Yayın olay kaydı uygun içerik yokluğu, kalite karantinası, görsel kopya ve önceki belirsiz gönderimi ayrı sayar. Gecikmiş izlenme raporu takvim günü büyümesini N/A tutarken yalnız doğrulanmış 18–30 saatlik ölçüm arası farkı ayrı gösterir.
+- **Doğrulama:** 238 ilgili test ve 70 alt test yerelde geçti; PR başındaki ilgili CI işleri başarılıydı. Kodun ana dala alınması gerçek Telegram mesajının telefona ulaştığını veya yeni gönderi üretildiğini kanıtlamaz. Sonraki planlı run'da Telegram sunucu ACK'si, yeni gönderi ID'si ve olay artefaktı ayrı kontrol edilmelidir.
+
+
+## 20 Kasım 2026 — Yayınsız başarı ve sessiz hesap kuyrukları
+
+- Kanıt: normal run44719770883 Penguen sıfır yeni yayınla yeşil; run44715995744 Tarladaki sıfır; run44715291297 Film sıfır. Gönle aynı çalışmada iki doğrulanmış yeni gönderi üretti; hesaplar ayrı değerlendirilir.
+- Penguen404.mp4 iki platformda da yerel görsel-kopya engeliyle, external_post_attempted=false olarak tutuluyordu. Facebook açıklama çakışması karantina kontrolünden önce kuyruğu kesiyordu. Arşivde851 MP4 ve601 Penguen ham aday vardır; kaynak tükenmesi sonucu çıkarılmaz. Kesin yerel karantina önce değerlendirilir; bilinmeyen POST, kaynak/hash ve kalite korumaları korunur.
+- no_eligible_content olayının pre_upload_only etiketi Telegram eylem filtresinden çıkarılmasına neden oluyordu; önceki belirsiz intent ayrıca günlük kuyruk açığını bastırıyordu. Kullanıcının20Kasım açık arıza bildirimi talebiyle bu bastırmalar kaldırıldı. Hesap/gün uyarısı, hesaba özel ACK arşivi ve gerçek incident makbuzu denetimi eklendi. Audit ve NOT DUE sıfırları arıza sayılmaz; zamanında yayın engeli yeni gönderisizse sonuç başarısız olur. Bildirim başarısızlığı medyayı yeniden yüklemez.
+- Film Part17 için mevcut kesin kaynak/hash/EXPIRED/live-history/tek-deneme kurtarma kapısı normal yolda açıldı. Yalnız kapı kanıtı geçerse hazırlanır; eski intent sıfırlanmaz. ToonZone eski31 Instagram ID erişim engeli giderilmiş sayılmaz; güncel GET-only denetimi yeniden çalışır, kör tekrar yok.
+- YouTube OAuth kurucusu yükleme iznine ek kanal kimliği için gereken readonly iznini ister. Mevcut geçersiz refresh grant yeniden kullanıcı onayı gerektirir; secret veya upload geçmişi değiştirilmez. Threads401 artık sağlıklı hesap yayınlarını koruduktan sonra başarısız sonuç ve hesap-durum arşivi bırakır.
+- Test: ilgili birim/regresyonlar ve migration suite; güncel CI sonuçları PR üzerinde ayrıca doğrulanır. Kod değişikliği canlı yayın kabulü değildir; sonraki normal schedule postID/uzak geçmiş ve bildirim ACK kanıtı gerekir. Geri alma kod commitini geri almaktır, yayın/intent arşivlerini silmek değildir.
+
+- Canlı yeniden denetim (20 Kasım14:07TRT): Film44724859643/job136249659379 eski konteynerEXPIRED ve0caption adayı doğruladı; yeni POST0. ToonZone44724859608/job136249737701 S01E04–12 Instagram5/36,31belirsiz; ikinci token dahil38doğrudan GET reddi sürdü. YouTube44724859598/job136249793951 dört kanalın tamamında oauth_refresh_rejected; yükleme0. Bunlar kodla çözülmüş sayılmaz.
+- Aynı gün eski queue_alert_days işaretinin yeni bildirim filtresini atlamaması için her due boşluk ayrı olay kaydına yazılır; mesaj tekilleştirmesi yalnız kalıcı hesap/gün bildirim katmanında kalır. Böylece bugünün eski, hiç gönderilmemiş uyarısı ertesi güne ertelenmez.
+
+
+## 20 Kasım 2026 — Kullanıcının Meta önceliği ve10dakika arıza uyarısı
+
+- Kullanıcı YouTube yetkilerini kendisi üstlendi; Facebook/Instagram yayınları önceliklidir. Kalıcı Meta arızalarında Telegram ve ntfy uyarısı10dakika kontrol aralığında tekrarlanır; günlük ACK bastırması bu açık repeat modunda uygulanmaz. Sağlıklı koşum sessizdir. GitHub cron gecikebilir; kesin dakika garantisi yoktur.
+- Son hesap makbuzları26saat penceresinde denetlenir, YouTube aşamalarının sonucu Meta alarmına karıştırılmaz. API/ölçüm belirsizliği başarı sayılmaz. Bildirim kanallarının gerçek ACK değeri doğrulanır.
+- Kullanıcının acil çalıştırma talebi için yalnız20Kasım ilk denemede yeni eklenen docs/owner-authorized-meta-repair-2026-11-20.md ve ops: authorized-once-meta-repair-2026-11-20 ana dal commit başlığı tek kontrollü due-slot çalıştırmasına izin verir. Mevcut kaynak, kalite, sıra, hash, kimlik ve bilinmeyen POST kilitleri aynıdır;7Meta hesap işçisi bağımsızdır. Marker yeniden çalıştırılamaz; sonraki tarihte audit olur. Sezon2gibi önceki özel kapsam kapıları açılmaz.
+
+## 21 Kasım 2026 — salt-okunur etkileşim teşhisinde yayıncı makbuzu yarışı
+
+- **Kanıt:** [44852333901](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/44852333901) içindeki altı hesap teşhis işi `source_result_artifact_missing` ile durdu. Daha sonraki [44886794712](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/44886794712) altı hesabı da başarıyla denetledi; Penguen için kaynak gönderi/plan sayısı sıfırdı. Bu, önceki anda erişilebilir yeni publisher sonucu bulunmadığını gösterir; hesapların tamamının bozuk olduğunu göstermez.
+- **Güvenli aksiyon:** Yalnız `.github/workflows/meta_engagement_isolated.yml` salt-okunur `dry_run` teşhisinde `source result unavailable` veya `no recent completed publisher run` durumunu `source_not_ready` diye arşivle ve sıfır yazımla tamamla. Meta erişim/izin hataları, bozuk kimlik, eski kaynak ve canlı etkileşim workflow'u fail-closed kalır. Niyet veya yayın makbuzu yokken etkileşim POST'u oluşturulmaz.
+- **Test:** `test_meta_cross_engagement.py` yalnız bu iki tam kaynak-yokluğu nedenini teşhis no-op'u için kabul etmeli; diğer kaynak ve izin hatalarını reddetmeli; arşivde `source_not_ready`, `writes_retried=false`, `engagement_posts_sent=0` korunmalı. PR/CI ve normal sonraki teşhis koşumu ayrıca doğrulanır; canlı doğrulama henüz yoktur.
+
+
+## 21 Kasım 2026 — Penguen kaynak videosu kalite kapısında bekledi
+
+- **Kanıt:** [44916271942](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/44916271942) Penguen Facebook ve Instagram yükleme adımlarını yerel kalite kontrolünde durdurdu; yeni post oluşmadı. Mevcut `quality` artifact'i yalnız genel `quality_check_failed` veriyor, başarısız ölçütü göstermiyordu.
+- **Güvenli aksiyon:** Kalite eşiğini ve durdurma kararını koru; artifact'e yalnız sabit allow-list'teki ölçüt kodunu ekle. Beklenmeyen exception metni, dosya yolu veya ffmpeg logu kaydedilmez. Ölçüt düzeltme ve uygun kaynak yeniden denetlenene kadar upload yok.
+- **Test:** Mock kalite hatasında sabit kod saklanmalı; bilinmeyen exception metni/path yalnız genel `quality_check_failed` olarak kalmalı. Bu tanı iyileştirmesi hiçbir kalite engelini geçersiz kılmaz; normal schedule'da ayrı canlı doğrulama gerekir.
+
+## 21 Kasım 2026 — publisher watchdog'u matrix sonucunu hesap bazında sınıflandırmalı
+
+- **Kanıt:** [44924603765](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/44924603765) watchdog'u iki kırmızı publisher matrix koşumunu doğrudan `consecutive_failures` diye duyurdu. Aynı çalıştırmalarda Tarladaki ve Gönle gibi kardeş hesaplar başarılıydı; kırmızı sonuç Penguen kaynak kalite engeli ve Film/Film Second içerik beklemelerinden geldi.
+- **Güvenli aksiyon:** Scheduler workflow'larının kırmızı/yeşil toplam sonucunu değil, mevcut hesap başına incident receipt'lerini esas al. Receipt'lerde engelli route varsa `blocked_routes` ile sınırlı alarm üret; tüm receipt'ler sağlıklıysa sibling başarısız job'larıyla genel Meta kesintisi uydurma; receipt okunamıyorsa `unknown` olarak bırak.
+- **Test:** Matrix run'lar fail iken sağlıklı receipt'ler `healthy`; bir Penguen receipt engelliyse yalnız `penguen` listelensin; receipt yoksa durum `unknown` kalmalı. Hiçbir publisher veya API yazımı yapılmaz.
+
+## 21 Kasım 2026 — watchdog engellerini platform bazında raporlama
+
+- **Kanıt:** Post-merge watchdog [44941176392](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/44941176392) gerçek `publication_blocked` durumunu ve beş engelli route'u buldu; dört yeni post makbuzu vardı. JSON, route'ları listelese de mevcut incidents/error events içindeki Facebook/Instagram kanıtını alarma taşımıyordu. Bu, yanlış sağlık sonucu değil, platform ayrıntısı eksikliğiydi.
+- **Güvenli aksiyon:** Yalnız izinli `facebook`/`instagram` etiketlerini o route'un doğrulanmış incident/error event kayıtlarından ekle; kanıt yoksa `unknown` göster. YouTube/Threads hatalarını Meta sonucu gibi sınıflandırma. `healthy` eşiğini değiştirme.
+- **Test:** Makbuzdaki aynı route'un iki izinli platformunu listele; diğer route'u ve desteklenmeyen platform adını dışla; platform kanıtı eksikse `unknown`. Bu raporlama değişikliği paylaşım, secret veya DB yazımı yapmaz.
+
+## 21 Kasım 2026 — hesap genelindeki kuyruk engeli platform atfetmemeli
+
+- **Kanıt:** Post-merge watchdog [44943156727](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/44943156727) platform detayını ekledi. Güncel makbuzdaki `no_eligible_content` route/account kapsamındaydı; bu nedenle platformlara özgü bir hata olarak yorumlanamaz.
+- **Güvenli aksiyon:** Platform bazlı ve hesap-genel nedenleri birlikte göster. Hesap-genel blocker varsa `unknown` platform etiketini koru; bilinen Facebook/Instagram olaylarını da ayrıca listele. Sağlık eşiği ve alarm durumu değişmez.
+- **Test:** Route'a ait platform incident'leri yanında account-level blocker geldiğinde bilinmeyen kapsam da gösterilmeli. Yeni kod sosyal yazım veya durum sıfırlama yapmaz.
+
+## 22 Kasım 2026 — gecikmiş günlük rapor başarıyla oluştuğu halde nöbetçi kırmızı kaldı
+
+- **Kanıt:** Günlük rapor koşumu [44968258566](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/44968258566) 00:46Z'de tamamlandı ve `account-views-comparison` artifact'ında `day=2026-11-21`, `timezone=Europe/Istanbul` vardı. Nöbetçi [45022546038](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/45022546038) yalnız koşum zamanını 20:54–22:59Z aralığında aradığı için `missing_or_failed` dedi; bildirim kullanıcı tarafından sessize alınmıştı.
+- **Neden:** GitHub schedule 20:59Z zamanlamasından 3 saat 47 dakika sonra başladı; nöbetçi rapor artifact'ındaki hedef günü doğrulamıyordu.
+- **Güvenli aksiyon:** Zaman aralığından geç başlayan tamamlanmış schedule koşumunu ancak aynı run'ın doğrulanmış rapor artifact'ı beklenen Istanbul gününü gösterirse sağlıklı say. Artifact yok/bozuksa veya günü farklıysa kırmızı kal; artifact API okunamıyorsa `audit_unavailable` olarak bildir. Bildirim gönderme davranışını ve rapor workflow'unu değiştirme.
+- **Test:** Gecikmiş doğru gün artifact'ı sağlıklı; yanlış gün, eksik artifact ve artifact API hatası sağlıksız/unknown kalmalı. Yalnızca fixture kullanılır; canlı bildirim veya rapor koşumu tetiklenmez.
+- **Canlı doğrulama:** PR ve CI yeterli değildir. Sonraki sabah nöbetçisi `verified_report_run_id` ve `report_day` kaydını üretmeli; bunun için gerçek rapor veya alarm gönderilmez.
+
+## 22 Kasım 2026 — seri tarihçe kilidi ve Penguen sessiz MP4
+
+- **Kanıt:** ToonZone yayın koşumu [45047259326](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/45047259326) S01E04 Part1 Instagram arşiv post ID'sini güncel geçmişte bulamadı. GET-only envanter [45051399436](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/45051399436) Facebook'ta 50/50, Instagram'da 8/50 arşiv ID'si gördü; görünmeyen Instagram ID'leri silinmiş kabul edilemez. Eski doğrudan denetim [44724859608](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/44724859608) HTTP 400 / Graph 100 / alt kod 33 ile reddedildi.
+- **Kod nedeni ve koruma:** ToonZone planlayıcısı bir platformun doğrulanmayan eski ID'sinde tüm route'u `break` ediyordu. Platforma özel engel uygulansın; Instagram kendi ilk doğrulanmamış seri parçasında beklesin, Facebook yalnız kendi canlı doğrulanmış sırasından ilerlesin. Hiçbir arşiv kaydı veya ID temizlenmez.
+- **Penguen kanıtı:** [45034949436](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/45034949436) 342.mp4'ü Meta POST'tan önce iki platformda da tuttu. Kaynak MP4 salt okunur indirildi ve FFprobe ile H.264 High, 360×640, 30 FPS, 16.466 saniye, ses akışı yok olarak doğrulandı; `media_quality.inspect_video` `silent_audio_samples` verdi. Video akışları tam decode oldu; ses uydurulmadı, kalite kapısı düşürülmedi.
+- **Güvenli aksiyon:** Aynı gün sonraki Penguen planı bu pre-upload kaydını atlayıp sıradaki adayı normal kalite, kaynak bütünlüğü, history ve görsel tekrar kapılarından geçirir. Tanı kodu yalnızca izinli sınıflardan state ve hata makbuzuna yazılır; hiçbiri yayın izni vermez.
+- **Test / canlı durumu:** Platform kapsamı, tanı kodu redaksiyonu ve gönderimsiz kalite reddi için yerel regresyonlar eklendi. Bu testler canlı yayın kanıtı değildir; ToonZone Facebook/Instagram ayrışması ve Penguen'in sonraki güvenli adayı ancak normal schedule ile gerçek post ID'leri üzerinden doğrulanabilir.
+
+## 22 Kasım 2026 — yalnız kesin zamanlı yayın makbuzlarını arşivleme
+
+- **Güvenli aktarım:** Yayıncı yalnız gerçek sayısal post ID'si ve UTC zaman damgası kaydedilmiş aynı run makbuzlarını Neon'a aktarır. Eski/uncertain kayıtlar için zaman uydurulmaz; sabit hata kodları dışında ham hata metni yazılmaz.
+- **Tekilleştirme:** Kaynak hesap eşleşmesi route ve platform bazındadır; aynı account/post ID çakışmasında önceki satır güncellenmez. Eşleşmeyen hesap yalnızca atlanır.
+- **Canlı durum:** Kod ve CI geçişi Neon yazımının veya yeni sosyal paylaşımın gerçekleştiğini kanıtlamaz. İlk normal schedule sonrası gerçek post ID'si, UTC zamanı ve Neon satırı ayrı doğrulanmalıdır.
+
+## 23 Kasım 2026 — Penguen sessiz 342.mp4 gün sınırından sonra yeniden seçildi
+
+- **Kanıt:** Güncel `main` publisher run [45171317800](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/45171317800) MP4'ü Facebook ve Instagram için Meta POST'tan önce `silent_audio_samples` nedeniyle tuttu. Kaynak Drive ID'si `14jz507WmoB-gAsSILcA6WT2LRJgHH1l0`, SHA-256 `c012a06a7207bb73895fbeba8493f8493534be07024227a13fe30499f62ea555`; state'te hata olmasına rağmen iki kayıt `ready` kaldı.
+- **Neden:** Yerel hazırlık hataları normalde aynı İstanbul yayın günü boyunca atlanıyor. Bu exact Drive ID/hash kalıcı doğrulanmış-kaynak listesinde olmadığından sonraki takvim gününde tekrar seçilebilirdi.
+- **Güvenli düzeltme:** Yalnız bu exact Penguen Drive ID, dosya adı, başarısız run ve hash'i günler arası karantinaya al. Değiştirilmiş baytlar veya yeni Drive ID karantinaya miras kalmaz; kalite, tarihçe ve tekrar denetimleri yine çalışır. Eski yayın geçmişi ve intent kayıtları korunur.
+- **Test / canlı durumu:** `test_unordered_local_preparation_hold` içindeki üç test yerelde geçti; exact kaynak sonraki gün atlanıyor, hash veya Drive ID değişirse karantina uygulanmıyor. Düzeltmenin sonraki planlı publisher run'ında 342'yi atlayıp güvenli sıradaki adayı seçtiği henüz canlı doğrulanmadı.
+
+## 24 Kasım 2026 — Tarladaki 560.mp4 kaynak inceleme beklemesi ve Daily Laugh kotası
+
+- **Kanıt:** Doğal publisher koşumu [45449684883](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/45449684883) Tarladaki 424.mp4 için Facebook ve Instagram gönderilerini doğruladı. Aynı iş daha sonra 560.mp4 yerel parmak izi aşamasında `video_fingerprint_invalid_frame` hatasıyla, herhangi bir Meta POST'tan önce durdu. Kaynak Drive ID `1Zl7Uf_TgRSU71iGS4xeWH67KYXTxFiuQ`, gözlenen SHA-256 `1b14cb6c20f9be569d1742589e9472fab04bc899aaf28fb1f43061034d751582`. Ayrı kalite denetimi üç örnek kare ve sesi geçti; bu nedenle dosyanın tamamının bozuk olduğu sonucu çıkarılmaz.
+- **Güvenli düzeltme:** Yalnız aynı Drive ID ve SHA-256 için günler arası kaynak inceleme beklemesi ekle. Aynı adla farklı Drive ID'si veya farklı baytlar bu beklemeyi devralmaz; yeni adaylar mevcut kalite, sıra ve duplicate kontrollerinden geçer. Yayın geçmişi ve intent kayıtları değişmez.
+- **Daily Laugh hedefi:** Kullanıcı başına günlük hedefi 5 olarak belirtti. Eski sekiz slot 09:00, 12:00, 15:00, 18:00, 21:00 New York yerel saatleriyle değiştirildi; GitHub cron, DST için gereken UTC saatlerinin birleşimini çalıştırır. Günlük hedef, rapor, kotalar ve sayaçlar 5 ile eşleştirildi. Kişi başı limit ve duplicate koruması korunur.
+- **Test / canlı durumu:** Kaynak kimliği/hash karantinası ile kotanın beşe indirilmesi için regresyon testleri eklendi; CI ve PR sonrası ana dal doğrulaması ayrıca gereklidir. Bu kod değişiklikleri kendi başına canlı yayın kanıtı değildir; sonraki doğal publisher koşumu ve gerçek makbuzlar ayrıca incelenmelidir.

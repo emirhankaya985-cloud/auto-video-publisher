@@ -68,6 +68,15 @@ def read_scoped_results(root):
     return results
 
 
+def write_empty_merge_report(path):
+    """Record missing receipts without overwriting the last combined state."""
+    path.write_text(
+        json.dumps({"schema": 1, "merged_accounts": [],
+                    "missing_accounts": list(SCOPES),
+                    "publication_verified": False}, indent=2),
+        encoding="utf-8")
+
+
 def main():
     from public_link_runtime import restore, save, STATE
 
@@ -77,7 +86,11 @@ def main():
         raise RuntimeError("Account-scoped job cannot aggregate other accounts")
     scoped = read_scoped_results(Path("link-runtime/account-artifacts"))
     if not scoped:
-        raise RuntimeError("No account artifacts to aggregate")
+        # A failed account job can stop before its scoped state is archived.
+        # Keep the last combined receipt and report missing evidence instead.
+        write_empty_merge_report(Path("link-runtime/merge-account-report.json"))
+        print("No account receipts were available; prior combined state preserved.")
+        return
     prior = restore()
     combined = merge_account_states(prior, scoped)
     save(STATE, combined)

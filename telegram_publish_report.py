@@ -15,6 +15,8 @@ from ntfy_notifications import send_ntfy
 from publisher_error_journal import read_errors, record_error
 import publisher_alert_history as alert_history
 from datetime import timedelta
+from zoneinfo import ZoneInfo
+from datetime import datetime, timezone
 
 STATE_PATH = Path("link-runtime/state.json")
 ALLOWED_STEP_RESULTS = {"success", "failure", "skipped", "cancelled", ""}
@@ -78,6 +80,34 @@ ROUTE_LABELS = {
 PLATFORM_LABELS = {"facebook": "Facebook", "instagram": "Instagram"}
 
 
+def stock_context_for_routes(routes, *, path=None, now=None):
+    """Explain a queue alert using a fresh candidate inventory, never a promise to publish."""
+    path = path or STATE_PATH.with_name("content-stock.json")
+    now = now or datetime.now(timezone.utc)
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        measured = datetime.fromisoformat(payload["measured_at"].replace("Z", "+00:00"))
+        if measured.tzinfo is None or not 0 <= (now - measured).total_seconds() <= 7200:
+            return []
+        accounts = payload["accounts"]
+        if not isinstance(accounts, list):
+            return []
+    except (OSError, ValueError, TypeError, KeyError):
+        return []
+    lines = []
+    for row in accounts:
+        if not isinstance(row, dict) or row.get("route") not in routes:
+            continue
+        route, platform = row.get("route"), row.get("platform")
+        remaining, held = row.get("remaining"), row.get("held")
+        if (platform not in PLATFORM_LABELS or type(remaining) is not int or remaining < 0
+                or type(held) is not int or held < 0):
+            continue
+        lines.append(f"• {ROUTE_LABELS.get(route, route)} / {PLATFORM_LABELS[platform]}: "
+                     f"{remaining} aday, {held} bekleyen. Adaylar hak, kalite ve platform kontrolünden geçmelidir.")
+    return lines[:8]
+
+
 def confirmed_posts(state, run_id):
     """Only actual post IDs created and recorded by this GitHub Actions run."""
     if not isinstance(state, dict) or not isinstance(state.get("entries"), dict):
@@ -120,9 +150,26 @@ def post_message(row, run_id):
 
 def _prepare_durable(messages, posts, events, state, run_id, *, telegram_on, ntfy_on, base_failures, category):
     now=alert_history.now_utc()
-    history=alert_history.restore()
+    scope = os.getenv("PUBLISH_ACCOUNT_SCOPE", "").strip()
+    if scope in ROUTE_LABELS:
+        history = alert_history.restore(names=(f"link-alert-intent-{scope}", f"link-alert-result-{scope}"))
+    else:
+        history = alert_history.restore()
     before=json.dumps(history,sort_keys=True)
     descriptors=alert_history.incident_descriptors(events)
+    # A persistent account outage remains actionable once per local day.
+    # Retry safety describes whether another POST is safe, not whether the
+    # operator needs to hear about a due slot that published nothing.
+    queue_routes = {ev.get("route") for ev in events
+                    if ev.get("reason") == "no_eligible_content" and ev.get("route") in ROUTE_LABELS}
+    if queue_routes:
+        local_day = now.astimezone(ZoneInfo("Europe/Istanbul")).date().isoformat()
+        descriptors = alert_history.incident_descriptors(
+            [event for event in events if event.get("reason") != "no_eligible_content"])
+        descriptors.update({alert_history.identity("incident", route, extra="queue:" + local_day):
+                            {"kind": "incident", "route": route, "platform": "unknown", "video": "",
+                             "family": "publication_deficit", "local_day": local_day}
+                            for route in sorted(queue_routes)})
     if not descriptors:
         k=alert_history.identity("incident",extra="workflow")
         descriptors={k:{"kind":"incident","route":"workflow","platform":"unknown","video":"","family":"workflow"}}
@@ -249,41 +296,81 @@ def main():
         print('{"status":"no_posts_or_errors","messages_sent":0}', flush=True)
         return 0
 
-    messages = [post_message(row, run_id) for row in posts]
-    # An already-known held intent is not another failed API request. Keep
-    # its daily audit trail, but reserve urgent phone alerts for NEW failures.
-    known_holds_only = (bool(events) and category != "alert"
-        and all(row.get("stage") == "previous_intent_hold"
-                and row.get("reason") == "unreconciled_previous_intent"
-                for row in events))
-    # Owner preference: retain every incident in artifacts, but send success receipts only.
-    if (category == "alert" or events) and os.getenv("PUBLISH_QUIET_FAILURES") != "true":
-        # One actionable warning per run; every sanitized event stays intact
-        # in the error-journal and 90-day artifact, even if the alert is short.
-        details = []
-        for entry in events[:8]:
-            part = (f"• {entry.get('route') or '?'} / {entry.get('platform') or '?'}"
-                    f" / {entry.get('video') or '-'}"
-                    f" — {entry.get('stage')}: {entry.get('reason')}")
-            if "http_status" in entry:
-                part += f" (HTTP {entry['http_status']})"
-            if "graph_code" in entry:
-                part += f" [Graph {entry['graph_code']}]"
-            details.append(part)
-        if len(events) > 8:
-            details.append(f"• Diğer {len(events) - 8} olayın tamamı GitHub error journal'da.")
-        title = "ℹ️ Mevcut Instagram engelleri" if known_holds_only else "⚠️ Kısmi yayın sonucu" if posts else "🚨 Meta yayın uyarısı"
-        warning = (message if category == "alert" else
-                   (f"ℹ️ Daha önce bildirilen engeller devam ediyor; yeni Meta POST hatası yok.\nGitHub çalışma: {run_id}"
-                    if known_holds_only else
-                    f"🚨 Yayın iş akışında engel veya hata kaydedildi.\nGitHub çalışma: {run_id}"))
-        warning += ("\n🧩 Kaydedilen hata/engel: " + str(len(events)) +
-                    "\n" + "\n".join(details)) if events else ""
-        messages.append((title, warning))
+    alerts_only = os.getenv("PUBLISH_ALERTS_ONLY", "false").strip().lower() == "true"
+    if alerts_only:
+        # New production policy: only unresolved, actionable failures. Preserve
+        # ALL routine successes and transient failures in artifacts, not in
+        # phone notifications. One consolidated notification per run.
+        manual_reasons = {
+            "credentials_or_permissions", "meta_account_missing",
+            "unreconciled_previous_intent", "invalid_media_or_graph_request",
+            "unclassified_upload_result", "state_restore_failed",
+            "intent_validation_failed", "source_content_changed",
+            "existing_container_reconciliation_failed", "cover_missing",
+            "no_eligible_content", "notification_delivery_failed",
+            "media_preparation_failed", "source_or_cover_preparation_failed",
+            "visual_duplicate_review", "film_part8_source_visually_duplicate",
+        }
+        actionable = [ev for ev in events
+                      if ev.get("reason") in manual_reasons
+                      and (ev.get("retry_policy") != "pre_upload_only"
+                           or ev.get("reason") in {"no_eligible_content", "media_preparation_failed",
+                               "source_or_cover_preparation_failed", "visual_duplicate_review", "cover_missing"})]
+        messages = []
+        if actionable or (category == "alert" and not events):
+            grouped = Counter((ev.get("route") or "workflow",
+                               ev.get("platform") or "unknown",
+                               ev.get("reason") or "unverified") for ev in actionable)
+            details = [
+                f"• {route} / {platform}: {reason} ({count})"
+                for (route, platform, reason), count in sorted(grouped.items())
+            ]
+            body = (f"GitHub çalışma: {run_id}\n"
+                    + "\n".join(details[:16])
+                    + (f"\nDiğer {len(details) - 16} kayıt arşivde." if len(details) > 16 else "")
+                    + f"\nhttps://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/{run_id}")
+            queue_routes = {route for route, _platform, reason in grouped
+                            if reason == "no_eligible_content"}
+            stock_lines = stock_context_for_routes(queue_routes) if queue_routes else []
+            if stock_lines:
+                body += "\n📦 İçerik durumu (yalnız aday sayısı):\n" + "\n".join(stock_lines)
+            messages = [("🚨 Müdahale gerektiren Meta hataları", body)]
+    else:
+        messages = [post_message(row, run_id) for row in posts]
+        # An already-known held intent is not another failed API request. Keep
+        # its daily audit trail, but reserve urgent phone alerts for NEW failures.
+        known_holds_only = (bool(events) and category != "alert"
+            and all(row.get("stage") == "previous_intent_hold"
+                    and row.get("reason") == "unreconciled_previous_intent"
+                    for row in events))
+        # Owner preference: retain every incident in artifacts, but send success receipts only.
+        if (category == "alert" or events) and os.getenv("PUBLISH_QUIET_FAILURES") != "true":
+            # One actionable warning per run; every sanitized event stays intact
+            # in the error-journal and 90-day artifact, even if the alert is short.
+            details = []
+            for entry in events[:8]:
+                part = (f"• {entry.get('route') or '?'} / {entry.get('platform') or '?'}"
+                        f" / {entry.get('video') or '-'}"
+                        f" — {entry.get('stage')}: {entry.get('reason')}")
+                if "http_status" in entry:
+                    part += f" (HTTP {entry['http_status']})"
+                if "graph_code" in entry:
+                    part += f" [Graph {entry['graph_code']}]"
+                details.append(part)
+            if len(events) > 8:
+                details.append(f"• Diğer {len(events) - 8} olayın tamamı GitHub error journal'da.")
+            title = "ℹ️ Mevcut Instagram engelleri" if known_holds_only else "⚠️ Kısmi yayın sonucu" if posts else "🚨 Meta yayın uyarısı"
+            warning = (message if category == "alert" else
+                       (f"ℹ️ Daha önce bildirilen engeller devam ediyor; yeni Meta POST hatası yok.\nGitHub çalışma: {run_id}"
+                        if known_holds_only else
+                        f"🚨 Yayın iş akışında engel veya hata kaydedildi.\nGitHub çalışma: {run_id}"))
+            warning += ("\n🧩 Kaydedilen hata/engel: " + str(len(events)) +
+                        "\n" + "\n".join(details)) if events else ""
+            messages.append((title, warning))
     run_url = f"https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/{run_id}"
     acknowledged = {"telegram": 0, "ntfy": 0}
     failures = 0
-    if require_both and (messages or os.getenv("PUBLISH_QUIET_FAILURES") != "true"):
+    if require_both and messages:
         # Publishing remains committed; missing phone channels are separately
         # recorded as a DELIVERY failure, never a reason to repeat Meta POST.
         missing = []
@@ -298,12 +385,18 @@ def main():
             record_error("ntfy_notification", "notification_delivery_failed",
                          error=RuntimeError("ntfy configuration missing"))
         if missing and (telegram_on or ntfy_on) and os.getenv("PUBLISH_QUIET_FAILURES") != "true":
-            messages.append(("🚨 Bildirim kanalı eksik",
-                             "Gönderi yeniden yayımlanmayacak. Eksik kanal: "
-                             + ", ".join(missing)
-                             + "\n🔎 " + run_url))
+            if alerts_only:
+                # Append configuration failures to the SAME per-account incident
+                # notification. Never create another phone message per platform.
+                title, body = messages[0]
+                messages[0] = (title, body + "\nEksik bildirim kanalı: " + ", ".join(missing))
+            else:
+                messages.append(("🚨 Bildirim kanalı eksik",
+                                 "Gönderi yeniden yayımlanmayacak. Eksik kanal: "
+                                 + ", ".join(missing)
+                                 + "\n🔎 " + run_url))
     if os.getenv("PUBLISH_ALERT_MODE")=="prepare":
-        return _prepare_durable(messages,posts,events,state,run_id,telegram_on=telegram_on,
+        return _prepare_durable(messages, [] if alerts_only else posts, events, state, run_id, telegram_on=telegram_on,
             ntfy_on=ntfy_on,base_failures=failures,category=category)
     for title, body in messages:
         if telegram_on:

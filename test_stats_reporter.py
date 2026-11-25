@@ -1,4 +1,5 @@
 import os
+import unittest
 from unittest.mock import Mock, patch
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -10,6 +11,13 @@ from stats_reporter import (
     ACCOUNT_TARGETS, YOUTUBE_TARGETS, _daily_delta_text, _platform_totals,
     notify, publication_progress, safe_error, youtube_video_snapshot,
 )
+
+def report_with_collection_error():
+    from views_comparison import ViewReport
+    return ViewReport("report", {
+        "accounts": [],
+        "collection_errors": ["Test / Instagram: HTTP 403"],
+    })
 
 
 def test_youtube_scope_error_is_short_and_actionable():
@@ -27,10 +35,10 @@ def test_ntfy_success_is_checked():
     with patch.dict(os.environ, {"NTFY_TOPIC": "private-topic"}, clear=True), patch(
         "ntfy_notifications.requests.post", return_value=response
     ) as post:
-        notify("report")
+        notify(report_with_collection_error())
     response.raise_for_status.assert_called_once_with()
     response.json.assert_called_once_with()
-    assert post.call_args.kwargs["json"]["title"] == "🌙 Günlük Sosyal Medya Raporu"
+    assert post.call_args.kwargs["json"]["title"] == "⚠️ Sosyal medya raporunda hata"
 
 
 def test_ntfy_topic_url_posts_json_to_root_with_explicit_topic():
@@ -42,7 +50,7 @@ def test_ntfy_topic_url_posts_json_to_root_with_explicit_topic():
     with patch.dict(os.environ, {"NTFY_TOPIC_URL": "https://ntfy.sh/private-topic"}, clear=True), patch(
         "ntfy_notifications.requests.post", return_value=response
     ) as post:
-        notify("report")
+        notify(report_with_collection_error())
     assert post.call_args.args[0] == "https://ntfy.sh/"
     assert post.call_args.kwargs["json"]["topic"] == "private-topic"
     assert post.call_args.kwargs["allow_redirects"] is False
@@ -54,7 +62,7 @@ def test_ntfy_transport_error_never_echoes_secret_topic_url():
         "ntfy_notifications.requests.post", side_effect=requests.ConnectionError(secret_url)
     ):
         try:
-            notify("report")
+            notify(report_with_collection_error())
         except RuntimeError as exc:
             assert secret_url not in str(exc)
             assert "ConnectionError" in str(exc)
@@ -72,7 +80,7 @@ def test_ntfy_http_200_with_wrong_server_topic_is_failure():
         "ntfy_notifications.requests.post", return_value=response
     ) as post:
         try:
-            notify("report")
+            notify(report_with_collection_error())
         except RuntimeError as exc:
             assert "secret-topic" not in str(exc)
             assert "different-topic" not in str(exc)
@@ -99,7 +107,7 @@ def test_first_snapshot_is_labeled_na_but_failed_metric_is_unavailable():
 
 
 def test_daily_targets_and_film_fanout_match_requested_scope():
-    assert [ACCOUNT_TARGETS[name][0] for name in ACCOUNT_TARGETS] == [5, 5, 5, 8, 5, 4]
+    assert [ACCOUNT_TARGETS[name][0] for name in ACCOUNT_TARGETS] == [5, 5, 5, 5, 5, 4]
     assert ACCOUNT_TARGETS["🎬 Film Mağarası + Filmmagrasi"][3] == ("fb_film_1", "fb_film_2", "ig")
     assert any(account == "❤️ Gönle Düşen" for account, *_rest in YOUTUBE_TARGETS)
 
@@ -175,20 +183,30 @@ def test_history_download_failure_never_overwrites_existing_drive_archive():
     assert "🗄️ Geçmiş: ⚠️ Drive arşivi kaydedilemedi" in report
 
 
-def test_notify_compacts_large_report_before_delivery():
+def test_notify_sends_only_aggregated_collection_errors():
     import stats_reporter
-    from test_ntfy_phone_report import ACCOUNTS, PhoneReportTests
-    report = PhoneReportTests().make_long_report()
-    assert len(report.encode("utf-8")) > 4096
+    from views_comparison import ViewReport
+    comparison = {
+        "accounts": [
+            {"account": "Penguen", "platforms": [
+                {"platform": "Facebook", "total": 10},
+                {"platform": "YouTube", "total": None},
+            ]},
+        ],
+        "collection_errors": ["Penguen / YouTube: HTTP 403"],
+    }
+    report = ViewReport("normal stats", comparison)
     with patch("stats_reporter.send_ntfy", return_value={
         "http_status": 200, "server_ack": True,
     }) as send:
         stats_reporter.notify(report)
+    assert send.call_count == 1
     body = send.call_args.args[1]
     assert send.call_args.kwargs["require_ack"] is True
-    assert len(body.encode("utf-8")) <= 3800
-    for name in ACCOUNTS:
-        assert name.upper() in body
+    assert "Penguen — YouTube" in body
+    assert "HTTP 403" in body
+    assert "Facebook" not in body
+
 
 
 
@@ -515,3 +533,179 @@ def test_threads_unsupported_batch_metric_falls_back_without_losing_supported_co
         data = threads_video_snapshot("film", on_followers=Mock())
     assert data["1234567890"]["engagement"] == {"likes": 2, "replies": 2, "reposts": 2, "quotes": 2, "shares": None}
     assert get.call_count == 8
+
+
+
+def test_facebook_view_snapshot_rejects_invalid_or_duplicate_records():
+    from stats_reporter import facebook_video_snapshot
+
+    page = {"page_id": "page", "page_token": "token"}
+    with patch("stats_reporter.graph_pages", return_value=iter([
+        {"id": "v1", "views": "12", "created_time": "2026-11-13T10:00:00+03:00"}
+    ])):
+        assert facebook_video_snapshot(page)["v1"]["views"] == 12
+
+    for bad in (-1, True, 1.5, "bad", None):
+        with patch("stats_reporter.graph_pages", return_value=iter([{"id": "v1", "views": bad}])):
+            try:
+                facebook_video_snapshot(page)
+            except RuntimeError:
+                pass
+            else:
+                raise AssertionError(f"invalid Facebook counter accepted: {bad!r}")
+
+    for rows in ([{"views": 1}], [{"id": "v1", "views": 1}, {"id": "v1", "views": 2}]):
+        with patch("stats_reporter.graph_pages", return_value=iter(rows)):
+            try:
+                facebook_video_snapshot(page)
+            except RuntimeError:
+                pass
+            else:
+                raise AssertionError("missing or duplicate Facebook video ID accepted")
+
+
+def test_instagram_view_snapshot_rejects_invalid_or_duplicate_records():
+    from stats_reporter import instagram_video_snapshot
+
+    page = {"instagram_id": "instagram", "page_token": "token"}
+    video = {"id": "v1", "media_type": "VIDEO", "timestamp": "2026-11-13T10:00:00+03:00"}
+    with patch("stats_reporter.graph_pages", return_value=iter([video])), patch(
+        "stats_reporter.graph_get", return_value={"data": [{"name": "views", "value": "19"}]}
+    ):
+        assert instagram_video_snapshot(page)["v1"]["views"] == 19
+
+    for bad in (-1, True, 1.5, "bad", None):
+        with patch("stats_reporter.graph_pages", return_value=iter([video])), patch(
+            "stats_reporter.graph_get", return_value={"data": [{"name": "views", "value": bad}]}
+        ):
+            try:
+                instagram_video_snapshot(page)
+            except RuntimeError:
+                pass
+            else:
+                raise AssertionError(f"invalid Instagram counter accepted: {bad!r}")
+
+    with patch("stats_reporter.graph_pages", return_value=iter([video, video])), patch(
+        "stats_reporter.graph_get", return_value={"data": [{"name": "views", "value": 19}]}
+    ):
+        try:
+            instagram_video_snapshot(page)
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("duplicate Instagram video ID accepted")
+
+
+class ArchivedLastGoodMetricsTests(unittest.TestCase):
+    def test_only_prior_successful_positive_or_zero_counts_are_stale_evidence(self):
+        import json
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from stats_reporter import _last_verified_account_metrics, _last_verified_text
+
+        def row(period, value, status, stamp, metric="lifetime_views"):
+            return {
+                "account": "Penguen", "platform": "Threads",
+                "entity_type": "account", "metric": metric,
+                "period": period, "value": value, "status": status,
+                "measured_at": stamp,
+            }
+
+        with TemporaryDirectory() as folder:
+            path = Path(folder) / "history.jsonl"
+            readings = [
+                row("2026-11-13", 80, "ok", "2026-11-13T21:00:00Z"),
+                row("2026-11-14", None, "error", "2026-11-14T21:00:00Z"),
+                row("2026-11-15", 0, "ok", "2026-11-15T21:00:00Z", "likes"),
+                row("2026-11-16", 1, "ok", "2026-11-16T08:00:00Z"),
+            ]
+            path.write_text("\n".join(json.dumps(item) for item in readings) +
+                            "\ninvalid-json\n", encoding="utf-8")
+            metrics = _last_verified_account_metrics(path, before_day="2026-11-16")
+        self.assertEqual(metrics[("Penguen", "Threads", "lifetime_views")][0], 80)
+        self.assertEqual(metrics[("Penguen", "Threads", "likes")][0], 0)
+        self.assertIn("14.11.2026", _last_verified_text(metrics, "Penguen", "Threads", "lifetime_views"))
+        self.assertIn("güncel değil", _last_verified_text(metrics, "Penguen", "Threads", "likes"))
+        self.assertIsNone(_last_verified_text(metrics, "Penguen", "Threads", "followers"))
+
+    def test_rejected_threads_401_is_actionable_without_exposing_token(self):
+        diagnostic = safe_error(RuntimeError("read_http_401_code_190"))
+        self.assertIn("HTTP 401", diagnostic)
+        self.assertIn("190", diagnostic)
+        self.assertIn("yeniden yetkilendirme", diagnostic)
+        self.assertNotIn("read_http_401_code_190", diagnostic)
+
+    def test_missing_archive_is_not_interpreted_as_zero(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from stats_reporter import _last_verified_account_metrics, _last_verified_text
+        with TemporaryDirectory() as folder:
+            metrics = _last_verified_account_metrics(Path(folder) / "not-there.jsonl")
+        self.assertEqual(metrics, {})
+        self.assertIsNone(_last_verified_text(metrics, "Penguen", "Threads", "lifetime_views"))
+
+    def test_partial_archived_meta_report_is_degraded_not_falsely_complete(self):
+        from stats_reporter import report_delivery_health
+        report = {
+            "meta_collection": {"status": "partial"},
+            "archive_saved": True,
+            "accounts": [{"platforms": [
+                {"platform": "Facebook", "total": 12},
+                {"platform": "Instagram", "total": None},
+                {"platform": "Threads", "total": None},
+            ]}],
+        }
+        self.assertEqual(report_delivery_health(report), "partial_persisted")
+        self.assertEqual(report["meta_collection"]["status"], "partial")
+
+    def test_all_meta_readings_missing_or_unarchived_is_still_failure(self):
+        from stats_reporter import report_delivery_health
+        report = {
+            "meta_collection": {"status": "unavailable"},
+            "archive_saved": True,
+            "accounts": [{"platforms": [
+                {"platform": "Facebook", "total": None},
+                {"platform": "Instagram", "total": None},
+            ]}],
+        }
+        self.assertEqual(report_delivery_health(report), "blocked_no_meta_measurement")
+        report["accounts"][0]["platforms"][0]["total"] = 12
+        report["archive_saved"] = False
+        self.assertEqual(report_delivery_health(report), "blocked_archive")
+        report["archive_saved"] = True
+        report["meta_collection"]["status"] = "complete"
+        self.assertEqual(report_delivery_health(report), "complete")
+
+
+    def test_notice_outage_never_marks_archived_report_failed(self):
+        from stats_reporter import notify_report_if_usable
+        from views_comparison import ViewReport
+        report = ViewReport("stored", {"meta_collection": {"status": "complete"},
+                    "archive_saved": True, "accounts": []})
+        with patch("stats_reporter.notify", side_effect=RuntimeError("PRIVATE_TOKEN")) as send:
+            result = notify_report_if_usable(report)
+        self.assertEqual(result, "notification_transport_failed")
+        send.assert_called_once()
+
+    def test_incomplete_metrics_defer_to_single_failure_workflow_alert(self):
+        from stats_reporter import notify_report_if_usable
+        from views_comparison import ViewReport
+        report = ViewReport("incomplete", {"meta_collection": {"status": "unavailable"},
+                 "archive_saved": False, "accounts": []})
+        with patch("stats_reporter.notify") as send:
+            self.assertEqual(notify_report_if_usable(report),
+                             "deferred_to_failure_alert")
+        send.assert_not_called()
+
+    def test_partially_persisted_report_can_notify_without_restarting_publisher(self):
+        from stats_reporter import notify_report_if_usable
+        from views_comparison import ViewReport
+        report = ViewReport("partial", {"meta_collection": {"status": "partial"},
+                    "archive_saved": True, "accounts": [{"platforms": [
+                        {"platform": "Instagram", "total": 7},
+                        {"platform": "Facebook", "total": None},
+                    ]}]})
+        with patch("stats_reporter.notify") as send:
+            self.assertEqual(notify_report_if_usable(report), "notification_checked")
+        send.assert_called_once()
+

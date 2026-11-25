@@ -2,7 +2,8 @@
 
 This never inserts, modifies, deletes, or retries videos. No raw Google error
 bodies, tokens, URLs, or OAuth credentials are ever written to the artifact.
-"""
+
+Owner-requested read-only four-channel identity audit trigger (2026-11-17)."""
 import json
 from pathlib import Path
 
@@ -59,6 +60,12 @@ def probe_all(*, checker=check_channel):
             code = evidence.get("http_status")
             if type(code) is int and 400 <= code <= 599:
                 item["http_status"] = code
+            reasons = evidence.get("api_reasons")
+            if isinstance(reasons, list):
+                allowed = {"insufficientPermissions", "forbidden", "quotaExceeded",
+                           "dailyLimitExceeded", "authError", "accessNotConfigured"}
+                item["api_reasons"] = sorted(set(r for r in reasons
+                                                if isinstance(r, str)) & allowed)
             failure_kind = safe_failure_kind(evidence)
             if failure_kind is not None:
                 item["failure_kind"] = failure_kind
@@ -66,11 +73,11 @@ def probe_all(*, checker=check_channel):
             if scope is True or scope is False:
                 item["upload_scope_in_file"] = scope
             else:
-                item["upload_scope_in_file"] = "N/A"
+                item["upload_scope_in_file"] = "scope_not_recorded_in_token_json"
         except Exception:
             item = {"route": route, "status": "authorization_or_connection_failed",
                     "expected_channel_id_matched": False,
-                    "upload_scope_in_file": "N/A"}
+                    "upload_scope_in_file": "scope_not_recorded_in_token_json"}
         checked.append(item)
     return {"status": "all_four_verified" if all(r["expected_channel_id_matched"]
              for r in checked) else "auth_or_identity_incomplete",

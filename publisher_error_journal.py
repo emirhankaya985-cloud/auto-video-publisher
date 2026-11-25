@@ -34,6 +34,12 @@ _ALLOWED_REASON = {
     "missing_secret", "youtube_publication_unverified",
     "visual_duplicate_review", "source_content_changed",
     "film_part8_strict_recheck_held",
+    "film_part8_source_visually_duplicate",
+}
+_ALLOWED_MEDIA_DIAGNOSTICS = {
+    "quality_check_unavailable", "media_decode_failed", "invalid_video_format",
+    "black_screen_samples", "audio_measurement_unavailable",
+    "silent_audio_samples", "missing_moov_atom",
 }
 
 
@@ -63,7 +69,8 @@ def http_failure_class(status):
 
 
 def error_event(stage, reason, *, route="", platform="", video="",
-                error=None, status="", safe_to_retry=False):
+                error=None, status="", safe_to_retry=False,
+                media_diagnostic=""):
     if stage not in _ALLOWED_STAGE or reason not in _ALLOWED_REASON:
         raise ValueError("Unregistered error stage/reason")
     exc = error
@@ -90,6 +97,8 @@ def error_event(stage, reason, *, route="", platform="", video="",
         number = getattr(exc, attr, None)
         if type(number) is int and 0 <= number <= 99999999:
             event[name] = number
+    if media_diagnostic in _ALLOWED_MEDIA_DIAGNOSTICS:
+        event["media_diagnostic"] = media_diagnostic
     stage_value = getattr(exc, "stage", None)
     if isinstance(stage_value, str):
         event["meta_stage"] = safe_label(stage_value, 80)
@@ -97,9 +106,11 @@ def error_event(stage, reason, *, route="", platform="", video="",
 
 
 def record_error(stage, reason, *, route="", platform="", video="",
-                 error=None, status="", safe_to_retry=False, path=JOURNAL):
+                 error=None, status="", safe_to_retry=False,
+                 media_diagnostic="", path=JOURNAL):
     event = error_event(stage, reason, route=route, platform=platform, video=video,
-                        error=error, status=status, safe_to_retry=safe_to_retry)
+                        error=error, status=status, safe_to_retry=safe_to_retry,
+                        media_diagnostic=media_diagnostic)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as stream:
         stream.write(json.dumps(event, ensure_ascii=False, separators=(",", ":")) + "\n")

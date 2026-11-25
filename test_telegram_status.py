@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from contextlib import closing
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -18,7 +19,7 @@ class StatusTableTests(unittest.TestCase):
         table = status_table(now=self.now, state={'entries': {'one': row, 'alias': row.copy()}})
         self.assertIn('1/5', table)
         self.assertIn('12:00 12:10 12:20 12:30', table)
-        self.assertIn('06:00', table)  # Standard time: New York 22:00 -> TR 06:00.
+        self.assertIn('05:00', table)  # Standard time: New York 21:00 -> TR 05:00.
         self.assertNotIn('0/5', status_table(now=self.now))
         self.assertLess(len(table.encode('utf-16-le')) // 2, 3600)
 
@@ -57,10 +58,10 @@ class StatusTableTests(unittest.TestCase):
         }
         message = status_table(now=now, state={'entries': rows})
         self.assertIn('Gec Bek Hata', message)
-        self.assertIn('1/8', message)
+        self.assertIn('1/5', message)
         self.assertIn('son tamamlanmış New York gününe', message)
         self.assertIn('yerel hazırlık', message)
-        self.assertNotIn('1/5', message)
+        self.assertNotIn('1/8', message)
         self.assertLess(len(message.encode('utf-16-le')) // 2, 4096)
 
     def test_actual_gate_configuration_is_distinct_from_counts(self):
@@ -79,12 +80,12 @@ class StatusOnlyWorkerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, env, clear=True):
             send, model, loader = Mock(), Mock(), Mock(return_value='<pre>Plan</pre>')
             worker = Worker(str(Path(temp)/'worker.db'), sender=send, model=model, status_loader=loader)
-            self.addCleanup(worker.db.close)
-            for uid, text in enumerate(['/stok', '/durdur', '/devam', '/durum', 'durum'], 1):
-                worker.handle({'update_id': uid, 'message': {'chat': {'id': 123456789},
-                    'from': {'id': 987654321}, 'text': text}})
-            model.assert_not_called()
-            self.assertEqual(loader.call_count, 2)
-            self.assertEqual(send.call_count, 5)
-            self.assertEqual(send.call_args.kwargs['parse_mode'], 'HTML')
-            self.assertTrue(send.call_args.kwargs['reply_markup']['is_persistent'])
+            with closing(worker.db):
+                for uid, text in enumerate(['/stok', '/durdur', '/devam', '/durum', 'durum'], 1):
+                    worker.handle({'update_id': uid, 'message': {'chat': {'id': 123456789},
+                        'from': {'id': 987654321}, 'text': text}})
+                model.assert_not_called()
+                self.assertEqual(loader.call_count, 2)
+                self.assertEqual(send.call_count, 5)
+                self.assertEqual(send.call_args.kwargs['parse_mode'], 'HTML')
+                self.assertTrue(send.call_args.kwargs['reply_markup']['is_persistent'])

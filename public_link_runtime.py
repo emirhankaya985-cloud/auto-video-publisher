@@ -15,7 +15,7 @@ import time
 import tempfile
 import zipfile
 from types import SimpleNamespace
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -29,9 +29,13 @@ from cloud_omnichannel_publisher import (
 from instagram_media_compat import prepare_instagram_upload, probe
 from toonzone_cover_fallback import generate_part_cover
 from content_hashtags import prepare_caption
+from account_fixed_txt import selected_txt, verify_text
 from instagram_tagging import enhance_instagram_caption
 from publisher_error_journal import record_error
-from expired_ig_container_recovery import authorize_exact_expired_recovery, terminal_recovery_reserved
+from expired_ig_container_recovery import (
+    authorize_exact_expired_recovery, authorize_film_part17_expired_recovery,
+    terminal_recovery_reserved,
+)
 from meta_auth_loader import load_meta_auth
 from ordered_channels import TOONZONE_ETSY_LINK, parse_order, toonzone_metadata
 from publication_safety import route_paused
@@ -127,6 +131,15 @@ def caption_key(value):
     return hashlib.sha256(" ".join(value.split()).encode()).hexdigest()
 
 
+def toonzone_archived_id_blockers(slot, platforms, receipts):
+    """Return only destinations whose archived serial post is unverified."""
+    return [
+        platform for platform in platforms
+        if isinstance(receipts.get((slot, platform)), dict)
+        and receipts[(slot, platform)].get("reason") == "archived_id_not_in_live_history"
+    ]
+
+
 # Proven in production job logs and the 30 Oct GET-only diagnostic. Binding
 # includes the exact old intent, source and text hash; no heuristic association.
 _LEGACY_IG_CONTAINERS = {
@@ -203,7 +216,9 @@ def publish_existing_ig_intent(item, page, state):
                      route=item["route"], platform="instagram", video=item["name"], status="uncertain")
         save(STATE, state)
         return False
-    entry.update(status="done", post_id=str(post))
+    entry.update(status="done", post_id=str(post),
+                 published_at_utc=datetime.now(timezone.utc).isoformat(),
+                 publication_run_id=os.getenv("GITHUB_RUN_ID", ""))
     entry.pop("failure", None)
     save(STATE, state)
     print(json.dumps({"page": item["page"], "file": item["name"], "platform": "instagram",
@@ -598,12 +613,15 @@ def clean_caption_ui(raw):
 
 def copies(route, item, files, temp, use_txt=True):
     stem = Path(item["name"]).stem
-    text = files.get(stem + ".txt") if use_txt else None
+    fixed = selected_txt(route, files) if use_txt else None
+    text = fixed if fixed else (files.get(stem + ".txt") if use_txt else None)
     raw = None
-    origin = "matching-txt"
+    origin = "account-fixed-txt" if fixed else "matching-txt"
     if text:
         try:
             raw = download(text["id"], temp / "caption.txt").read_text(encoding="utf-8-sig").strip()
+            if fixed:
+                raw = verify_text(raw, fixed["sha256"])
         except Exception as exc:
             if route != "toonzone":
                 raise RuntimeError(f"Eşleşen TXT indirilemedi: {route}/{item['name']} ({type(exc).__name__})") from None
@@ -643,13 +661,14 @@ def copies(route, item, files, temp, use_txt=True):
     else:
         # Other routes must never upload with generic filename-only captions.
         raise RuntimeError(f"Eşleşen TXT gerekli: {route}/{item['name']}")
-    if route == "daily_laugh":
+    if route == "daily_laugh" and not fixed:
         # Reused TXT bodies are paired to specific videos to avoid ambiguous reconciliation.
         reference = f"Daily Laugh Lab · Video {stem}\n\n"
         fb, ig = reference + fb, reference + ig
     # IG-only tagging, applied before caption hash/remote reconciliation.
     # FB caption remains unchanged; non-approved videos are bit-for-bit unchanged.
-    ig, _tags = enhance_instagram_caption(ig, route, stem)
+    if not fixed:
+        ig, _tags = enhance_instagram_caption(ig, route, stem)
     if not fb.strip() or not ig.strip() or len(ig) > 2200 or "<html" in fb.lower():
         raise RuntimeError("Platform açıklaması geçersiz")
     return {"facebook": fb, "instagram": ig}, origin
@@ -990,8 +1009,12 @@ def target_count(route, now):
         slots = slots_for_route(document, route, now, slots)
     if os.getenv("COMPLETE_DAY_DATE") == now.date().isoformat():
         # The second Film page still lacked the already-confirmed Part 6 at cutover.
-        return len(slots) + (1 if route == "film_second" and now.date().isoformat() == "2026-10-23" else 0)
-    return sum((h, m) <= (clock.hour, clock.minute) for h, m in slots)
+        due = len(slots) + (1 if route == "film_second" and now.date().isoformat() == "2026-10-23" else 0)
+    else:
+        due = sum((h, m) <= (clock.hour, clock.minute) for h, m in slots)
+    # Adaptive or one-shot schedules cannot exceed the owner's five-video
+    # Daily Laugh daily target.
+    return min(5, due) if route == "daily_laugh" else due
 
 
 def apply_verified_migration(state):
@@ -1099,9 +1122,40 @@ _CONFIRMED_UNREADABLE_SHARED_SOURCES = {
     ("daily_laugh", "1TBHD0d-rtgt8ECx_6oYHeRBW8Ae2ysyH", "195.mp4"): {
         "run_id": "42378874507",
     },
+    # 10 Nov run 42888833591 fetched exact bytes SHA, but FFmpeg could not
+    # decode the frame required for safe visual fingerprinting BEFORE any POST.
+    # Facebook and IG both retained local-only "ready" failures. Do not keep
+    # retrying this same unmodified Drive object across future days; a
+    # separately uploaded corrected video receives a distinct Drive ID.
+    ("daily_laugh", "1i0pA26ewaAOlqxTbIxva_nsxZ_K_OrUW", "40.mp4"): {
+        "run_id": "42888833591",
+        "sha256": "579051bc54e3466977fec7656b1eb15b03bd1e2c339c9dfa3acd889086e2f45c",
+    },
     ("penguen", "1lBoXFmmxvlfL6lUhxk4Qc_eZ6WHANb2I", "250.mp4"): {
         "run_id": "42175366213",
         "sha256": "513d67961759f96a7e64196bf2adbe4d8ce01f0acb3b0257a5acce71a27ea1b0",
+    },
+    # 23 Nov live run 45171317800 confirmed this exact Penguen MP4 has no
+    # audio samples. Keep the unchanged Drive object quarantined across days;
+    # a replacement upload has a different Drive ID and goes through all gates.
+    ("penguen", "14jz507WmoB-gAsSILcA6WT2LRJgHH1l0", "342.mp4"): {
+        "run_id": "45171317800",
+        "sha256": "c012a06a7207bb73895fbeba8493f8493534be07024227a13fe30499f62ea555",
+    },
+    # Natural run 45240919761 confirmed this unchanged Penguen source is
+    # silent. Preserve this exact source across days; replacements with a new
+    # Drive ID or content hash still pass through the quality checks.
+    ("penguen", "1_zCLAJJGTVrZ5h8HReMY3Vj-1q1rylga", "414.mp4"): {
+        "run_id": "45240919761",
+        "sha256": "7526fb6ea06e3c4466dbbd7ed7bba8393beaab7a52de404a5cb00edf9919a931",
+    },
+    # 24 Nov natural run 45449684883 could not decode an exact visual
+    # fingerprint frame for this Tarladaki source before POST. Hold only this
+    # unchanged Drive ID/hash across days; this does not claim the full video
+    # is corrupt, and a new upload identity still passes normal quality gates.
+    ("tarladaki", "1Zl7Uf_TgRSU71iGS4xeWH67KYXTxFiuQ", "560.mp4"): {
+        "run_id": "45449684883",
+        "sha256": "1b14cb6c20f9be569d1742589e9472fab04bc899aaf28fb1f43061034d751582",
     },
     ("tarladaki", "1T3nTIgRJwmgeQOkCwZrvezl61tic3aI2", "278.mp4"): {
         "run_id": "42222196393",
@@ -1239,12 +1293,19 @@ def plan(audit=False):
     # Reserve the exact final caption per route/platform within this batch.
     # Different Drive IDs with identical text are not two safe posts.
     planned_caption_hashes = set()
-    batch_limit = 8 if os.getenv("CATCHUP_BATCH_DATE") == day else 1
+    scope = account_scope()
+    # A signed, exact-date workflow gate sets this flag for the PRIMARY Film
+    # route only. It cannot affect normal slots, other routes or later dates.
+    film_ten_once = (os.getenv("FILM_TEN_PARTS_ONCE") == "true"
+                     and day == "2026-11-10" and scope == "film")
+    film_gap_once = (os.getenv("FILM_GAP_PART6TO10_ONCE") == "true"
+                     and day == "2026-11-10" and scope == "film")
+    batch_limit = (5 if film_gap_once else 10 if film_ten_once
+                   else 8 if os.getenv("CATCHUP_BATCH_DATE") == day else 1)
     from operational_enhancements import bounded_catchup_limit
     history_cache = {}
     duplicate_fingerprints = {}
     rescue_only = os.getenv("IG_AUDITED_RESCUE_ONLY") == "true"
-    scope = account_scope()
     for route, (source, page_name) in prioritized_route_items(day):
         if scope and route != scope:
             continue
@@ -1325,6 +1386,10 @@ def plan(audit=False):
             if entry["route"] != route or entry["platform"] not in platforms:
                 continue
             caption_hash = entry.get("caption_hash")
+            # Fixed TXT repeats on every clip: caption is not a source identity.
+            # Remote caption matching must NEVER convert its uncertain intent to done.
+            if entry.get("caption_source") == "account-fixed-txt":
+                continue
             if entry["status"] != "done" and caption_hash in ambiguous_captions[entry["platform"]]:
                 report.append("HELD: previous uncertain intent matches multiple remote posts.")
                 continue
@@ -1358,7 +1423,19 @@ def plan(audit=False):
             # account quota. Exact caption reconciliation still runs above.
             counts = {p: 0 for p in platforms}
         due = target_count(route, now)
-        if os.getenv("CATCHUP_BATCH_DATE") != day:
+        if film_gap_once and route == "film":
+            # The first release already published five parts on both platforms.
+            # Raise the OWNER-ONLY temporary planning ceiling by five; never
+            # change normal per-account targets or any provider rate limits.
+            due = max(counts.values(), default=0) + 5
+            report.append("OWNER ONCE: only En Buyuk Saban Parts 6-10, no new posts outside gap.")
+        if film_ten_once and route == "film":
+            # Ten *new, distinct* Part 1-10 sources, not ten quota slots
+            # consumed by other Film posts earlier today. Per-source ledger
+            # and provider dedupe still apply, so nothing is blindly reposted.
+            due = max(counts.values(), default=0) + 10
+            report.append("OWNER ONE-SHOT: up to ten En Buyuk Saban parts (1-10) on primary Film Meta routes.")
+        if os.getenv("CATCHUP_BATCH_DATE") != day and not ((film_ten_once or film_gap_once) and route == "film"):
             batch_limit = bounded_catchup_limit(
                 route, due, counts, clock,
                 enabled=os.getenv("AUTO_BACKFILL_ENABLED", "false").lower() == "true")
@@ -1414,6 +1491,28 @@ def plan(audit=False):
                     "original source stays subject to all publish safety gates."
                 )
             videos.sort(key=lambda v: (not v["name"].lower().startswith("yoksul_1986_"), parse_order(Path(v["name"]).stem, "film")))
+            # Explicit owner handoff after Bıçkın 8 proved visually duplicated
+            # Part 3. Reconcile historical ledger and remote history as usual,
+            # but plan ONLY the complete fresh series. No old intent is reset.
+            if os.getenv("FILM_HANDOFF_TO_EN_BUYUK_SABAN", "false").lower() == "true":
+                from film_series_transition import switch_film_source
+                videos = switch_film_source(route, videos, files)
+                if film_gap_once and route == "film":
+                    # Part 1-5 have already posted; never plan duplicates.
+                    allowed = {f"En_Buyuk_Saban_Part_{i}.mp4" for i in range(6, 11)}
+                    videos = [video for video in videos if video["name"] in allowed]
+                    if len(videos) != 5:
+                        raise RuntimeError("film_gap_source_selection_incomplete")
+                if film_ten_once and route == "film":
+                    # Exclude Part 11+ even if the daily accounting target is
+                    # higher because of already-published unrelated videos.
+                    allowed = {f"En_Buyuk_Saban_Part_{i}.mp4" for i in range(1, 11)}
+                    videos = [video for video in videos if video["name"] in allowed]
+                    if len(videos) != 10:
+                        raise RuntimeError("film_ten_source_selection_incomplete")
+                report.append(
+                    "FILM HANDOFF: complete En_Buyuk_Saban Part 1-32 selected; "
+                    "historical Bickin/Yoksul receipts preserved and checked.")
         elif source == "toonzone":
             videos = [v for v in videos if parse_order(Path(v["name"]).stem, "cartoon")]
             videos.sort(key=lambda v: parse_order(Path(v["name"]).stem, "cartoon"))
@@ -1434,20 +1533,21 @@ def plan(audit=False):
                     break
                 if order and order[0] == 1 and 4 <= order[1] <= 12:
                     slot = f"S01E{order[1]:02d} Part{order[2]}"
-                    unresolved = [
-                        season1_receipts_by_part.get((slot, p), {})
-                        for p in platforms
-                    ]
-                    if any(row.get("reason") == "archived_id_not_in_live_history"
-                           for row in unresolved):
+                    held_platforms = toonzone_archived_id_blockers(
+                        slot, platforms, season1_receipts_by_part)
+                    if held_platforms:
+                        blocked_platforms.update(held_platforms)
                         report.append(
-                            "HELD: " + slot + " has archived DONE post IDs absent "
-                            "from current Meta history; verify original remote "
-                            "IDs independently before any further publication."
+                            "HELD: " + slot + " archived post ID is not visible in "
+                            "current Meta history for " + ",".join(held_platforms)
+                            + "; keep those destinations blocked. Other platforms "
+                            "may continue only from their own verified history."
                         )
-                        break
+                        if all(platform in blocked_platforms for platform in platforms):
+                            break
             available = [p for p in platforms if p not in blocked_platforms]
-            if not available or all(counts[p] + planned_counts.get((route, p), 0) >= target_count(route, now) for p in available):
+            route_target = due if (route == "film" and (film_ten_once or film_gap_once)) else target_count(route, now)
+            if not available or all(counts[p] + planned_counts.get((route, p), 0) >= route_target for p in available):
                 break
             if all(seed_done(route, p, item["name"]) or state["entries"].get(f"{route}:{p}:{item['id']}", {}).get("status") == "done" for p in available):
                 continue
@@ -1493,6 +1593,16 @@ def plan(audit=False):
                 key = f"{route}:{p}:{item['id']}"
                 existing = state["entries"].get(key, {})
                 cap_hash = caption_key(captions[p])
+                if (existing.get("route") == route
+                        and existing.get("platform") == p
+                        and existing.get("file") == item["name"]
+                        and can_advance_past_local_visual_hold(route, existing)):
+                    # A source rejected locally before any Meta POST stays
+                    # quarantined even if its caption also matches old posts.
+                    # Check this before caption ambiguity can stop the queue.
+                    skip_unproven_candidate = True
+                    report.append("QUARANTINE: proven local-only visual duplicate; look for next unique clip.")
+                    continue
                 if (route == "film" and p == "instagram" and existing
                         and existing.get("status") == "uncertain"
                         and existing.get("reconciliation_conflict") == "post_id_belongs_to_other_source"):
@@ -1528,7 +1638,7 @@ def plan(audit=False):
                         state["entries"][key] = duplicate
                         report.append(f"DUPLICATE VERIFIED: {item['name']} {p}; existing post_id={duplicate['post_id']}; no new upload.")
                         continue
-                if cap_hash in ambiguous_captions[p]:
+                if origin != "account-fixed-txt" and cap_hash in ambiguous_captions[p]:
                     if (source == "film" and
                             confirmed_existing_film_post_amid_caption_reuse(
                                 existing, route, p, histories[p])):
@@ -1551,7 +1661,7 @@ def plan(audit=False):
                         report.append("HELD: multiple Meta posts share the same caption; manual reconciliation required.")
                         held = True
                     continue
-                match = remote[p].get(cap_hash)
+                match = None if origin == "account-fixed-txt" else remote[p].get(cap_hash)
                 if (match and existing.get("status") in {"uncertain", "intent"}
                         and conflicting_done_post_source(
                             state["entries"], key, route, p, str(match.get("id") or ""))):
@@ -1594,6 +1704,9 @@ def plan(audit=False):
                 if not audit:
                     if authorize_exact_expired_recovery(route, p, item, existing, page, history_reconciled=True):
                         report.append("RECOVERY: exact never-published Film container expired; one fresh upload reserved.")
+                    if authorize_film_part17_expired_recovery(
+                            route, p, item, existing, page, history_reconciled=True):
+                        report.append("RECOVERY: Film Part17 exact expired IG container; one bounded re-encoding reserved.")
                     bind_legacy_ig_container(route, p, item, existing, page)
                 # Historical compact IG uploads that failed *before*
                 # media_publish were incorrectly treated as uncertain forever.
@@ -1703,7 +1816,7 @@ def plan(audit=False):
                     else:
                         held = True
                     continue
-                target = target_count(route, now)
+                target = due if (film_ten_once or film_gap_once) and route == "film" else target_count(route, now)
                 today_count = sum(route_clock(route, timestamp(row)).date() == clock.date() for row in histories[p])
                 confirmed_in_ledger = ledger_daily_count(state, route, p, clock.date().isoformat())
                 today_count = 0 if rescue_only else max(today_count, confirmed_in_ledger)
@@ -1737,7 +1850,7 @@ def plan(audit=False):
             # Dedupe with the original TXT first; decorate only genuinely new
             # intents, before their exact publication hashes are persisted.
             for p in pending:
-                if not state["entries"].get(f"{route}:{p}:{item['id']}"):
+                if origin != "account-fixed-txt" and not state["entries"].get(f"{route}:{p}:{item['id']}"):
                     captions[p] = prepare_caption(captions[p], route, Path(item["name"]).stem, p)
             if any((route, p, caption_key(captions[p])) in planned_caption_hashes
                    for p in pending):
@@ -1795,7 +1908,7 @@ def plan(audit=False):
                     state["entries"][key] = {
                         "route": route, "platform": p, "status": "intent",
                         "caption_hash": caption_key(captions[p]), "file": item["name"],
-                        "publish_caption": captions[p],
+                        "publish_caption": captions[p], "caption_source": origin,
                         "day": clock.date().isoformat(), "run_id": os.environ["GITHUB_RUN_ID"],
                         "prepublish_retry_count": old_attempts,
                     }
@@ -1832,15 +1945,15 @@ def plan(audit=False):
         if selected is None:
             report.append("No eligible unpublished item below the daily target.")
             # An empty/blocked queue below a due target is an operational
-            # deficit, not a successful no-op. Warn once per route/local day;
-            # ordinary NOT DUE and already-complete ticks never reach here.
+            # deficit, not a successful no-op. Journal every due tick;
+            # delivery is deduplicated separately after notification ACK.
+            # Ordinary NOT DUE and already-complete ticks never reach here.
             alert_days = state.setdefault("queue_alert_days", {})
             local_day = clock.date().isoformat()
-            unresolved = any(e.get("route") == route and e.get("status") in {"intent", "uncertain"}
-                             for e in state["entries"].values())
-            # Existing unresolved intents have their own daily notification;
-            # do not turn that known hold into a second urgent queue alert.
-            if not audit and not unresolved and alert_days.get(route) != local_day:
+            # Old publication holds can persist for days and their original
+            # notification may already be deduplicated. They must not hide
+            # today's missing publications; keep the held records untouched.
+            if not audit:
                 record_error("planning_queue", "no_eligible_content", route=route,
                              safe_to_retry=True)
                 alert_days[route] = local_day
@@ -1848,7 +1961,7 @@ def plan(audit=False):
     save(PLAN, plans)
     from content_stock import build_stock, stock_markdown
     stocks = build_stock(catalogs, state, ROUTES,
-                         {r: (4 if r == 'toonzone' else 8 if r == 'daily_laugh' else 5)
+                         {r: (4 if r == 'toonzone' else 5)
                           for r in ROUTES}, unavailable=unavailable_catalogs,
                          generated_caption_dirs=generated_caption_dirs)
     save(ROOT / 'content-stock.json', {'measured_at': now.isoformat(), 'accounts': stocks})
@@ -2059,6 +2172,7 @@ def publish():
         with tempfile.TemporaryDirectory() as tmp:
             temp = Path(tmp)
             source_fingerprint = None
+            quality_diagnostic = None
             try:
                 video = download_verified_publication_video(item["id"], temp / "source.mp4")
                 from operational_enhancements import bind_source_integrity
@@ -2071,12 +2185,14 @@ def publish():
                 # Persist the immutable source digest before any external POST.
                 save(STATE, state)
                 if os.getenv('MEDIA_QUALITY_ENABLED', 'false').lower() == 'true':
-                    from media_quality import inspect_video
+                    from media_quality import inspect_video, safe_failure_code
                     try:
                         quality = inspect_video(video)
-                    except Exception:
+                    except Exception as exc:
+                        quality_diagnostic = safe_failure_code(exc)
                         save(ROOT / 'quality' / (item['id'] + '.json'),
                              {'status': 'held', 'reason': 'quality_check_failed',
+                              'check_code': quality_diagnostic,
                               'source_id': item['id']})
                         raise RuntimeError('Local media quality gate held source') from None
                     save(ROOT / 'quality' / (item['id'] + '.json'), quality)
@@ -2112,15 +2228,20 @@ def publish():
                         status="ready",
                         failure={"reason": "source_or_cover_preparation_failed",
                                  "error_type": type(exc).__name__,
-                                 "media_diagnostic": ("missing_moov_atom"
-                                                      if isinstance(exc, MP4MissingMoov)
-                                                      else "N/A"),
+                                 "media_diagnostic": (
+                                     "missing_moov_atom"
+                                     if isinstance(exc, MP4MissingMoov)
+                                     else quality_diagnostic or "N/A"),
                                  "safe_to_repost": True},
                     )
                 for platform in item["platforms"]:
                     record_error("source_video", "source_or_cover_preparation_failed",
                                  route=item["route"], platform=platform,
-                                 video=item["name"], error=exc, safe_to_retry=True)
+                                 video=item["name"], error=exc, safe_to_retry=True,
+                                 media_diagnostic=(
+                                     "missing_moov_atom"
+                                     if isinstance(exc, MP4MissingMoov)
+                                     else quality_diagnostic or ""))
                 save(STATE, state)
                 continue
             if item.get("film_part8_strict_recheck") and source_fingerprint is None:
@@ -2142,16 +2263,21 @@ def publish():
                             item, state, temp / "source.mp4",
                             download_verified_publication_video, temp)
                     except (OSError, RuntimeError, ValueError) as exc:
+                        film_hold_reason = (
+                            "film_part8_source_visually_duplicate"
+                            if str(exc) == "film_part8_source_visually_duplicates_part3"
+                            else "film_part8_strict_recheck_held"
+                        )
                         # The original three-frame hold is still authoritative
                         # unless the stronger source-vs-source proof passes.
                         if not hold_visual_duplicate(item, state, source_fingerprint):
                             for p in item["platforms"]:
                                 state["entries"][f"{item['route']}:{p}:{item['id']}"].update(
                                     status="held",
-                                    failure={"reason": "film_part8_strict_recheck_held",
+                                    failure={"reason": film_hold_reason,
                                              "external_post_attempted": False,
                                              "safe_to_repost": False})
-                        record_error("source_video", "film_part8_strict_recheck_held",
+                        record_error("source_video", film_hold_reason,
                                      route=item["route"], video=item["name"],
                                      error=exc, safe_to_retry=False)
                         save(STATE, state)
@@ -2292,7 +2418,11 @@ def publish():
                         )
                     if not post:
                         raise RuntimeError("Publication has no post ID")
-                    state["entries"][key].update(status="done", post_id=str(post))
+                    state["entries"][key].update(
+                        status="done", post_id=str(post),
+                        published_at_utc=datetime.now(timezone.utc).isoformat(),
+                        publication_run_id=os.getenv("GITHUB_RUN_ID", ""),
+                    )
                     state["entries"][key].pop("failure", None)
                     print(json.dumps({"page": item["page"], "file": item["name"], "platform": platform, "post_id": str(post)}, ensure_ascii=False), flush=True)
                 except Exception as exc:

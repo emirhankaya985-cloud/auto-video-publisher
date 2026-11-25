@@ -5,6 +5,20 @@ import subprocess
 from pathlib import Path
 
 
+SAFE_FAILURE_CODES = {
+    'quality_check_unavailable', 'media_decode_failed', 'invalid_video_format',
+    'black_screen_samples', 'audio_measurement_unavailable',
+    'silent_audio_samples',
+}
+
+
+def safe_failure_code(exc):
+    """Return only a fixed media-quality reason; never surface paths/log text."""
+    if isinstance(exc, RuntimeError) and str(exc) in SAFE_FAILURE_CODES:
+        return str(exc)
+    return 'quality_check_failed'
+
+
 def run(command, *, timeout):
     try:
         result = subprocess.run(command, capture_output=True, text=True, timeout=timeout)

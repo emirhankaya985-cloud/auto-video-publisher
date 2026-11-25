@@ -1,15 +1,17 @@
 name: Meta cross-account engagement
 on:
   schedule:
-    # One verified, individually ledgered cross-account like per tick at most.
+    # One target account per tick, individually verified/ledgered likes on all recent posts.
     # Every 15 minutes; GitHub can delay scheduled starts.
     # Never bulk-like, save or repost. Provider restrictions remain authoritative.
     - cron: '7,22,37,52 * * * *'
   push:
     branches: [main]
-    # A single approval marker starts the first bounded real tick on merge.
+    # An owner approval marker starts one guarded account batch on merge.
     # Unrelated pushes never trigger engagement.
-    paths: ['docs/meta-cross-engagement-live-2026-11-08.md']
+    paths:
+      - 'docs/meta-cross-engagement-live-2026-11-08.md'
+      - 'docs/meta-cross-engagement-owner-start-2026-11-10.md'
   workflow_dispatch:
     inputs:
       source_run_id:
@@ -27,6 +29,8 @@ on:
     paths:
       - 'meta_cross_engagement.py'
       - 'test_meta_cross_engagement.py'
+      - 'meta_cross_engagement_receipts.py'
+      - 'test_meta_cross_engagement_receipts.py'
       - '.github/workflows/meta_cross_engagement.yml'
 permissions:
   contents: read
@@ -45,7 +49,7 @@ jobs:
           python-version: '3.12'
       - run: pip install --require-hashes -r requirements.txt
       - name: Verify identities, unsupported actions, dedupe and crash safety with mocks
-        run: python -m unittest -v test_meta_cross_engagement.py
+        run: python -m unittest -v test_meta_cross_engagement.py test_meta_cross_engagement_receipts.py
   engage:
     needs: tests
     if: >-
@@ -57,8 +61,8 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       SOURCE_RUN_ID: ${{ inputs.source_run_id || 'latest' }}
       ENGAGEMENT_SCOPE: recent_window
-      # Manual runs remain read-only and ToonZone-focused; scheduled and
-      # one-time marker runs use the guarded one-like-only plan.
+      # Manual runs remain read-only; scheduled ticks rotate one target account.
+      # Every individual like is recorded and Graph-verified.
       META_AUDIT_FOCUS: ${{ github.event_name == 'workflow_dispatch' && 'ToonZone' || '' }}
 
       META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
@@ -74,11 +78,11 @@ jobs:
       META_NEW_ROUTES_RIGHTS_APPROVED: ${{ vars.META_NEW_ROUTES_RIGHTS_APPROVED }}
       META_CROSS_ENGAGEMENT_ENABLED: ${{ vars.META_CROSS_ENGAGEMENT_ENABLED || 'true' }}
       META_CROSS_REPOST_ENABLED: 'false'
-      # Live scheduled runs are strictly one-like only (never bulk apply).
+      # Live scheduled ticks process one selected target's eligible recent posts.
       # A marker push on main authorizes an immediate first bounded tick.
       GITHUB_EVENT_NAME: ${{ github.event_name }}
       GITHUB_REF: ${{ github.ref }}
-      ENGAGEMENT_MODE: ${{ github.event_name == 'schedule' && 'single_like' || github.event_name == 'push' && 'single_like' || 'dry_run' }}
+      ENGAGEMENT_MODE: ${{ github.event_name == 'schedule' && 'account_batch' || github.event_name == 'push' && 'account_batch' || 'dry_run' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -90,7 +94,7 @@ jobs:
       - name: Read recent publisher results and verified actor identities; prepare independent ledger
         run: python meta_cross_engagement.py plan
       - name: Persist all intents before any engagement POST
-        if: env.META_CROSS_ENGAGEMENT_ENABLED == 'true' && (env.ENGAGEMENT_MODE == 'apply' || env.ENGAGEMENT_MODE == 'single_like')
+        if: env.META_CROSS_ENGAGEMENT_ENABLED == 'true' && (env.ENGAGEMENT_MODE == 'apply' || env.ENGAGEMENT_MODE == 'single_like' || env.ENGAGEMENT_MODE == 'account_batch')
         uses: actions/upload-artifact@v4
         with:
           name: cross-engagement-intent
@@ -108,16 +112,25 @@ jobs:
           path: cross-engagement/engagement.json
           if-no-files-found: ignore
           retention-days: 90
-      - name: Send one separate Telegram receipt only for genuinely accepted likes
+      - name: Send verified like receipt or daily zero-like alert
+        id: engagement_receipt
         if: >-
-          success() &&
+          always() &&
           steps.verified_ledger.outcome == 'success' &&
-          (env.ENGAGEMENT_MODE == 'apply' || env.ENGAGEMENT_MODE == 'single_like')
+          (env.ENGAGEMENT_MODE == 'apply' || env.ENGAGEMENT_MODE == 'single_like' || env.ENGAGEMENT_MODE == 'account_batch')
         env:
           ENGAGEMENT_RESULT_ARCHIVED: 'true'
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python meta_cross_engagement_receipts.py
+      - name: Archive daily zero-like alert marker after Telegram server ACK
+        if: always() && steps.engagement_receipt.outputs.alert_artifact_name != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.engagement_receipt.outputs.alert_artifact_name }}
+          path: cross-engagement/no-like-alert.json
+          if-no-files-found: error
+          retention-days: 30
       - name: Publish verified like acceptance summary
         if: always()
         env:

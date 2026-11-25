@@ -1,0 +1,66 @@
+name: Film Part17 exact Instagram reconciliation (GET-only)
+
+on:
+  pull_request:
+    paths:
+      - film_part17_readonly_reconcile.py
+      - test_film_part17_readonly_reconcile.py
+      - .github/workflows/film_part17_readonly_reconcile.yml
+  push:
+    branches: [main]
+    paths:
+      - film_part17_readonly_reconcile.py
+      - test_film_part17_readonly_reconcile.py
+      - .github/workflows/film_part17_readonly_reconcile.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: film17-original-ig-readonly
+  cancel-in-progress: false
+
+jobs:
+  no-provider-write-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - run: pip install --require-hashes -r requirements.txt
+      - run: python -m unittest -v test_film_part17_readonly_reconcile.py test_film_part17_expired_recovery.py
+
+  live-readonly:
+    needs: no-provider-write-tests
+    if: >-
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
+      PUBLISH_ACCOUNT_SCOPE: film
+      FILM_PART17_EXPIRED_RECOVERY_ENABLED: 'false'
+      YOUTUBE_PUBLISHING_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - run: pip install --require-hashes -r requirements.txt
+      - run: pip install gdown==6.4.2 pillow==13.0.0
+      - name: Reconcile original source ledger with live IG history and expired container
+        run: python film_part17_readonly_reconcile.py
+      - name: Store metadata-only evidence, including on denial
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: film-part17-original-instagram-evidence
+          path: film17-readonly/result.json
+          if-no-files-found: warn
+          retention-days: 30

@@ -10,6 +10,8 @@ import os
 
 import requests
 
+from tiktok_post_status import fetch_status
+
 CREATOR_INFO_URL = "https://open.tiktokapis.com/v2/post/publish/creator_info/query/"
 
 
@@ -69,10 +71,13 @@ def probe_creator_info(*, session=requests, environ=None):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--probe-creator", action="store_true")
+    parser.add_argument("--status-publish-id", help="Previously archived publish_id; read-only status check")
     args = parser.parse_args()
     result = readiness()
     if args.probe_creator:
         result.update(probe_creator_info())
+    if args.status_publish_id:
+        result["existing_publish_status"] = fetch_status(args.status_publish_id)
     print(json.dumps(result, ensure_ascii=False))
 
 

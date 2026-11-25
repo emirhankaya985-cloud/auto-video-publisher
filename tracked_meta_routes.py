@@ -21,7 +21,7 @@ from telegram_notifications import send_telegram, telegram_configured
 
 ISTANBUL = ZoneInfo("Europe/Istanbul")
 NEW_YORK = ZoneInfo("America/New_York")
-TARGETS = {"toonzone": ("ToonZone", 4), "daily_laugh": ("Daily Laugh Lab", 8)}
+TARGETS = {"toonzone": ("ToonZone", 4), "daily_laugh": ("Daily Laugh Lab", 5)}
 WORKFLOW_URL = (
     "https://github.com/emirhankaya985-cloud/auto-video-publisher/"
     "actions/workflows/tracked_meta_routes.yml"
@@ -140,10 +140,11 @@ def main():
         except Exception:
             print('{"correlation":"unavailable","new_target_alert_preserved":true}',flush=True)
 
-    # The owner requested no repeated deficit/error push notifications.
-    # Keep a nonzero job result, the exact read-only verdict artifact, and
-    # the step summary: quiet mode must not disguise a missing post as healthy.
-    if os.getenv("QUIET_FAILURE_NOTIFICATIONS") == "true":
+    # A verified missing target must still alert. Quiet mode suppresses only
+    # unknown read failures; correlated duplicate publisher alerts were handled
+    # above, so this sends at most one new deficit alert for this route/run.
+    if (os.getenv("QUIET_FAILURE_NOTIFICATIONS") == "true"
+            and verdict["status"] != "behind"):
         print(json.dumps({"notification": "quiet_by_owner",
                           "status": verdict["status"],
                           "target": route,

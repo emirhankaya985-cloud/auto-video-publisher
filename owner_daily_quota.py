@@ -21,7 +21,7 @@ OWNER_ACCOUNTS = (
                                          ("penguen", "instagram"))),
     ("Gönle Düşen", "gonle", 5, (("gonle", "facebook"),
                                     ("gonle", "instagram"))),
-    ("Daily Laugh Lab", "daily_laugh", 8, (("daily_laugh", "facebook"),
+    ("Daily Laugh Lab", "daily_laugh", 5, (("daily_laugh", "facebook"),
                                               ("daily_laugh", "instagram"))),
     ("Film Mağarası", "film", 5, (("film", "facebook"),
                                     ("film_second", "facebook"),

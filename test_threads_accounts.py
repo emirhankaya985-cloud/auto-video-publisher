@@ -141,7 +141,7 @@ class ThreadsAccountsTests(unittest.TestCase):
         result = safe_provider_failure(error)
         self.assertEqual(result["http_status"], 401)
         self.assertEqual(result["graph_code"], 190)
-        self.assertEqual(result["reason"], "threads_token_reauthorization_required")
+        self.assertEqual(result["reason"], "threads_token_expired_or_invalid")
         self.assertNotIn("PRIVATE", str(result))
         self.assertEqual(result["graph_subcode"], 463)
         response = Mock(status_code=503)
@@ -161,6 +161,61 @@ class ThreadsAccountsTests(unittest.TestCase):
             self.assertNotIn("graph_subcode", proof)
             self.assertEqual(proof["graph_code"], 190)
             self.assertNotIn("SECRET", str(proof))
+
+    def test_official_graph_subcodes_are_sanitized_not_assumed_expired(self):
+        from check_threads_connection import safe_provider_failure
+        from requests import HTTPError
+        from unittest.mock import Mock
+        cases = {
+            458: "threads_app_authorization_missing",
+            459: "threads_user_checkpoint_required",
+            460: "threads_password_changed_reauthorization_required",
+            463: "threads_token_expired_or_invalid",
+            467: "threads_token_invalid_or_revoked",
+            None: "threads_token_reauthorization_required",
+        }
+        for subcode, reason in cases.items():
+            with self.subTest(subcode=subcode):
+                response = Mock(status_code=401)
+                response.json.return_value = {"error": {
+                    "code": 190, "error_subcode": subcode,
+                    "message": "PRIVATE_SECRET_TOKEN"}}
+                status = safe_provider_failure(HTTPError("PRIVATE_SECRET_TOKEN", response=response))
+                self.assertEqual(status["reason"], reason)
+                self.assertEqual(status["http_status"], 401)
+                self.assertNotIn("PRIVATE_SECRET_TOKEN", str(status))
+        response = Mock(status_code=403)
+        response.json.return_value = {"error": {"code": 10, "message": "PRIVATE_SECRET"}}
+        self.assertEqual(safe_provider_failure(HTTPError(response=response))["reason"],
+                         "threads_scope_or_permission_denied")
+
+    @patch("check_threads_connection.validate_threads_identity")
+    def test_one_route_failure_always_archives_redacted_receipt(self, check):
+        from check_threads_connection import main
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from requests import HTTPError
+        from unittest.mock import Mock
+        import json
+        response = Mock(status_code=401)
+        response.json.return_value = {"error": {
+            "code": 190, "error_subcode": 467,
+            "message": "PRIVATE_TOKEN_BODY"}}
+        check.side_effect = HTTPError("PRIVATE_TOKEN_BODY", response=response)
+        with TemporaryDirectory() as folder, patch.dict(os.environ, {
+            "THREADS_CHECK_ROUTE": "penguen",
+            "PENGUEN_THREADS_ACCESS_TOKEN": "PRIVATE_TOKEN_VALUE",
+            "PENGUEN_THREADS_USERNAME": "beyinsiz.penguen",
+        }, clear=True), patch("check_threads_connection.Path",
+                              side_effect=lambda *args: Path(folder, *args)):
+            with self.assertRaisesRegex(RuntimeError, "penguen"):
+                main()
+            data = json.loads((Path(folder) / "threads-connection-readonly.json").read_text())
+        self.assertEqual(data["routes_checked"], 1)
+        self.assertEqual(data["verified_routes"], 0)
+        self.assertEqual(data["accounts"][0]["status"], "threads_token_invalid_or_revoked")
+        self.assertNotIn("PRIVATE_TOKEN", str(data))
+        check.assert_called_once()
 
     @patch("check_threads_connection.validate_threads_identity")
     def test_all_route_audit_reports_failed_identity_and_checks_others(self, validate):

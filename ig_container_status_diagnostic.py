@@ -10,6 +10,9 @@ PINNED = {
  "toonzone_part3": ("1298191963387372", "17841477404255851", "17909360826580142"),
  "film_avanak_part10_oct30": ("1239298989276639", "17841477990224124", "17904577569599675"),
  "toonzone_s01e07_part3_oct30": ("1298191963387372", "17841477404255851", "17910279864580142"),
+ # 11 Nov S01E09 Part1: FB was confirmed; IG rupload returned HTTP 400
+ # before media_publish, so only read the EXACT original container.
+ "toonzone_s01e09_part1_nov11": ("1298191963387372", "17841477404255851", "17912187078580142"),
 }
 # Exact result-ledger containers from run 41301342606. Read-only diagnosis;
 # the name is verified with live Page GET before its discovered credentials
@@ -18,6 +21,9 @@ NAMED_PINNED = {
  "tarladaki_192_nov01": ("Tarladaki Fasulye", "18111440750133751"),
  "tarladaki_194_nov01": ("Tarladaki Fasulye", "18111509597133751"),
  "penguen_193_nov01": ("Beyinsiz Penguen", "18120540917054769"),
+ # 12 Nov Film Mağarası Part 17: binary upload returned HTTP 400 ProcessingFailedError.
+ # Read this exact container after live page/Instagram identity verification; never resend media here.
+ "film_part17_nov12": ("Film Mağarası", "17906869221599675"),
 }
 STATES = frozenset(("IN_PROGRESS", "FINISHED", "PUBLISHED", "ERROR", "EXPIRED"))
 

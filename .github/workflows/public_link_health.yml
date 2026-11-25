@@ -1,10 +1,15 @@
 name: Meta publisher health watchdog
 
 on:
-  # At 11:40 TRT, verify real scheduled jobs from the preceding 3 hours.
-  # Once daily to avoid repeated phone alerts for the same outage.
+  push:
+    branches: [main]
+    paths:
+      - 'public_link_health.py'
+      - 'public_link_runtime.py'
+      - '.github/workflows/public_link_health.yml'
+  # GitHub may delay cron starts; this is not a hard real-time SLA.
   schedule:
-    - cron: '40 8 * * *'
+    - cron: '*/10 * * * *'
   workflow_dispatch:
 
 permissions:

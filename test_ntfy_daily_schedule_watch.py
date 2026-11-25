@@ -1,6 +1,8 @@
 import io
+import json
 import os
 import unittest
+import zipfile
 from contextlib import redirect_stdout
 from datetime import datetime, timezone
 from unittest.mock import Mock, patch
@@ -16,33 +18,61 @@ def mock_response(runs, *, status=200):
     return response
 
 
+def mock_json_response(payload, *, status=200):
+    response = Mock(status_code=status)
+    response.json.return_value = payload
+    return response
+
+
+def report_artifact(day):
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w") as archive:
+        archive.writestr("account_views_comparison.json", json.dumps({
+            "day": day, "timezone": "Europe/Istanbul",
+        }))
+    response = Mock(status_code=200)
+    response.content = out.getvalue()
+    return response
+
+
 def scheduled(created_at, status="completed", conclusion="success", event="schedule",
-              branch="main"):
-    return {"created_at": created_at, "status": status, "conclusion": conclusion,
+              branch="main", run_id=None):
+    row = {"created_at": created_at, "status": status, "conclusion": conclusion,
             "event": event, "head_branch": branch}
+    if run_id is not None:
+        row["id"] = run_id
+    return row
 
 
 class MissingDailyReportTests(unittest.TestCase):
     def test_previous_day_window_respects_turkey_local_report_date(self):
         first, last = watch.expected_window(NOW)
-        self.assertEqual(first.isoformat(), "2026-10-20T20:10:00+00:00")
-        self.assertEqual(last.isoformat(), "2026-10-20T22:15:00+00:00")
+        self.assertEqual(first.isoformat(), "2026-10-20T20:54:00+00:00")
+        self.assertEqual(last.isoformat(), "2026-10-20T22:59:00+00:00")
 
     def test_successful_automatic_report_is_healthy(self):
         response = mock_response([
-            scheduled("2026-10-20T20:15:35Z"),
+            scheduled("2026-10-20T20:59:35Z", run_id=123),
             scheduled("2026-10-20T21:03:00Z", event="workflow_dispatch"),
         ])
-        get = Mock(return_value=response)
+        artifacts = mock_json_response({"artifacts": [{
+            "name": "account-views-comparison", "expired": False,
+            "archive_download_url": (
+                "https://api.github.com/repos/emirhankaya985-cloud/"
+                "auto-video-publisher/actions/artifacts/123/zip"),
+        }]})
+        get = Mock(side_effect=[response, artifacts, report_artifact("2026-10-20")])
         actual = watch.check_daily_run(now=NOW, token="test-token", get=get)
         self.assertEqual(actual["status"], "healthy")
+        self.assertEqual(actual["verified_report_run_id"], "123")
         self.assertFalse(any("test-token" in str(v) for v in actual.values()))
-        self.assertEqual(get.call_args.kwargs["params"]["event"], "schedule")
-        self.assertFalse(get.call_args.kwargs["allow_redirects"])
+        self.assertEqual(get.call_count, 3)
+        self.assertEqual(get.call_args_list[0].kwargs["params"]["event"], "schedule")
+        self.assertFalse(get.call_args_list[0].kwargs["allow_redirects"])
 
     def test_manual_run_cannot_mask_missed_schedule(self):
         response = mock_response([
-            scheduled("2026-10-20T20:15:35Z", event="workflow_dispatch"),
+            scheduled("2026-10-20T20:59:35Z", event="workflow_dispatch"),
         ])
         result = watch.check_daily_run(now=NOW, token="test-token",
                                        get=Mock(return_value=response))
@@ -50,7 +80,7 @@ class MissingDailyReportTests(unittest.TestCase):
 
     def test_failed_or_active_run_does_not_count_as_success(self):
         response = mock_response([
-            scheduled("2026-10-20T20:15:35Z", status="completed", conclusion="failure"),
+            scheduled("2026-10-20T20:59:35Z", status="completed", conclusion="failure"),
             scheduled("2026-10-20T21:10:35Z", status="in_progress", conclusion=None),
         ])
         actual = watch.check_daily_run(now=NOW, token="test-token",
@@ -60,13 +90,49 @@ class MissingDailyReportTests(unittest.TestCase):
 
     def test_wrong_day_branch_or_late_run_cannot_mask_missing_schedule(self):
         response = mock_response([
-            scheduled("2026-10-20T20:15:35Z", branch="test-branch"),
-            scheduled("2026-10-19T20:15:35Z"),
+            scheduled("2026-10-20T20:59:35Z", branch="test-branch"),
+            scheduled("2026-10-19T20:59:35Z"),
             scheduled("2026-10-20T23:59:35Z"),
         ])
         result = watch.check_daily_run(now=NOW, token="test-token",
                                        get=Mock(return_value=response))
         self.assertEqual(result["status"], "missing_or_failed")
+
+    def test_late_success_with_expected_report_day_is_healthy(self):
+        run_list = mock_response([scheduled(
+            "2026-10-21T00:46:31Z", run_id=44968258566)])
+        artifacts = mock_json_response({"artifacts": [{
+            "name": "account-views-comparison", "expired": False,
+            "archive_download_url": (
+                "https://api.github.com/repos/emirhankaya985-cloud/"
+                "auto-video-publisher/actions/artifacts/123/zip"),
+        }]})
+        get = Mock(side_effect=[run_list, artifacts, report_artifact("2026-10-20")])
+        result = watch.check_daily_run(now=NOW, token="test-token", get=get)
+        self.assertEqual(result["status"], "healthy")
+        self.assertEqual(result["report_day"], "2026-10-20")
+        self.assertEqual(result["verified_report_run_id"], "44968258566")
+
+    def test_late_success_with_wrong_report_day_does_not_mask_missing(self):
+        run_list = mock_response([scheduled(
+            "2026-10-21T00:46:31Z", run_id=44968258566)])
+        artifacts = mock_json_response({"artifacts": [{
+            "name": "account-views-comparison", "expired": False,
+            "archive_download_url": (
+                "https://api.github.com/repos/emirhankaya985-cloud/"
+                "auto-video-publisher/actions/artifacts/123/zip"),
+        }]})
+        get = Mock(side_effect=[run_list, artifacts, report_artifact("2026-10-21")])
+        result = watch.check_daily_run(now=NOW, token="test-token", get=get)
+        self.assertEqual(result["status"], "missing_or_failed")
+
+    def test_report_artifact_api_failure_is_unknown_not_healthy(self):
+        run_list = mock_response([scheduled(
+            "2026-10-20T20:59:35Z", run_id=123)])
+        inaccessible = mock_json_response({}, status=403)
+        get = Mock(side_effect=[run_list, inaccessible])
+        result = watch.check_daily_run(now=NOW, token="test-token", get=get)
+        self.assertEqual(result["status"], "audit_unavailable")
 
     def test_api_error_or_malformed_response_fails_closed(self):
         bad = Mock(status_code=401)

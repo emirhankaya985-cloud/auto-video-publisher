@@ -1,0 +1,69 @@
+name: Private dashboard archive sync
+
+on:
+  workflow_run:
+    workflows: ["Hesap Bazli Izlenme Raporu"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: Successful daily statistics run ID to sync
+        required: true
+        type: string
+  # One explicit, safe post-merge acceptance for already verified read-only
+  # report 43871556294. Never re-run actual media publishing or notifications.
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/dashboard_archive_sync.yml'
+      - 'neon_archive_sync.py'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: private-dashboard-archive-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') ||
+      (github.event_name == 'push' &&
+       startsWith(github.event.head_commit.message, 'ops: verify-existing-neon-ingest-20261116'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: Install locked dependencies
+        run: pip install --require-hashes -r requirements.txt
+      - name: Install pinned direct-Neon driver (existing PostgreSQL, no new service)
+        run: python -m pip install 'psycopg[binary]==3.2.9'
+      - name: Sync verified nightly archive with one selected transport
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          SOURCE_RUN_ID: ${{ github.event_name == 'push' && '43961941936' || github.event.workflow_run.id || inputs.source_run_id }}
+          DASHBOARD_DATABASE_URL: ${{ secrets.DASHBOARD_DATABASE_URL }}
+          DASHBOARD_INGEST_URL: ${{ secrets.DASHBOARD_INGEST_URL }}
+          DASHBOARD_INGEST_TOKEN: ${{ secrets.DASHBOARD_INGEST_TOKEN }}
+          DASHBOARD_SYNC_DAYS: ${{ github.event_name == 'push' && '2' || '7' }}
+        run: |
+          set -euo pipefail
+          if [ -n "${DASHBOARD_DATABASE_URL:-}" ]; then
+            echo "sync_transport=existing_neon_postgres"
+            python neon_archive_sync.py
+          elif [ -n "${DASHBOARD_INGEST_URL:-}" ] && [ -n "${DASHBOARD_INGEST_TOKEN:-}" ]; then
+            echo "sync_transport=existing_authenticated_dashboard"
+            python dashboard_archive_push.py
+          else
+            echo "::error::Neon sync blocked: DASHBOARD_DATABASE_URL or authenticated ingest URL+token required"
+            echo "Neon aktarımı: engel, bağlantı yetkisi tanımlı değil. Veri yazıldığı iddia edilmez." >> "${GITHUB_STEP_SUMMARY}"
+            exit 2
+          fi

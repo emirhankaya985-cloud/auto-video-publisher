@@ -71,6 +71,21 @@ def build_incident_report(state, run_id, *, plan_text="", errors=None, step_outc
     }
     blockers = {name: sum(line.startswith(marker) for line in plan_text.splitlines())
                 for name, marker in markers.items()}
+    # A successful Actions job can still publish nothing. Keep the reasons
+    # separate: an empty queue, a known-bad local source, and an ambiguous
+    # earlier POST require different follow-up actions.
+    no_post_signals = {
+        "no_eligible_content": blockers["no_eligible_content"],
+        "local_quality_quarantine": sum(
+            line.startswith("QUARANTINE: exact source failed local MP4 preparation")
+            for line in plan_text.splitlines()),
+        "visual_duplicate_hold": sum(
+            line.startswith("QUARANTINE: proven local-only visual duplicate")
+            for line in plan_text.splitlines()),
+        "uncertain_previous_intent": sum(
+            line.startswith("HELD:") and "uncertain previous intent" in line
+            for line in plan_text.splitlines()),
+    }
     # Journal events are emitted at each individual exception/hold, even if
     # the state is later reconciled or a different account publishes.
     # Never persist raw provider responses or secret-bearing tracebacks.
@@ -118,6 +133,54 @@ def build_incident_report(state, run_id, *, plan_text="", errors=None, step_outc
         row.get("route") if row.get("route") in safe_routes else "unknown"
         for row in previous_held
     ))
+
+    # Keep enough bounded, sanitized provenance in the artifact to resolve
+    # old records without dumping captions, Drive IDs, URLs, or raw API errors.
+    previous_details = []
+    for row in previous_held:
+        failure = row.get("failure") if isinstance(row.get("failure"), dict) else {}
+        route = row.get("route") if row.get("route") in safe_routes else "unknown"
+        platform = row.get("platform") if row.get("platform") in ("facebook", "instagram") else "unknown"
+        detail = {
+            "route": route,
+            "platform": platform,
+            "status": row.get("status"),
+            "source_file": str(row.get("file", ""))[:160],
+            "origin_run_id": str(row.get("run_id", ""))[:24],
+            "reason": failure.get("reason") if failure.get("reason") in _SAFE_REASONS else "unknown",
+            "action": "remote_reconciliation_required" if row.get("status") in ("intent", "uncertain") else
+                      "source_review_required_no_repost" if row.get("status") == "held" else
+                      "safe_to_reprepare_next_tick",
+        }
+        for source_field, output_field in (
+            ("stage", "failure_stage"), ("container_status", "container_status"),
+        ):
+            value = failure.get(source_field)
+            if isinstance(value, str) and value in {
+                "Instagram ikili video aktarımı", "PUBLISHED", "FINISHED",
+                "IN_PROGRESS", "ERROR", "EXPIRED", "UNVERIFIED",
+            }:
+                detail[output_field] = value
+        for field in ("http_status", "graph_code", "graph_subcode"):
+            value = failure.get(field)
+            if type(value) is int and 0 <= value <= 99999999:
+                detail[field] = value
+        for field in ("external_post_attempted", "safe_to_repost"):
+            if type(failure.get(field)) is bool:
+                detail[field] = failure[field]
+        if type(row.get("container_publish_attempted")) is bool:
+            detail["container_publish_attempted"] = row["container_publish_attempted"]
+        conflicts = failure.get("conflicting_platforms")
+        if isinstance(conflicts, list):
+            detail["conflicting_platforms"] = [
+                platform_name for platform_name in conflicts
+                if platform_name in ("facebook", "instagram")
+            ]
+        post_id = row.get("post_id")
+        if isinstance(post_id, str) and post_id.isdecimal():
+            detail["post_id"] = post_id[:32]
+        previous_details.append(detail)
+
     return {
         "schema": 2, "run_id": run_id,
         "state_available": bool(state_available),
@@ -137,12 +200,20 @@ def build_incident_report(state, run_id, *, plan_text="", errors=None, step_outc
             row.get("route") if row.get("route") in safe_routes else "unknown"
             for row in remote_reconciliation
         )),
+        "previous_unreconciled_details": previous_details,
         "incidents": incidents, "planning_blocker_counts": blockers,
+        "no_post_signals": no_post_signals if not counts["done"] else {},
         "all_error_events": events, "error_event_count": len(events),
         "step_outcomes": outcomes,
         "run_url": f"https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/{run_id}",
         "message": "No automatic Meta POST retries. Confirm remote history before reattempting an ambiguous upload.",
     }
+
+
+def blocked_due_publication(summary, *, publishing_allowed=False):
+    """Only a due, exhausted planning pass fails; audit/off-slot no-ops stay valid."""
+    return bool(publishing_allowed and summary.get("confirmed_new_posts", 0) == 0
+                and summary.get("planning_blocker_counts", {}).get("no_eligible_content", 0))
 
 
 def main():
@@ -169,11 +240,13 @@ def main():
                       "previous_remote_reconciliation_required",
                       "previous_known_nonposted_visual_holds", "previous_other_review_holds",
                       "previous_ambiguous_by_route",
-                      "planning_blocker_counts", "error_event_count", "step_outcomes",
+                      "planning_blocker_counts", "no_post_signals", "error_event_count", "step_outcomes",
                       "state_available")},
                      ensure_ascii=False), flush=True)
     # Do not let an apparently green workflow conceal a completed entry with
     # no verifiable platform post ID. Artifact upload steps use always().
+    if blocked_due_publication(summary, publishing_allowed=os.getenv("PUBLISH_ALLOWED") == "true"):
+        raise SystemExit("Due publication blocked: no confirmed new posts; inspect preserved incidents and account alert")
     if summary["unverified_done_entries"]:
         raise SystemExit("Publication evidence anomaly: done entry without post_id")
 

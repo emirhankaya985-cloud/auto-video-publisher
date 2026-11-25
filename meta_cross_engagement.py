@@ -172,6 +172,7 @@ def verified_like_coverage(actors, ledger):
         accepted_by = set()
         accepted_targets = set()
         count = 0
+        self_count = 0
         for record in ledger["actions"].values():
             if not isinstance(record, dict):
                 continue
@@ -180,12 +181,13 @@ def verified_like_coverage(actors, ledger):
                 continue
             actor = members.get(str(record.get("actor", "")))
             target = members.get(str(record.get("owner", "")))
-            if (not actor or not target or actor["id"] == target["id"]
-                    or actor["name"] not in eligible):
+            if (not actor or not target or actor["name"] not in eligible):
                 continue
             accepted_by.add(actor["name"])
             accepted_targets.add(target["name"])
             count += 1
+            if actor["id"] == target["id"]:
+                self_count += 1
         output[platform] = {
             "permission_eligible_actor_routes": sorted(eligible),
             "permission_missing_actor_routes": sorted(missing_grant),
@@ -193,6 +195,8 @@ def verified_like_coverage(actors, ledger):
             "eligible_routes_without_confirmed_like": sorted(eligible - accepted_by),
             "confirmed_target_routes": sorted(accepted_targets),
             "confirmed_like_count_in_retained_ledger": count,
+            "confirmed_self_like_count_in_retained_ledger": self_count,
+            "confirmed_cross_like_count_in_retained_ledger": count - self_count,
         }
     return output
 
@@ -318,6 +322,17 @@ def permission(platform, operation):
     return {"pages_manage_engagement"} if operation == "like" else {"pages_manage_posts"}
 
 
+def cross_page_like_hold_key(task):
+    """Stable provider-denied Page-to-Page target, never affect owner self-likes."""
+    if (task.get("platform") == "facebook" and task.get("operation") == "like"
+            and str(task.get("actor") or "") != str(task.get("owner") or "")
+            and str(task.get("post_id") or "").isdecimal()
+            and str(task.get("actor") or "").isdecimal()
+            and str(task.get("owner") or "").isdecimal()):
+        return "facebook/like/cross_post/" + str(task["post_id"])
+    return None
+
+
 def provider_holds(ledger):
     """Persist Meta policy restrictions; never rotate actors to continue a lane.
 
@@ -333,6 +348,18 @@ def provider_holds(ledger):
                 and record["graph_code"] == 368 and lane in SUPPORTED):
             holds.setdefault("/".join(lane), {"graph_code": 368, "reason": "meta_provider_restriction",
                                               "run_id": str(record.get("run_id", ""))})
+        # Live run 42901421078: six distinct Pages got definitive HTTP403 /
+        # Graph 200 trying to like the same Gönle Düşen FB video; its own
+        # Page succeeded. Never rotate other Pages to bypass this access
+        # denial. Preserve a target-only hold even after 7-day pruning.
+        held_post = cross_page_like_hold_key(record)
+        if (held_post and record.get("status") == "rejected"
+                and record.get("http_status") == 403
+                and record.get("graph_code") == 200):
+            holds.setdefault(held_post, {
+                "http_status": 403, "graph_code": 200,
+                "reason": "meta_cross_page_permission_denied",
+                "run_id": str(record.get("run_id", ""))})
     return holds
 
 
@@ -373,6 +400,8 @@ def build_plan(posts, actors, ledger, run_id, source_run_id, *, now):
                     report.append(dict(task, status="already_recorded"))
                 elif f"{task['platform']}/{operation}" in holds:
                     report.append(dict(task, status="provider_restriction_hold"))
+                elif cross_page_like_hold_key(task) in holds:
+                    report.append(dict(task, status="provider_permission_hold"))
                 else:
                     # Reserve the ENTIRE batch in a GitHub artifact before POST.
                     ledger["actions"][action_key] = dict(task, status="reserved",
@@ -381,11 +410,15 @@ def build_plan(posts, actors, ledger, run_id, source_run_id, *, now):
     return tasks, report
 
 
-def verified_media(task, actors):
+def verified_media(task, actors, *, recent_now=None):
     source = actors[(task["platform"], task["owner"])]
     # The publisher records a Video ID, not a PagePost ID. permalink_url is
     # not a common Video field; do not fail the owner check by requesting it.
     fields = "id,from" if task["platform"] == "facebook" else "id,owner,permalink,media_type"
+    if recent_now is not None:
+        # Use the provider's publication timestamp, not the publisher run's
+        # time or the local calendar day. Fail closed if Meta omits the field.
+        fields += ",created_time" if task["platform"] == "facebook" else ",timestamp"
     body = graph("GET", task["post_id"], source["token"], {"fields": fields})
     owner = body.get("from" if task["platform"] == "facebook" else "owner")
     if str(body.get("id")) != task["post_id"]:
@@ -396,6 +429,14 @@ def verified_media(task, actors):
         raise ValueError("source_owner_mismatch")
     if task["platform"] == "instagram" and body.get("media_type") not in {"IMAGE", "VIDEO", "CAROUSEL_ALBUM"}:
         raise ValueError("unsupported Instagram media")
+    if recent_now is not None:
+        if recent_now.tzinfo is None:
+            raise ValueError("invalid recent window")
+        published = stamp(body.get("created_time") if task["platform"] == "facebook"
+                          else body.get("timestamp"))
+        latest = recent_now.astimezone(timezone.utc)
+        if not latest - timedelta(hours=24) <= published <= latest:
+            raise ValueError("outside_recent_24h_window")
     if task["platform"] == "facebook" and task["operation"] == "repost":
         if task["post_id"].isdigit():
             # Canonical Facebook Watch URL of the verified owned Video ID.
@@ -449,6 +490,10 @@ def execute(tasks, actors, ledger, run_id, *, persist, sleep=time.sleep):
             record["status"] = "provider_restriction_hold"
             persist(ledger)
             continue
+        if cross_page_like_hold_key(task) in holds:
+            record["status"] = "provider_permission_hold"
+            persist(ledger)
+            continue
         actor = actors.get(actor_key)
         if not actor or actor_key in stopped or not account_enabled(actor["name"], task["platform"]):
             record["status"] = "blocked_actor"
@@ -462,7 +507,10 @@ def execute(tasks, actors, ledger, run_id, *, persist, sleep=time.sleep):
             source_key = (task["platform"], task["post_id"], task["owner"], task["operation"])
             if source_key not in source_checks:
                 try:
-                    source_checks[source_key] = verified_media(task, actors)
+                    source_checks[source_key] = verified_media(
+                        task, actors,
+                        **({"recent_now": datetime.now(timezone.utc)}
+                           if os.getenv("ENGAGEMENT_MODE") == "account_batch" else {}))
                 except (GraphFailure, ValueError, KeyError) as exc:
                     source_checks[source_key] = exc
             link = source_checks[source_key]
@@ -491,6 +539,11 @@ def execute(tasks, actors, ledger, run_id, *, persist, sleep=time.sleep):
                 stopped.add(actor_key)
             if exc.code == 368:
                 holds[lane] = {"graph_code": 368, "reason": "meta_provider_restriction", "run_id": run_id}
+            denied_post = cross_page_like_hold_key(task)
+            if denied_post and exc.definite and exc.http == 403 and exc.code == 200:
+                holds[denied_post] = {"http_status": 403, "graph_code": 200,
+                                      "reason": "meta_cross_page_permission_denied",
+                                      "run_id": run_id}
         persist(ledger)
     return ledger
 
@@ -536,35 +589,63 @@ def source_run_valid(run, now):
 
 
 def failed_before_source_state(run_id):
-    """Positive job evidence for one specific setup failure, never an upload."""
+    """Skip only proven failed runs that could NOT have issued any Meta POST.
+
+    The modern publisher uses one account-scoped `meta (film)` job and a
+    downstream merge job; its first stage can fail in no-write verification.
+    A run with a planning, intent or publish attempt is NEVER a fallback.
+    """
     body = github(f"actions/runs/{run_id}/jobs?per_page=100").json()
     jobs = body.get("jobs") if isinstance(body, dict) else None
-    if (not isinstance(jobs, list) or len(jobs) != 1
+    if (not isinstance(jobs, list) or not 1 <= len(jobs) <= 2
             or type(body.get("total_count")) is not int
-            or body.get("total_count") != 1 or not isinstance(jobs[0], dict)):
+            or body["total_count"] != len(jobs)
+            or any(not isinstance(j, dict) for j in jobs)):
         return False
-    job = jobs[0]
+    candidates = [j for j in jobs
+                  if j.get("name") == "meta" or
+                  (isinstance(j.get("name"), str) and
+                   re.fullmatch(r"meta \((?:film|film_second|toonzone|tarladaki|penguen|gonle|daily_laugh)\)",
+                                j["name"]))]
+    if len(candidates) != 1:
+        return False
+    job = candidates[0]
+    others = [j for j in jobs if j is not job]
+    if others and (len(others) != 1
+                   or others[0].get("name") != "merge-account-receipts"
+                   or others[0].get("status") != "completed"
+                   or others[0].get("conclusion") not in {"failure", "skipped"}):
+        return False
     if (str(job.get("run_id")) != str(run_id)
-            or job.get("name") != "meta" or job.get("status") != "completed"
-            or job.get("conclusion") != "failure" or not isinstance(job.get("steps"), list)):
+            or job.get("status") != "completed"
+            or job.get("conclusion") != "failure"
+            or not isinstance(job.get("steps"), list)):
         return False
     steps = job["steps"]
-    expected = {
+    required = {
         "Fail early on invalid Meta credentials before any video work": "success",
-        "Install media runtime only after Meta preflight passed": "failure",
-        "Verify state, account and caption safety without API writes": "skipped",
         "Check public folders, captions, histories and prepare intent": "skipped",
         "Prepare verified YouTube channel intents for current plans": "skipped",
         "Persist intent before any Meta upload": "skipped",
         "Publish explicitly planned Meta videos": "skipped",
         "Publish planned YouTube videos with archived intent": "skipped",
     }
-    for name, conclusion in expected.items():
-        rows = [step for step in steps if isinstance(step, dict) and step.get("name") == name]
+    for name, conclusion in required.items():
+        rows = [s for s in steps if isinstance(s, dict) and s.get("name") == name]
         if (len(rows) != 1 or rows[0].get("status") != "completed"
                 or rows[0].get("conclusion") != conclusion):
             return False
-    return True
+    stages = {}
+    for name in ("Install media runtime only after Meta preflight passed",
+                 "Verify state, account and caption safety without API writes"):
+        rows = [s for s in steps if isinstance(s, dict) and s.get("name") == name]
+        if len(rows) != 1 or rows[0].get("status") != "completed":
+            return False
+        stages[name] = rows[0].get("conclusion")
+    return stages["Install media runtime only after Meta preflight passed"] == "failure" and stages[
+        "Verify state, account and caption safety without API writes"] == "skipped" or (
+        stages["Install media runtime only after Meta preflight passed"] == "success"
+        and stages["Verify state, account and caption safety without API writes"] == "failure")
 
 
 def latest_source_id(*, now, allow_prestate_fallback=False, skipped_runs=None):
@@ -737,6 +818,64 @@ def build_one_like(posts, actors, ledger, run_id, source_run_id, *, now):
             return tasks, report
     return [], [{"status": "no_eligible_verified_single_like"}]
 
+
+def build_account_batch(posts, actors, ledger, run_id, source_run_id, *, now):
+    """One account per tick, all its eligible recent posts, same-platform likes only.
+
+    Each actor/post intent is persisted to an artifact before the first POST.
+    Other account lanes stay independent; permit verified owner likes, never save or repost.
+    """
+    if ledger.get("schema") != 1 or not isinstance(ledger.get("actions"), dict):
+        raise ValueError("invalid engagement ledger; reset forbidden")
+    holds = provider_holds(ledger)
+    never = datetime(1970, 1, 1, tzinfo=timezone.utc)
+    names = {(a["platform"], a["id"]): a["name"] for a in actors.values()}
+    last_target = {}
+    for record in ledger["actions"].values():
+        if record.get("operation") == "like":
+            name = names.get((record.get("platform"), str(record.get("owner", ""))))
+            if name:
+                last_target[name] = max(last_target.get(name, never), stamp(record["at"]))
+
+    priority = ("ToonZone", "Film Mağarası", "Filmmagrasi",
+                "Beyinsiz Penguen", "Tarladaki Fasulye",
+                "Gönle Düşen", "Daily Laugh Lab")
+    rank = {name: i for i, name in enumerate(priority)}
+    by_name = {}
+    for post in posts:
+        owner = actors.get((post["platform"], post["owner"]))
+        if owner and f'{post["platform"]}/like' not in holds:
+            by_name.setdefault(owner["name"], []).append(post)
+
+    blocked_across_accounts = []
+    for name in sorted(by_name, key=lambda n: (last_target.get(n, never),
+                                               rank.get(n, len(rank)), n)):
+        planned, report = [], []
+        for post in sorted(by_name[name], key=lambda p: (p["platform"], p["post_id"])):
+            platform = post["platform"]
+            reviewers = {
+                (a["platform"], a["id"]): a for a in actors.values()
+                if a["platform"] == platform
+                and permission(platform, "like") <= a["grants"]
+                and key(dict(post, actor=a["id"], operation="like")) not in ledger["actions"]
+            }
+            if not reviewers:
+                continue
+            probe = dict(post, actor=next(iter(reviewers.values()))["id"], operation="like")
+            try:
+                verified_media(probe, actors, recent_now=now)
+            except (GraphFailure, ValueError, KeyError):
+                report.append({"status": "source_preflight_failed"})
+                continue
+            reservations, reasons = build_plan([post], reviewers, ledger, run_id,
+                                               source_run_id, now=now)
+            planned.extend(t for t in reservations if t["operation"] == "like")
+            report.extend(reasons)
+        if planned:
+            return planned, report
+        blocked_across_accounts.extend(report)
+    return [], blocked_across_accounts or [{"status": "no_eligible_verified_account_batch"}]
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("action", choices=("plan", "execute"))
@@ -751,8 +890,11 @@ def main():
     single_like = (mode == "single_like"
                    and os.getenv("GITHUB_EVENT_NAME") in {"push", "schedule"}
                    and os.getenv("GITHUB_REF") == "refs/heads/main")
+    account_batch = (mode == "account_batch"
+                     and os.getenv("GITHUB_EVENT_NAME") in {"schedule", "push"}
+                     and os.getenv("GITHUB_REF") == "refs/heads/main")
     live = (os.getenv("META_CROSS_ENGAGEMENT_ENABLED") == "true"
-            and (mode == "apply" or single_like))
+            and (mode == "apply" or single_like or account_batch))
     focus = os.getenv("META_AUDIT_FOCUS", "").strip()
     if focus and live:
         # A focus is exclusively for read-only coverage; never escalate to
@@ -767,7 +909,7 @@ def main():
         if source_id == "latest":
             source_id = latest_source_id(now=now,
                 allow_prestate_fallback=(mode == "dry_run" and not live
-                    and os.getenv("GITHUB_EVENT_NAME") == "schedule"
+                    and (os.getenv("GITHUB_EVENT_NAME") == "schedule" or bool(focus))
                     and os.getenv("ENGAGEMENT_SCOPE") == "recent_window"),
                 skipped_runs=skipped_sources)
         ledger = restore()
@@ -776,14 +918,22 @@ def main():
                  if os.getenv("ENGAGEMENT_SCOPE") == "recent_window"
                  else source_posts(state, source_id, actors))
         posts, focus_info = scope_audit_posts(posts, actors, focus)
-        tasks, report = (build_one_like(posts, actors, ledger, run_id, source_id, now=now)
-                         if single_like else build_plan(posts, actors, ledger, run_id,
-                                                        source_id, now=now))
+        if account_batch:
+            tasks, report = build_account_batch(posts, actors, ledger, run_id, source_id, now=now)
+        elif single_like:
+            tasks, report = build_one_like(posts, actors, ledger, run_id, source_id, now=now)
+        else:
+            tasks, report = build_plan(posts, actors, ledger, run_id, source_id, now=now)
         if single_like and live and (
                 len(tasks) > 1
                 or any(t["operation"] != "like" or t["actor"] == t["owner"]
                        for t in tasks)):
             raise ValueError("single-like plan not safe")
+        if account_batch and live and (any(t["operation"] != "like"
+                for t in tasks)
+                or len({a["name"] for t in tasks for a in actors.values()
+                        if a["platform"] == t["platform"] and a["id"] == t["owner"]}) > 1):
+            raise ValueError("account batch scope invalid")
         # A zero-eligible scheduled tick is a legitimate no-op. Its
         # diagnostic has a status but no platform/operation, unlike task rows.
         blocked_counts = dict(Counter(
@@ -816,6 +966,11 @@ def main():
                 or any(t.get("operation") != "like" or t.get("actor") == t.get("owner")
                        for t in tasks)):
             raise ValueError("single-like execution scope invalid")
+        if account_batch and (any(t.get("operation") != "like"
+                for t in tasks)
+                or len({a["name"] for t in tasks for a in actors.values()
+                        if a["platform"] == t.get("platform") and a["id"] == t.get("owner")}) > 1):
+            raise ValueError("account batch execution scope invalid")
         execute(tasks, actors, ledger, run_id, persist=lambda x: save(STATE, x))
         counts = {}
         for value in ledger["actions"].values():
@@ -826,7 +981,7 @@ def main():
                                     for v in ledger["actions"].values() if v.get("run_id") == run_id))
         print(json.dumps({"results": counts, "by_operation": by_operation,
                           "provider_holds": ledger.get("provider_holds", {}), "publication_state_modified": False}))
-        if (ledger.get("provider_holds") and not single_like) or any(counts.get(s) for s in ("source_or_permission_unverified", "uncertain", "rejected", "blocked_actor", "provider_restriction_hold")):
+        if (ledger.get("provider_holds") and mode == "apply") or any(counts.get(s) for s in ("source_or_permission_unverified", "uncertain", "rejected", "blocked_actor", "provider_restriction_hold")):
             raise SystemExit(1)
     else:
         print('{"mode":"dry_run","writes":0}')
@@ -859,6 +1014,31 @@ def safe_hold_reason(exc):
     return "read_or_runtime_failure"
 
 
+def readonly_source_not_ready(exc):
+    """Whether a dry-run health scan merely raced the publisher schedule.
+
+    This is safe to treat as a no-op only in the dedicated read-only
+    diagnostics workflow. The live engagement workflow remains fail-closed.
+    """
+    return (type(exc) is ValueError
+            and str(exc) in {"no recent completed publisher run",
+                             "source result unavailable"})
+
+
+def mark_source_not_ready_report():
+    """Label a read-only schedule race as unavailable evidence, not a hold."""
+    report = {}
+    try:
+        prior = json.loads(REPORT.read_text(encoding="utf-8"))
+        if isinstance(prior, dict):
+            report = prior
+    except (OSError, ValueError):
+        pass
+    report.update(runtime_status="source_not_ready", writes_retried=False,
+                  engagement_posts_sent=0)
+    save(REPORT, report)
+
+
 def preserve_failed_audit(exc):
     """Keep an actionable, redacted report even when planning fails early.
 
@@ -886,6 +1066,13 @@ if __name__ == "__main__":
     except Exception as exc:
         # Keep a redacted audit artifact; do not convert any failure to success.
         reason = preserve_failed_audit(exc)
+        if (os.getenv("ENGAGEMENT_SOURCE_NOT_READY_IS_OK") == "true"
+                and os.getenv("ENGAGEMENT_MODE") == "dry_run"
+                and readonly_source_not_ready(exc)):
+            mark_source_not_ready_report()
+            print(json.dumps({"status": "source_not_ready", "reason_code": reason,
+                              "writes_retried": False, "engagement_posts_sent": 0}))
+            raise SystemExit(0) from None
         print(json.dumps({"status": "held", "reason_code": reason,
                           "error_type": type(exc).__name__, "writes_retried": False}))
         raise SystemExit(1) from None

@@ -1,0 +1,6 @@
+Owner explicitly requested completing verified provider mappings in the
+985 AI Control Center. This one-time action reads six Threads /me identities
+using only existing Secrets and validates username plus optional configured ID.
+No media, posts, token changes, Telegram, user data or CRM writes. Broken
+Penguen identity must not block unrelated source accounts. This file is
+immutable and must not be edited again.
