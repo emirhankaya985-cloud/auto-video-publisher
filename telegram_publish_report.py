@@ -74,7 +74,6 @@ ROUTE_LABELS = {
     "gonle": "❤️ Gönle Düşen",
     "daily_laugh": "😂 Daily Laugh Lab",
     "film": "🎬 Film Mağarası",
-    "film_second": "🎞️ Filmmagrasi",
     "toonzone": "📺 ToonZone",
 }
 PLATFORM_LABELS = {"facebook": "Facebook", "instagram": "Instagram"}

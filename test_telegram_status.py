@@ -30,6 +30,14 @@ class StatusTableTests(unittest.TestCase):
         self.assertIn('kota ve yayın sayısı N/A', table)
         self.assertNotIn('OddFrames      0/5', table)
 
+    def test_inactive_film_second_is_not_in_status_or_schedule(self):
+        table = status_table(now=self.now, state={'entries': {'old': {
+            'route': 'film_second', 'platform': 'facebook', 'status': 'done',
+            'post_id': '1234567890', 'day': '2026-11-03'}}}, configured=True)
+        self.assertIn('Film Mağarası', table)
+        self.assertNotIn('Film FB 2', table)
+        self.assertNotIn('Filmmagrasi', table)
+
     def test_future_daily_slots_are_not_prematurely_reported_overdue(self):
         early = datetime(2026, 11, 7, 2, 0, tzinfo=ZoneInfo('Europe/Istanbul'))
         late = datetime(2026, 11, 7, 23, 50, tzinfo=ZoneInfo('Europe/Istanbul'))

@@ -26,6 +26,8 @@ from meta_report_tables import ntfy_table, publication_telegram
 from ntfy_notifications import send_ntfy
 from telegram_notifications import STATISTICS_KEYBOARD, send_telegram, telegram_configured
 from ntfy_phone_report import compact_phone_report
+from token_status_tracker import account_summary, build_inventory
+from notification_dedup import mark_result, should_send
 from publisher_recovery import read_with_retry
 from performance_history import counter, follower_changes
 from views_comparison import ViewReport, build_comparison, load_history, telegram_tables, validate_collection, number
@@ -41,9 +43,8 @@ META_TARGETS = (
     ("❤️ Gönle Düşen", "Gönle Düşen", "Instagram"),
     ("😂 Daily Laugh Lab", "Daily Laugh Lab", "Facebook"),
     ("😂 Daily Laugh Lab", "Daily Laugh Lab", "Instagram"),
-    ("🎬 Film Mağarası + Filmmagrasi", "Film Mağarası", "Facebook 1"),
-    ("🎬 Film Mağarası + Filmmagrasi", "Filmmagrasi", "Facebook 2"),
-    ("🎬 Film Mağarası + Filmmagrasi", "Film Mağarası", "Instagram"),
+    ("🎬 Film Mağarası", "Film Mağarası", "Facebook 1"),
+    ("🎬 Film Mağarası", "Film Mağarası", "Instagram"),
     ("📺 ToonZone", "ToonZone", "Facebook"),
     ("📺 ToonZone", "ToonZone", "Instagram"),
 )
@@ -60,7 +61,7 @@ ACCOUNT_TARGETS = {
     "🐧 Beyinsiz Penguen": (5, "penguen", "DRIVE_FOLDER_ID", ("yt2", "fb", "ig")),
     "❤️ Gönle Düşen": (5, "gonle", "GONLE_DUSEN_DRIVE_FOLDER_ID", ("fb", "ig")),
     "😂 Daily Laugh Lab": (5, "daily_laugh", "DAILY_LAUGH_DRIVE_FOLDER_ID", ("fb", "ig", "yt_daily")),
-    "🎬 Film Mağarası + Filmmagrasi": (5, "film", "FILM_DRIVE_FOLDER_ID", ("fb_film_1", "fb_film_2", "ig")),
+    "🎬 Film Mağarası": (5, "film", "FILM_DRIVE_FOLDER_ID", ("fb_film_1", "ig")),
     "📺 ToonZone": (4, "toonzone", "TOONZONE_DRIVE_FOLDER_ID", ("fb", "ig")),
 }
 
@@ -850,6 +851,7 @@ def build_report(now=None):
                 failed_total += progress["failures"]
                 posts_total += progress["posts"]
                 expected_posts_total += progress["expected_posts"]
+                rows.append(f"  Bekleyen/belirsiz video: {progress.get('uncertain', 0)}")
                 mark = "✅" if progress["completed"] >= target else "⚠️"
                 rows.append(f"🎬 Yayın: {progress['completed']}/{target} {mark}")
                 rows.append(f"  Eksik video: {max(target - progress['completed'], 0)}")
@@ -954,6 +956,16 @@ def build_report(now=None):
             f"🗄️ Geçmiş: {'GitHub artifact için hazırlandı (yükleme doğrulanmalı)' if archive_saved else '⚠️ GitHub artifact hazırlanamadı'}" if meta_only else
             f"🗄️ Geçmiş: {'Drive’a kaydedildi' if archive_saved else '⚠️ Drive arşivi kaydedilemedi'}",
         ])
+        token_inventory = build_inventory(
+            snapshot=snapshot, errors=collection_errors,
+            measured_at=now.isoformat(timespec="seconds"), history_path=history_path,
+        )
+        token_status_path = Path(os.getenv(
+            "TOKEN_STATUS_ARTIFACT_PATH", "link-runtime/token-status-inventory.json"))
+        token_status_path.parent.mkdir(parents=True, exist_ok=True)
+        token_status_path.write_text(json.dumps(
+            token_inventory, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+        rows.extend(["", *account_summary(token_inventory)])
         if errors:
             rows.append("\n⚠️ EKSİK VERİ / İZİN:")
             rows.extend(f"• {error}" for error in errors)
@@ -991,6 +1003,7 @@ def build_report(now=None):
             and record.get("entity_type") == "account"
             and record.get("metric") in THREADS_ENGAGEMENT_METRICS
         ]
+        comparison["token_status"] = token_inventory
         return ViewReport("\n".join(rows), comparison)
 
 
@@ -1111,6 +1124,35 @@ def notify_report_if_usable(report, *, send=None):
     verdict = report_delivery_health(report.comparison)
     if verdict not in {"complete", "partial_persisted"}:
         return "deferred_to_failure_alert"
+    event_name = os.getenv("GITHUB_EVENT_NAME", "")
+    if event_name == "schedule":
+        if os.getenv("GITHUB_RUN_ATTEMPT", "1") != "1":
+            return "scheduled_retry_suppressed"
+        day = report.comparison.get("day")
+        if not isinstance(day, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+            return "notification_transport_failed"
+        key = f"daily-stats-report|{day}"
+        try:
+            if not should_send(key):
+                return "duplicate_suppressed"
+            body = compact_phone_report(str(report), list(ACCOUNT_TARGETS))
+            send_ntfy(f"🌙 Günlük sosyal medya raporu — {day}", body,
+                      timeout=20, require_ack=True)
+            try:
+                mark_result(key, True)
+            except Exception:
+                print("::warning::daily_report_dedupe_persist_failed", flush=True)
+            return "notification_checked"
+        except Exception as exc:
+            try:
+                mark_result(key, False, type(exc).__name__)
+            except Exception:
+                pass
+            print("::warning::daily_report_notification_failed error_type="
+                  + type(exc).__name__, flush=True)
+            return "notification_transport_failed"
+    if event_name and event_name != "workflow_dispatch":
+        return "non_scheduled_send_suppressed"
     try:
         (send or notify)(report)
     except Exception as exc:

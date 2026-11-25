@@ -296,7 +296,7 @@ class MetaConnectionAuditTests(unittest.TestCase):
         result=audit_meta("secret",auth)
         film_rows={row["page_name"]:row for row in result["accounts"]}
         self.assertEqual(film_rows["Film Mağarası"]["status"],"passed")
-        self.assertEqual(film_rows["Filmmagrasi"]["status"],"passed")
+        self.assertNotIn("Filmmagrasi", film_rows)
 
 
 if __name__ == "__main__": unittest.main()

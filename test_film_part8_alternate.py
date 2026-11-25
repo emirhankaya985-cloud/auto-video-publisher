@@ -64,62 +64,13 @@ class FilmPart8AlternateTests(unittest.TestCase):
             "film_second", dict(self.files, **{same_id["name"]: same_id}),
             {"film_second:facebook:held-copy-id": base}))
 
-    def test_plan_keeps_hold_and_reserves_only_original_no_post(self):
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            start = {"schema": 1, "episode_days": {}, "entries": {
-                "film_second:facebook:held-copy-id": deepcopy(self.row)
-            }}
-            with ExitStack() as stack:
-                stack.enter_context(patch.dict(os.environ, {
-                    "GITHUB_RUN_ID": "12345",
-                    "GITHUB_STEP_SUMMARY": str(root / "summary.md"),
-                    "ADAPTIVE_SCHEDULE_ENABLED": "false",
-                    "AUTO_BACKFILL_ENABLED": "false",
-                    "CATCHUP_BATCH_DATE": "not-today",
-                    "META_PREFLIGHT_PARTIAL_OK": "false",
-                    "PUBLISH_ACCOUNT_SCOPE": "film_second",
-                }))
-                for name, value in (
-                    ("ROOT", root),
-                    ("STATE", root / "state.json"),
-                    ("PLAN", root / "plan.json"),
-                    ("FOLDERS", {"film": "shared-folder"}),
-                    ("ROUTES", {"film_second": ("film", "Filmmagrasi")}),
-                ):
-                    stack.enter_context(patch.object(runtime, name, value))
-                stack.enter_context(patch.object(runtime, "restore", return_value=start))
-                stack.enter_context(patch.object(runtime, "apply_verified_migration"))
-                stack.enter_context(patch.object(runtime, "quarantine_weak_caption_aliases"))
-                stack.enter_context(patch.object(runtime, "load_meta_auth", return_value={
-                    "pages": [{"page_name": "Filmmagrasi"}]}))
-                stack.enter_context(patch.object(runtime, "inventory", return_value=self.files))
-                stack.enter_context(patch.object(runtime, "graph_rows", return_value=[]))
-                stack.enter_context(patch.object(runtime, "route_enabled", return_value=True))
-                stack.enter_context(patch.object(runtime, "target_count", return_value=1))
-                stack.enter_context(patch.object(runtime, "seed_done", return_value=False))
-                stack.enter_context(patch.object(runtime, "verified_film_duplicate", return_value=None))
-                stack.enter_context(patch.object(runtime, "copies", return_value=({
-                    "facebook": "Owner checked caption", "instagram": "Owner checked caption"
-                }, "matching-txt")))
-                stack.enter_context(patch.object(
-                    runtime, "prepare_caption", side_effect=lambda text, *_: text))
-                stack.enter_context(patch("content_stock.build_stock", return_value={}))
-                stack.enter_context(patch("content_stock.stock_markdown", return_value=""))
-                post = stack.enter_context(patch.object(runtime, "upload_facebook_reel"))
-                runtime.plan()
-                post.assert_not_called()
-            plans = json.loads((root / "plan.json").read_text())
-            state = json.loads((root / "state.json").read_text())
-            self.assertEqual([item["name"] for item in plans],
-                             ["Bickin_Part_8.mp4"])
-            self.assertEqual(plans[0]["platforms"], ["facebook"])
-            self.assertEqual(state["entries"]["film_second:facebook:held-copy-id"],
-                             self.row)
-            self.assertEqual(state["entries"]["film_second:facebook:original-file-id"]["status"],
-                             "intent")
-            self.assertIn("QUARANTINE: Bickin Part 8 export",
-                          (root / "report.md").read_text())
+    def test_legacy_film_second_history_is_preserved_without_active_route(self):
+        self.assertNotIn("film_second", runtime.ROUTES)
+        self.assertTrue(runtime.film_part8_local_only_export_hold(
+            "film_second", self.files,
+            {"film_second:facebook:held-copy-id": deepcopy(self.row)}))
+        self.assertEqual(self.row["status"], "held")
+        self.assertNotIn("post_id", self.row)
 
 
 if __name__ == "__main__":

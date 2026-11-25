@@ -85,7 +85,7 @@ ACCOUNT_PLATFORMS = (
     ("Film Mağarası", "Facebook", "Film Mağarası", "N/A", "active", "stats_reporter / Meta; Facebook sayfa 1"),
     ("Film Mağarası", "Instagram", "Film Mağarası", "N/A", "active", "stats_reporter / Meta"),
     ("Film Mağarası", "Threads", "film_magrasi", "@film_magrasi", "not_collected", "Threads metrik kaynağı master'da yok (PR #46 ayrı)"),
-    ("Filmmagrasi", "Facebook", "Filmmagrasi", "N/A", "active", "stats_reporter / Meta; Facebook sayfa 2"),
+    ("Filmmagrasi", "Facebook", "Filmmagrasi", "N/A", "archived", "Tarihsel hesap; aktif yayın rotası kapalı"),
     ("ToonZone", "Facebook", "ToonZone", "N/A", "active", "stats_reporter / Meta"),
     ("ToonZone", "Instagram", "ToonZone", "N/A", "active", "stats_reporter / Meta"),
     ("ToonZone", "Threads", "toonzone.tr", "@toonzone.tr", "not_collected", "Threads metrik kaynağı master'da yok (PR #46 ayrı)"),

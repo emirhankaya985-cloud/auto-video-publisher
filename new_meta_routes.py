@@ -35,7 +35,6 @@ ROUTES = {
         "film", FILM_FOLDER_ID,
         (
             MetaTarget("film_magrasi_fb", "Film Mağarası", "facebook", "1239298989276639"),
-            MetaTarget("filmmagrasi1_fb", "Filmmagrasi", "facebook", "854990964375370"),
             MetaTarget("film_magrasi_ig", "Film Mağarası", "instagram", "1239298989276639"),
         ),
         "ordered-film-part", "turkish", False,
@@ -114,8 +113,8 @@ def dry_run_route(route_key, meta_auth, selected_video, rights_approved=False):
 
 def assert_same_film_file(plan):
     ids = {row["drive_file_id"] for row in plan}
-    if len(ids) != 1 or len(plan) != 3:
-        raise RuntimeError("Film üç hedefi aynı Drive dosyasını kullanmalı")
+    if len(ids) != 1 or len(plan) != 2:
+        raise RuntimeError("Film Facebook ve Instagram hedefleri aynı Drive dosyasını kullanmalı")
     return True
 
 

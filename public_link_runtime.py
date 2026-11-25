@@ -65,7 +65,6 @@ ROUTES = {
     "gonle": ("gonle", "Gönle Düşen"),
     "daily_laugh": ("daily_laugh", "Daily Laugh Lab"),
     "film": ("film", "Film Mağarası"),
-    "film_second": ("film", "Filmmagrasi"),
     "toonzone": ("toonzone", "ToonZone"),
 }
 

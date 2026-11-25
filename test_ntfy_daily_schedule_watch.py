@@ -163,11 +163,12 @@ class MissingDailyReportTests(unittest.TestCase):
 
     def test_main_missing_run_sends_one_sanitized_alert(self):
         output = io.StringIO()
-        with patch("ntfy_daily_schedule_watch.check_daily_run",
+        with patch.dict(os.environ, {"GITHUB_EVENT_NAME": "schedule", "GITHUB_RUN_ATTEMPT": "1"}, clear=True), patch(
+            "ntfy_daily_schedule_watch.check_daily_run",
                    return_value={"status": "missing_or_failed"}), patch(
             "ntfy_daily_schedule_watch.send_ntfy",
             return_value={"http_status": 200, "server_ack": True}
-        ) as sender, redirect_stdout(output):
+        ) as sender, patch("ntfy_daily_schedule_watch.should_send", return_value=True), redirect_stdout(output):
             self.assertEqual(watch.main(), 1)
         self.assertEqual(sender.call_count, 1)
         self.assertTrue(sender.call_args.kwargs["require_ack"])
@@ -176,38 +177,52 @@ class MissingDailyReportTests(unittest.TestCase):
 
     def test_main_api_inaccessible_alerts_without_claiming_missed_run(self):
         output = io.StringIO()
-        with patch("ntfy_daily_schedule_watch.check_daily_run",
+        with patch.dict(os.environ, {"GITHUB_EVENT_NAME": "schedule", "GITHUB_RUN_ATTEMPT": "1"}, clear=True), patch(
+            "ntfy_daily_schedule_watch.check_daily_run",
                    return_value={"status": "audit_unavailable"}), patch(
             "ntfy_daily_schedule_watch.send_ntfy",
             return_value={"http_status": 200, "server_ack": True}
-        ) as sender, redirect_stdout(output):
+        ) as sender, patch("ntfy_daily_schedule_watch.should_send", return_value=True), redirect_stdout(output):
             self.assertEqual(watch.main(), 1)
         self.assertIn("durumuna erişilemedi", sender.call_args.args[1])
         self.assertNotIn("başarılı otomatik", sender.call_args.args[1])
 
     def test_failed_ntfy_attempt_does_not_echo_secret_credentials(self):
         output = io.StringIO()
-        with patch("ntfy_daily_schedule_watch.check_daily_run",
+        with patch.dict(os.environ, {"GITHUB_EVENT_NAME": "schedule", "GITHUB_RUN_ATTEMPT": "1"}, clear=True), patch(
+            "ntfy_daily_schedule_watch.check_daily_run",
                    return_value={"status": "missing_or_failed"}), patch(
             "ntfy_daily_schedule_watch.send_ntfy",
             side_effect=RuntimeError("private-topic-url")
-        ) as sender, redirect_stdout(output):
+        ) as sender, patch("ntfy_daily_schedule_watch.should_send", return_value=True), redirect_stdout(output):
             self.assertEqual(watch.main(), 1)
         self.assertEqual(sender.call_count, 1)
         self.assertNotIn("private-topic-url", output.getvalue())
 
-    def test_owner_quiet_mode_keeps_failed_verdict_without_sending(self):
+    def test_natural_watchdog_sends_deduplicated_alert(self):
         output = io.StringIO()
-        with patch.dict(os.environ, {"QUIET_FAILURE_NOTIFICATIONS": "true"}, clear=True), patch(
+        with patch.dict(os.environ, {"GITHUB_EVENT_NAME": "schedule", "GITHUB_RUN_ATTEMPT": "1"}, clear=True), patch(
             "ntfy_daily_schedule_watch.check_daily_run",
             return_value={"status": "missing_or_failed"}
         ), patch("ntfy_daily_schedule_watch.send_ntfy") as ntfy, patch(
             "ntfy_daily_schedule_watch.send_telegram"
-        ) as telegram, redirect_stdout(output):
+        ), patch("ntfy_daily_schedule_watch.should_send", return_value=True) as should_send, patch(
+            "ntfy_daily_schedule_watch.mark_result"
+        ) as mark, redirect_stdout(output):
+            self.assertEqual(watch.main(), 1)
+        ntfy.assert_called_once()
+        should_send.assert_called_once()
+        mark.assert_called_once()
+
+    def test_watchdog_retry_suppresses_duplicate_alert(self):
+        output = io.StringIO()
+        with patch.dict(os.environ, {"GITHUB_EVENT_NAME": "schedule", "GITHUB_RUN_ATTEMPT": "2"}, clear=True), patch(
+            "ntfy_daily_schedule_watch.check_daily_run",
+            return_value={"status": "missing_or_failed"}
+        ), patch("ntfy_daily_schedule_watch.send_ntfy") as ntfy, redirect_stdout(output):
             self.assertEqual(watch.main(), 1)
         ntfy.assert_not_called()
-        telegram.assert_not_called()
-        self.assertIn('"silenced_by_owner": true', output.getvalue())
+        self.assertIn('"suppressed_retry": true', output.getvalue())
 
 
 if __name__ == "__main__":

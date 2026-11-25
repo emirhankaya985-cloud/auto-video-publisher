@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 
 SCOPES = ("tarladaki", "penguen", "gonle", "daily_laugh",
-          "film", "film_second", "toonzone")
+          "film", "toonzone")
 
 
 def _check(state):

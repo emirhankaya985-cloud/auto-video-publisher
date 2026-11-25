@@ -14,8 +14,8 @@ class IdentityProofTests(unittest.TestCase):
             return {"status":"identity_verified","instagram_identity_checked":True}
         result=verify({"pages":list(pages.values())},check=check)
         self.assertEqual(result["status"],"verified_all")
-        self.assertEqual(result["expected"],13)
-        self.assertEqual(result["verified"],13)
+        self.assertEqual(result["expected"],12)
+        self.assertEqual(result["verified"],12)
         self.assertTrue(all(x["status"]=="identity_verified" for x in result["identities"]))
         self.assertNotIn("PRIVATE_NOT_PRINTED",str(result))
         self.assertFalse(result["publishing_performed"])

@@ -8,7 +8,7 @@ ACCOUNTS = [
     "🐧 Beyinsiz Penguen",
     "❤️ Gönle Düşen",
     "😂 Daily Laugh Lab",
-    "🎬 Film Mağarası + Filmmagrasi",
+    "🎬 Film Mağarası",
     "📺 ToonZone",
 ]
 
@@ -76,6 +76,17 @@ class PhoneReportTests(unittest.TestCase):
         report = self.make_long_report()
         result = compact_phone_report(report, ACCOUNTS)
         self.assertLessEqual(len(result.encode("utf-8")), PHONE_BODY_LIMIT)
+
+    def test_compaction_preserves_active_connection_status_and_expiry_unknown(self):
+        report = self.make_long_report() + "\n🔐 Bağlantı/token özeti (API okuması; yayın yetkisi ayrıca doğrulanır):\n"
+        report += "\n".join(f"• {name}: Facebook=VERIFIED_WORKING; Instagram=VERIFIED_WORKING; Threads=ACTION_REQUIRED; token expiry=UNKNOWN"
+                             for name in ACCOUNTS)
+        report += "\nToken bitişi yalnız API açık tarih verdiğinde gösterilir; paylaşım yetkisi bu raporda test edilmez."
+        compact = compact_phone_report(report, ACCOUNTS)
+        self.assertIn("🔐 Bağlantı/token özeti", compact)
+        self.assertIn("🐧 Beyinsiz Penguen: Facebook=VERIFIED_WORKING; Instagram=VERIFIED_WORKING; Threads=ACTION_REQUIRED; token expiry=UNKNOWN", compact)
+        self.assertIn("Token bitişi yalnız API açık tarih verdiğinde", compact)
+        self.assertLessEqual(len(compact.encode("utf-8")), PHONE_BODY_LIMIT)
 
 
 if __name__ == "__main__":

@@ -58,7 +58,7 @@ class PublicLinkHealthTests(unittest.TestCase):
     def test_failed_matrix_runs_report_only_accounts_with_blocked_receipts(self):
         with patch.object(health, "check_publication_receipts", return_value={
                 "status": "unhealthy", "reason": "publication_blocked",
-                "blocked_routes": ["penguen"], "receipt_accounts": 7}):
+                "blocked_routes": ["penguen"], "receipt_accounts": 6}):
             result = health.check_publisher(now=NOW, token="test", get=fake_get([
                 run("2026-10-24T08:07:00Z", "failure")]))
         self.assertEqual(result["status"], "unhealthy")
@@ -294,6 +294,14 @@ class PublicationReceiptTests(unittest.TestCase):
     def test_missing_receipts_are_unknown_not_healthy(self):
         verdict = health.check_publication_receipts([(NOW, {"id": 123, "status": "completed"})],
             get=self.receipt_get({}), headers={})
+        self.assertEqual(verdict["status"], "unknown")
+
+    def test_legacy_film_second_receipt_is_not_an_active_account_requirement(self):
+        okay = {"run_id": "123", "confirmed_new_posts": 1,
+                "planning_blocker_counts": {}, "step_outcomes": {"publish": "success"}}
+        verdict = health.check_publication_receipts(
+            [(NOW, {"id": 123, "status": "completed"})],
+            get=self.receipt_get({"film_second": okay}), headers={})
         self.assertEqual(verdict["status"], "unknown")
 
     def test_receipt_from_wrong_run_is_rejected(self):

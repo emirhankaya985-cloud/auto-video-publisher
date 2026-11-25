@@ -55,15 +55,18 @@ class PageHealthTests(unittest.TestCase):
     def test_historical_film_labels_resolve_by_allowlisted_page_id(self):
         first = {"page_name": "Eski Film Etiketi", "page_id": "1239298989276639", "page_token": "fake"}
         second = {"page_name": "Filmmağrası1", "page_id": "854990964375370", "page_token": "fake"}
+        checked = []
         def mocked_get(url, **kwargs):
             pid = url.split("/")[-1]
+            checked.append(pid)
             return self.response(id=pid, name="arbitrary historical display label")
         from meta_page_token_health import canonical_page_name
         self.assertEqual(canonical_page_name(first), "Film Mağarası")
         self.assertEqual(canonical_page_name(second), "Filmmagrasi")
         result = audit({"pages": [first, second]}, get=mocked_get)
         self.assertEqual([row["status"] for row in result["accounts"]],
-                         ["identity_verified", "identity_verified"])
+                         ["identity_verified"])
+        self.assertEqual(checked, ["1239298989276639"])
         self.assertNotIn("Film Mağarası", result["missing_page_names"])
         self.assertNotIn("Filmmagrasi", result["missing_page_names"])
 
