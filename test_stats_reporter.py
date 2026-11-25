@@ -707,7 +707,8 @@ class ArchivedLastGoodMetricsTests(unittest.TestCase):
                         {"platform": "Instagram", "total": 7},
                         {"platform": "Facebook", "total": None},
                     ]}]})
-        with patch("stats_reporter.notify") as send:
+        with patch.dict(os.environ, {"GITHUB_EVENT_NAME": "workflow_dispatch"}), \
+             patch("stats_reporter.notify") as send:
             self.assertEqual(notify_report_if_usable(report), "notification_checked")
         send.assert_called_once()
 
