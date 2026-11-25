@@ -2,43 +2,43 @@
 
 Date: 2026-11-26 (Europe/Istanbul)
 
-## Scope and safety
+## Delivered
 
-- Audited `emirhankaya985-cloud/auto-video-publisher` on `main` at `9c7337dca04ab49f7f5838ce88340a8997262842`.
-- Work is on `task73/read-only-meta-engagement`; no production deployment or engagement write was triggered.
-- Preserved prior branch `fix/engagement-readonly-health-20261126` findings: Film Second removed from active engagement routes; isolated health report treats missing/invalid evidence as unknown. `meta_auth_loader` and historic data were left intact.
-- `Film Second` / `Filmmagrasi` is excluded only from engagement identity/routes. Existing history and shared publisher account allowlist remain unchanged.
-- Engagement workflows now retain the 15-minute cadence and run read-only. Dispatch no longer offers `apply`; workflow always sets dry-run and engagement disabled; direct execute and unsupported API actions fail closed.
-- No Meta POST, Telegram/NTFY notification, or database write was made.
+- Repository: `emirhankaya985-cloud/auto-video-publisher`; merged PR [#325](https://github.com/emirhankaya985-cloud/auto-video-publisher/pull/325).
+- Production `main`: `0a1b0ce56cff4aa904a27e57f1dca2dab7c9c7e7`.
+- Existing `fix/engagement-readonly-health-20261126` fixes were preserved: Film Second excluded from active engagement identities and isolated health reports treat missing/invalid evidence as unknown. Shared publisher allowlist/history was left intact.
+- Engagement schedule remains every 15 minutes. Main and isolated workflows are read-only; manual `apply`, intent uploads, and engagement POST execution are disabled. Direct unsupported calls fail closed.
+- No Meta interaction, Telegram/NTFY message, or database write was sent.
 
-## API and production evidence
+## Read-only live evidence
 
-- Meta's current Instagram Media API documents engagement counts as readable fields; the repository's Instagram `/likes` POST is not a supported documented write. Historical Instagram `api_ack` rows are retained but are no longer counted as confirmed engagement.
-- Facebook Page likes are technically supported only for eligible Page posts, a Page token, `CREATE_CONTENT` task, and `pages_manage_engagement`. Automated cross-account likes are disabled by policy to avoid coordinated/artificial metric inflation.
-- Prior natural run `45639089352` was on stale SHA `aa4029036b25592721a10b1918d83762689e205b`; ledger had 21 Facebook and 18 Instagram API acknowledgements. These do not prove platform-side state and are historical only.
-- No current live account/token/permission health run was executed. Current account status for all six requested accounts is therefore **unknown / not freshly verified**.
-- Neon engagement receipt read/write integration is absent; connected Neon discovery did not expose the requested production analytics project. No Neon engagement rows were queried or written.
-- Engagement notifications currently lack a daily Turkish account-health summary and NTFY transport. Existing action receipt code is Telegram-only; success notifications are disabled by the read-only workflow. No notification delivery is claimed.
+- Isolated health run **45718400844** (push after merge) and manual read-only run **45718418035** both completed successfully on the merged SHA. Each evaluated all six accounts independently. The manual run is not evidence of a natural schedule trigger.
+- The run's account inventory contains all six requested accounts with **6 Facebook and 6 Instagram identities**, and no unverified account/platform routes. Facebook `pages_manage_engagement` permission checks passed for all six accounts. Instagram identity/token discovery succeeded, but Instagram like writes are unsupported and not enabled.
+- Accounts in the verified inventory: Tarladaki Fasulye, Gönle Düşen, Beyinsiz Penguen, Daily Laugh Lab, Film Mağarası, ToonZone. Film Second is absent.
+- New engagement actions: **0**. The workflow produced no engagement plans. The historical ledger contains 174 Facebook and 0 Instagram API-ACK rows in the restored view; these are historical API acknowledgements only, not platform-side verification. Historical Instagram acknowledgements remain preserved in prior artifacts.
+- The most recent natural engagement run found before the change was **45639089352**, on stale SHA `aa4029036b25592721a10b1918d83762689e205b`. No natural schedule run on the merged SHA has yet been observed.
 
-## Code and checks
+## API and policy
 
-- Updated `meta_cross_engagement.py`: removed Film Second active mapping, disabled write actions, blocked direct unsupported `perform`/execute calls, distinguished Facebook policy-disabled from unsupported API operations, stopped pruning historic action receipts, and reclassified old API acknowledgements as historical rather than platform-confirmed.
-- Updated `meta_cross_engagement_receipts.py`: read-only mode sends no engagement success/zero-like alert.
-- Updated main and isolated workflows: 15-minute schedule unchanged; all engagement runs dry-run, no intent upload or write execution; incomplete isolated reports remain unknown.
-- Added/updated regression coverage for no-write behavior, retired Film Second route, and historic receipt retention. Legacy tests that asserted live write behavior are explicitly skipped because the feature is intentionally disabled.
-- Focused test command `python -m unittest test_meta_cross_engagement.py test_meta_cross_engagement_receipts.py`: **passed** (81 tests; 16 legacy live-write expectations skipped).
-- Full command `python -m unittest discover`: **exit 0**, 1,476 tests. Some existing integration fixtures print expected Threads/auth failures; no production requests were made by the engagement changes.
-- Workflow YAML parsed successfully with PyYAML; `git diff --check` passed.
+- Meta's Instagram Media API exposes engagement counts as readable fields; no supported Instagram like-creation operation is documented. Instagram writes are classified `unsupported_by_verified_api`.
+- Facebook Page-post likes have a supported API under narrow Page/token/task/permission conditions. Automated cross-account likes are nevertheless disabled as coordinated metric inflation; they are classified `disabled_by_policy`.
+- The 15-minute schedule remains a health audit only. Meta rate limits and restriction responses are respected; no retries or alternate-actor bypasses are used.
 
-## Remaining work / blockers
+## Tests
 
-- PR not yet created and no CI or merge result exists.
-- Must open PR from `task73/read-only-meta-engagement`, wait for its checks, then merge only after CI passes.
-- After merge, run the isolated six-account read-only workflow on the merged SHA to refresh token, identity, and permission evidence. Do not trigger likes.
-- Daily Turkish Telegram/NTFY health delivery and persistent Neon health receipts remain unimplemented/unverified; current connected Neon project access is unavailable. Keep those fields unknown until existing authorized infrastructure is found and validated.
-- Current actual health status by account: Tarladaki Fasulye — unknown; Gönle Düşen — unknown; Beyinsiz Penguen — unknown; Daily Laugh Lab — unknown; Film Mağarası — unknown; ToonZone — unknown.
+- Focused engagement suite: `python -m unittest test_meta_cross_engagement.py test_meta_cross_engagement_receipts.py` — passed (81 tests; 16 legacy live-write expectations skipped).
+- Full suite: `python -m unittest discover` — exit 0, 1,476 tests.
+- Workflow YAML parsed with PyYAML; `git diff --check` passed.
+- PR #325 checks passed: engagement tests and repository regression; the engagement write job was skipped on the PR.
 
-## References
+## Remaining blockers
+
+- Engagement health/receipt data is not connected to Neon. The existing Neon sync covers publication receipts only, and connected Neon discovery did not expose the requested production project. No Neon engagement rows were read or written.
+- A daily Turkish health report through Telegram and NTFY is not implemented. Existing engagement receipts were Telegram-only; they are no longer sent by the read-only workflow. No delivery is claimed.
+- Account-level daily reporting of last run, errors, blocked operations, and token/permission state is not persisted. The successful diagnostic run proves identity and permission reads at that run time, not ongoing token health.
+- Natural schedule after merge remains unverified. The workflow cron and previous schedule records were inspected, but the new SHA has only push and manual run evidence so far.
+
+## Official references
 
 - [Meta Instagram Media reference](https://developers.facebook.com/docs/instagram-platform/reference/instagram-media/v21.0/)
 - [Meta Page Post Likes reference](https://developers.facebook.com/docs/graph-api/reference/page-post/likes/)
