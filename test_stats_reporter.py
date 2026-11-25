@@ -682,7 +682,8 @@ class ArchivedLastGoodMetricsTests(unittest.TestCase):
         from views_comparison import ViewReport
         report = ViewReport("stored", {"meta_collection": {"status": "complete"},
                     "archive_saved": True, "accounts": []})
-        with patch("stats_reporter.notify", side_effect=RuntimeError("PRIVATE_TOKEN")) as send:
+        with patch.dict(os.environ, {"GITHUB_EVENT_NAME": "workflow_dispatch"}), \
+             patch("stats_reporter.notify", side_effect=RuntimeError("PRIVATE_TOKEN")) as send:
             result = notify_report_if_usable(report)
         self.assertEqual(result, "notification_transport_failed")
         send.assert_called_once()
@@ -692,7 +693,8 @@ class ArchivedLastGoodMetricsTests(unittest.TestCase):
         from views_comparison import ViewReport
         report = ViewReport("incomplete", {"meta_collection": {"status": "unavailable"},
                  "archive_saved": False, "accounts": []})
-        with patch("stats_reporter.notify") as send:
+        with patch.dict(os.environ, {"GITHUB_EVENT_NAME": "workflow_dispatch"}), \
+             patch("stats_reporter.notify") as send:
             self.assertEqual(notify_report_if_usable(report),
                              "deferred_to_failure_alert")
         send.assert_not_called()
