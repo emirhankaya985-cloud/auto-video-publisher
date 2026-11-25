@@ -28,6 +28,12 @@ from telegram_notifications import STATISTICS_KEYBOARD, send_telegram, telegram_
 from ntfy_phone_report import compact_phone_report
 from token_status_tracker import account_summary, build_inventory
 from notification_dedup import mark_result, should_send
+from engagement_health_report import (
+    collect_report as collect_engagement_health_report,
+    format_digest as format_engagement_health_digest,
+    format_report as format_engagement_health_report,
+    persist_artifact as persist_engagement_health_artifact,
+)
 from publisher_recovery import read_with_retry
 from performance_history import counter, follower_changes
 from views_comparison import ViewReport, build_comparison, load_history, telegram_tables, validate_collection, number
@@ -1015,6 +1021,14 @@ def build_report(now=None):
             and record.get("metric") in THREADS_ENGAGEMENT_METRICS
         ]
         comparison["token_status"] = token_inventory
+        engagement_health = collect_engagement_health_report()
+        try:
+            engagement_health["artifact_saved"] = bool(persist_engagement_health_artifact(engagement_health))
+        except OSError:
+            engagement_health["artifact_saved"] = False
+            engagement_health["artifact_error"] = "write_failed"
+        comparison["engagement_health"] = engagement_health
+        rows.extend(["", format_engagement_health_report(engagement_health)])
         return ViewReport("\n".join(rows), comparison)
 
 
@@ -1156,7 +1170,11 @@ def notify_report_if_usable(report, *, send=None):
         try:
             if not should_send(key):
                 return "duplicate_suppressed"
+            health_report = report.comparison.get("engagement_health")
             body = compact_phone_report(str(report), list(ACCOUNT_TARGETS))
+            if isinstance(health_report, dict):
+                health_digest = format_engagement_health_digest(health_report)
+                body = health_digest
             source_summary = report.comparison.get("instagram_source_report")
             if (isinstance(source_summary, dict)
                     and source_summary.get("status") in {"active", "degraded", "unavailable"}):
@@ -1168,6 +1186,25 @@ def notify_report_if_usable(report, *, send=None):
                 mark_result(key, True)
             except Exception:
                 print("::warning::daily_report_dedupe_persist_failed", flush=True)
+            telegram_key = f"daily-stats-engagement-health-telegram|{day}"
+            if telegram_configured():
+                try:
+                    if should_send(telegram_key):
+                        receipt = send_telegram(
+                            f"🌙 Günlük etkileşim sağlık raporu — {day}",
+                            health_digest if isinstance(health_report, dict) else body)
+                        delivered = isinstance(receipt, dict) and receipt.get("server_ack") is True
+                        mark_result(telegram_key, delivered,
+                                    None if delivered else "telegram_ack_missing")
+                except Exception as exc:
+                    try:
+                        mark_result(telegram_key, False, type(exc).__name__)
+                    except Exception:
+                        pass
+                    print("::warning::daily_health_telegram_failed error_type="
+                          + type(exc).__name__, flush=True)
+            else:
+                print("::warning::daily_health_telegram_not_configured", flush=True)
             return "notification_checked"
         except Exception as exc:
             try:
