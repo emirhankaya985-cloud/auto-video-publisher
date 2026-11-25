@@ -2,12 +2,21 @@ import io
 import os
 import unittest
 from contextlib import redirect_stdout
+from pathlib import Path
 from unittest.mock import patch, Mock
 
 import ntfy_smoke_test
 
 
 class SmokeTests(unittest.TestCase):
+    def test_live_smoke_workflow_is_manual_and_uses_active_gate(self):
+        workflow = (Path(__file__).parent / ".github" / "workflows" /
+                    "ntfy_server_smoke.yml").read_text(encoding="utf-8")
+        self.assertIn("  workflow_dispatch:\n", workflow)
+        self.assertNotIn("  push:", workflow)
+        self.assertIn("if: vars.LINK_AUTOMATION_ENABLED == 'true'", workflow)
+        self.assertNotIn("vars.AUTOMATION_ENABLED", workflow)
+
     def test_missing_config_does_not_send(self):
         output = io.StringIO()
         with patch.dict(os.environ, {}, clear=True), patch(
