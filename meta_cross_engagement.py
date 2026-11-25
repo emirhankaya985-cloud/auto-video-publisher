@@ -35,7 +35,7 @@ REPORT = ROOT / "report.json"
 ROUTE_NAMES = {
     "tarladaki": "Tarladaki Fasulye", "penguen": "Beyinsiz Penguen",
     "gonle": "Gönle Düşen", "daily_laugh": "Daily Laugh Lab",
-    "film": "Film Mağarası", "film_second": "Filmmagrasi", "toonzone": "ToonZone",
+    "film": "Film Mağarası", "toonzone": "ToonZone",
 }
 OPERATIONS = ("like", "save", "repost")
 
@@ -44,7 +44,11 @@ def repost_enabled():
     """Explicit opt-in only: owner has disabled all Facebook repost writes."""
     return os.getenv("META_CROSS_REPOST_ENABLED") == "true"
 
-SUPPORTED = {("facebook", "like"), ("instagram", "like"), ("facebook", "repost")}
+# Task 7.3: this service is read-only. Facebook Page likes are technically
+# available under narrow permission/task conditions, but coordinated likes
+# between owned accounts are disabled to avoid artificial engagement. The
+# Instagram API does not document a like-creation endpoint.
+SUPPORTED = set()
 ID = re.compile(r"[0-9]+(?:_[0-9]+)?\Z")
 
 
@@ -165,10 +169,11 @@ def verified_like_coverage(actors, ledger):
     for platform in ("facebook", "instagram"):
         members = {(str(actor["id"])): actor for actor in actors.values()
                    if actor["platform"] == platform}
+        supported = (platform == "facebook")
         eligible = {actor["name"] for actor in members.values()
-                    if permission(platform, "like") <= actor["grants"]}
+                    if supported and permission(platform, "like") <= actor["grants"]}
         missing_grant = {actor["name"] for actor in members.values()
-                         if not permission(platform, "like") <= actor["grants"]}
+                         if supported and not permission(platform, "like") <= actor["grants"]}
         accepted_by = set()
         accepted_targets = set()
         count = 0
@@ -176,7 +181,8 @@ def verified_like_coverage(actors, ledger):
         for record in ledger["actions"].values():
             if not isinstance(record, dict):
                 continue
-            if (record.get("operation") != "like" or record.get("platform") != platform
+            if (platform != "facebook" or record.get("operation") != "like"
+                    or record.get("platform") != platform
                     or record.get("status") != "accepted" or record.get("api_ack") is not True):
                 continue
             actor = members.get(str(record.get("actor", "")))
@@ -191,21 +197,23 @@ def verified_like_coverage(actors, ledger):
         output[platform] = {
             "permission_eligible_actor_routes": sorted(eligible),
             "permission_missing_actor_routes": sorted(missing_grant),
-            "confirmed_actor_routes": sorted(accepted_by),
-            "eligible_routes_without_confirmed_like": sorted(eligible - accepted_by),
-            "confirmed_target_routes": sorted(accepted_targets),
-            "confirmed_like_count_in_retained_ledger": count,
-            "confirmed_self_like_count_in_retained_ledger": self_count,
-            "confirmed_cross_like_count_in_retained_ledger": count - self_count,
+            "historical_api_ack_actor_routes": sorted(accepted_by),
+            "eligible_routes_without_verified_like": [],
+            "historical_api_ack_target_routes": sorted(accepted_targets),
+            "historical_api_ack_count_in_retained_ledger": count,
+            "historical_api_ack_self_count_in_retained_ledger": self_count,
+            "historical_api_ack_cross_count_in_retained_ledger": count - self_count,
+            "write_support": "disabled_read_only" if platform == "facebook" else "unsupported_by_verified_api",
         }
     return output
 
 
 def account_enabled(name, platform):
-    route = next((r for r, n in ROUTE_NAMES.items() if n == name), None)
-    if route is None:
+    if name.casefold() in {"filmmagrasi", "film second"}:
         return False
-    route = "film" if route == "film_second" else route
+    route = next((r for r, n in ROUTE_NAMES.items() if n == name), None)
+    if route is None or name == "Filmmagrasi":
+        return False
     if platform == "instagram" and route in {"gonle", "daily_laugh"}:
         route = "gonle_ig" if route == "gonle" else "daily_laugh_instagram"
     return not route_paused(route)
@@ -316,9 +324,16 @@ def key(task):
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
+def unsupported_reason(platform, operation):
+    if operation == "like" and platform == "facebook":
+        return "disabled_by_policy"
+    return "unsupported_by_verified_api"
+
+
 def permission(platform, operation):
     if platform == "instagram":
-        return {"instagram_basic", "instagram_manage_engagement"}
+        # No Instagram like-write capability is used by this read-only auditor.
+        return set()
     return {"pages_manage_engagement"} if operation == "like" else {"pages_manage_posts"}
 
 
@@ -345,7 +360,7 @@ def provider_holds(ledger):
     for record in ledger["actions"].values():
         lane = (record.get("platform"), record.get("operation"))
         if (record.get("status") == "rejected" and type(record.get("graph_code")) is int
-                and record["graph_code"] == 368 and lane in SUPPORTED):
+                and record["graph_code"] == 368 and lane in {("facebook", "like"), ("instagram", "like")}):
             holds.setdefault("/".join(lane), {"graph_code": 368, "reason": "meta_provider_restriction",
                                               "run_id": str(record.get("run_id", ""))})
         # Live run 42901421078: six distinct Pages got definitive HTTP403 /
@@ -391,7 +406,7 @@ def build_plan(posts, actors, ledger, run_id, source_run_id, *, now):
                 if operation == "repost" and not repost_enabled():
                     report.append(dict(task, status="disabled_by_owner"))
                 elif (task["platform"], operation) not in SUPPORTED:
-                    report.append(dict(task, status="unsupported_by_verified_api"))
+                    report.append(dict(task, status=unsupported_reason(task["platform"], operation)))
                 elif operation == "repost" and task["owner"] == task["actor"]:
                     report.append(dict(task, status="self_share_not_applicable"))
                 elif not permission(task["platform"], operation) <= actor["grants"]:
@@ -454,6 +469,8 @@ def verified_media(task, actors, *, recent_now=None):
 
 
 def perform(task, actor, link):
+    if (task["platform"], task["operation"]) not in SUPPORTED:
+        raise ValueError("unsupported_by_verified_api_or_policy")
     if task["operation"] == "like":
         node = f"{actor['id']}/likes" if task["platform"] == "instagram" else f"{task['post_id']}/likes"
         data = {"media_id": task["post_id"]} if task["platform"] == "instagram" else {}
@@ -605,7 +622,7 @@ def failed_before_source_state(run_id):
     candidates = [j for j in jobs
                   if j.get("name") == "meta" or
                   (isinstance(j.get("name"), str) and
-                   re.fullmatch(r"meta \((?:film|film_second|toonzone|tarladaki|penguen|gonle|daily_laugh)\)",
+                   re.fullmatch(r"meta \((?:film|toonzone|tarladaki|penguen|gonle|daily_laugh)\)",
                                 j["name"]))]
     if len(candidates) != 1:
         return False
@@ -745,6 +762,8 @@ def build_one_like(posts, actors, ledger, run_id, source_run_id, *, now):
     """
     if ledger.get("schema") != 1 or not isinstance(ledger.get("actions"), dict):
         raise ValueError("invalid engagement ledger; reset forbidden")
+    if not SUPPORTED:
+        return [], [{"status": "unsupported_by_verified_api_or_policy"}]
     holds = provider_holds(ledger)
     names = {(actor["platform"], actor["id"]): actor["name"]
              for actor in actors.values()}
@@ -768,7 +787,7 @@ def build_one_like(posts, actors, ledger, run_id, source_run_id, *, now):
 
     # ToonZone retains first priority on an entirely fresh ledger. Thereafter,
     # accounts and platform lanes that received less recent coverage go first.
-    routes = ("ToonZone", "Film Mağarası", "Filmmagrasi", "Beyinsiz Penguen",
+    routes = ("ToonZone", "Film Mağarası", "Beyinsiz Penguen",
               "Tarladaki Fasulye", "Gönle Düşen", "Daily Laugh Lab")
     rank = {name: index for index, name in enumerate(routes)}
     for platform in sorted(("instagram", "facebook"),
@@ -827,6 +846,8 @@ def build_account_batch(posts, actors, ledger, run_id, source_run_id, *, now):
     """
     if ledger.get("schema") != 1 or not isinstance(ledger.get("actions"), dict):
         raise ValueError("invalid engagement ledger; reset forbidden")
+    if not SUPPORTED:
+        return [], [{"status": "unsupported_by_verified_api_or_policy"}]
     holds = provider_holds(ledger)
     never = datetime(1970, 1, 1, tzinfo=timezone.utc)
     names = {(a["platform"], a["id"]): a["name"] for a in actors.values()}
@@ -837,7 +858,7 @@ def build_account_batch(posts, actors, ledger, run_id, source_run_id, *, now):
             if name:
                 last_target[name] = max(last_target.get(name, never), stamp(record["at"]))
 
-    priority = ("ToonZone", "Film Mağarası", "Filmmagrasi",
+    priority = ("ToonZone", "Film Mağarası",
                 "Beyinsiz Penguen", "Tarladaki Fasulye",
                 "Gönle Düşen", "Daily Laugh Lab")
     rank = {name: i for i, name in enumerate(priority)}
@@ -893,13 +914,16 @@ def main():
     account_batch = (mode == "account_batch"
                      and os.getenv("GITHUB_EVENT_NAME") in {"schedule", "push"}
                      and os.getenv("GITHUB_REF") == "refs/heads/main")
-    live = (os.getenv("META_CROSS_ENGAGEMENT_ENABLED") == "true"
-            and (mode == "apply" or single_like or account_batch))
+    # This workflow is permanently read-only. Legacy modes are accepted only
+    # so old callers fail closed; they never enable Meta POST requests.
+    live = False
     focus = os.getenv("META_AUDIT_FOCUS", "").strip()
     if focus and live:
         # A focus is exclusively for read-only coverage; never escalate to
         # coordinated cross-account likes via manual apply or old push modes.
         raise ValueError("focused account coverage is read-only")
+    if args.action == "execute":
+        raise ValueError("read-only engagement workflow does not execute writes")
     actors = accounts(load_meta_auth(), os.getenv("META_ACCESS_TOKEN", ""))
     if not actors:
         raise ValueError("no verified enabled accounts")
@@ -918,12 +942,7 @@ def main():
                  if os.getenv("ENGAGEMENT_SCOPE") == "recent_window"
                  else source_posts(state, source_id, actors))
         posts, focus_info = scope_audit_posts(posts, actors, focus)
-        if account_batch:
-            tasks, report = build_account_batch(posts, actors, ledger, run_id, source_id, now=now)
-        elif single_like:
-            tasks, report = build_one_like(posts, actors, ledger, run_id, source_id, now=now)
-        else:
-            tasks, report = build_plan(posts, actors, ledger, run_id, source_id, now=now)
+        tasks, report = build_plan(posts, actors, ledger, run_id, source_id, now=now)
         if single_like and live and (
                 len(tasks) > 1
                 or any(t["operation"] != "like" or t["actor"] == t["owner"]
@@ -958,6 +977,8 @@ def main():
                           **focus_info,
                           "blocked": len(report), "blocked_counts": blocked_counts,
                           "provider_holds": ledger.get("provider_holds", {})}))
+    elif args.action == "execute":
+        raise ValueError("read-only engagement workflow does not execute writes")
     elif live:
         ledger = json.loads(STATE.read_text())
         tasks = json.loads(PLAN.read_text())
@@ -981,7 +1002,7 @@ def main():
                                     for v in ledger["actions"].values() if v.get("run_id") == run_id))
         print(json.dumps({"results": counts, "by_operation": by_operation,
                           "provider_holds": ledger.get("provider_holds", {}), "publication_state_modified": False}))
-        if (ledger.get("provider_holds") and mode == "apply") or any(counts.get(s) for s in ("source_or_permission_unverified", "uncertain", "rejected", "blocked_actor", "provider_restriction_hold")):
+        if any(counts.get(s) for s in ("source_or_permission_unverified", "uncertain", "rejected", "blocked_actor", "provider_restriction_hold")):
             raise SystemExit(1)
     else:
         print('{"mode":"dry_run","writes":0}')
