@@ -160,7 +160,7 @@ jobs:
                               and record.get("api_ack") is True):
                           accepted[platform] += 1
                   state = "GRAPH_ACK_PRESENT" if sum(accepted.values()) else "NO_ACCEPTED_GRAPH_ACK"
-              except (OSError, ValueError, TypeError):
+              except (OSError, ValueError, TypeError, AttributeError):
                   state = "INVALID_LEDGER"
           planned = "unknown"
           if report_path.is_file():
