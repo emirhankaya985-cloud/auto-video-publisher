@@ -74,7 +74,8 @@ jobs:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          TELEGRAM_STATUS_INBOX_ENABLED: ${{ vars.TELEGRAM_STATUS_INBOX_ENABLED != 'false' && 'true' || 'false' }}
+          # Daily report transport only; never poll Telegram or mutate its inbox.
+          TELEGRAM_STATUS_INBOX_ENABLED: 'false'
           NVIDIA_AI_ENABLED: ${{ vars.NVIDIA_AI_ENABLED }}
           NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
           NVIDIA_MODEL: ${{ vars.NVIDIA_MODEL || 'nvidia/nemotron-3.5-super-vl-120b-a12b' }}
@@ -140,6 +141,14 @@ jobs:
           name: token-status-inventory
           path: link-runtime/token-status-inventory.json
           if-no-files-found: ignore
+          retention-days: 90
+      - name: Preserve redacted engagement health snapshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: engagement-health-report
+          path: link-runtime/engagement-health-report.json
+          if-no-files-found: warn
           retention-days: 90
       - name: Resolve prior report incident after a clean run
         if: success()

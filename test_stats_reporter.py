@@ -728,6 +728,7 @@ class ArchivedLastGoodMetricsTests(unittest.TestCase):
         with patch.dict(os.environ, {"GITHUB_EVENT_NAME": "schedule", "GITHUB_RUN_ATTEMPT": "1"}), \
              patch("stats_reporter.should_send", return_value=True) as should_send, \
              patch("stats_reporter.send_ntfy", return_value={"server_ack": True}) as send, \
+             patch("stats_reporter.telegram_configured", return_value=False), \
              patch("stats_reporter.mark_result") as mark:
             result = notify_report_if_usable(report)
         self.assertEqual(result, "notification_checked")
@@ -749,11 +750,56 @@ class ArchivedLastGoodMetricsTests(unittest.TestCase):
         with patch.dict(os.environ, {"GITHUB_EVENT_NAME": "schedule", "GITHUB_RUN_ATTEMPT": "1"}), \
              patch("stats_reporter.should_send", return_value=True), \
              patch("stats_reporter.send_ntfy", return_value={"server_ack": True}) as send, \
+             patch("stats_reporter.telegram_configured", return_value=False), \
              patch("stats_reporter.mark_result"):
             result = notify_report_if_usable(report)
         self.assertEqual(result, "notification_checked")
         send.assert_called_once()
         self.assertIn("Instagram kaynak toplama", send.call_args.args[1])
+
+    def test_natural_daily_health_digest_sends_telegram_and_ntfy_once_each(self):
+        from stats_reporter import notify_report_if_usable
+        from views_comparison import ViewReport
+        report = ViewReport("normal report", {
+            "meta_collection": {"status": "complete"}, "archive_saved": True,
+            "day": "2026-11-26", "accounts": [],
+            "engagement_health": {"status": "unknown", "accounts": []},
+        })
+        with patch.dict(os.environ, {"GITHUB_EVENT_NAME": "schedule", "GITHUB_RUN_ATTEMPT": "1"}), \
+             patch("stats_reporter.should_send", return_value=True) as should_send, \
+             patch("stats_reporter.send_ntfy", return_value={"server_ack": True}) as ntfy, \
+             patch("stats_reporter.send_telegram", return_value={"server_ack": True}) as telegram, \
+             patch("stats_reporter.telegram_configured", return_value=True), \
+             patch("stats_reporter.mark_result") as mark:
+            result = notify_report_if_usable(report)
+        self.assertEqual(result, "notification_checked")
+        self.assertEqual(should_send.call_args_list[0].args[0], "daily-stats-report|2026-11-26")
+        self.assertEqual(should_send.call_args_list[1].args[0], "daily-stats-engagement-health-telegram|2026-11-26")
+        ntfy.assert_called_once()
+        telegram.assert_called_once()
+        self.assertIn("ETKİLEŞİM SAĞLIK DENETİMİ", ntfy.call_args.args[1])
+        self.assertIn("ETKİLEŞİM SAĞLIK DENETİMİ", telegram.call_args.args[1])
+        self.assertEqual(mark.call_count, 2)
+
+    def test_health_digest_is_not_appended_to_oversize_ntfy_report(self):
+        from stats_reporter import notify_report_if_usable
+        from views_comparison import ViewReport
+        health = {"status": "unknown", "accounts": []}
+        report = ViewReport("x" * 3900, {"meta_collection": {"status": "complete"},
+                         "meta_collection_errors": [], "archive_saved": True,
+                         "day": "2026-11-26", "accounts": [{"platforms": [
+                             {"platform": "Facebook", "total": 3}]}],
+                         "engagement_health": health})
+        with patch.dict(os.environ, {"GITHUB_EVENT_NAME": "schedule", "GITHUB_RUN_ATTEMPT": "1"}), \
+             patch("stats_reporter.should_send", return_value=True), \
+             patch("stats_reporter.send_ntfy", return_value={"server_ack": True}, side_effect=None) as ntfy, \
+             patch("stats_reporter.send_telegram", return_value={"server_ack": True}) as telegram, \
+             patch("stats_reporter.compact_phone_report", return_value="x" * 3900), \
+             patch("stats_reporter.telegram_configured", return_value=True), \
+             patch("stats_reporter.mark_result"):
+            notify_report_if_usable(report)
+        self.assertLessEqual(len(ntfy.call_args.args[1].encode("utf-8")), 4096)
+        self.assertIn("ETKİLEŞİM SAĞLIK DENETİMİ", telegram.call_args.args[1])
 
     def test_scheduled_rerun_does_not_send_a_second_digest(self):
         from stats_reporter import notify_report_if_usable
