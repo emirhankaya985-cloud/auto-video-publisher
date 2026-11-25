@@ -7,8 +7,7 @@ on:
     - cron: '7,22,37,52 * * * *'
   push:
     branches: [main]
-    # An owner approval marker starts one guarded account batch on merge.
-    # Unrelated pushes never trigger engagement.
+    # Code changes trigger only read-only diagnostics.
     paths:
       - 'docs/meta-cross-engagement-live-2026-11-08.md'
       - 'docs/meta-cross-engagement-owner-start-2026-11-10.md'
@@ -19,12 +18,6 @@ on:
         required: false
         default: latest
         type: string
-      mode:
-        description: Preview or execute supported API operations
-        required: true
-        default: dry_run
-        type: choice
-        options: [dry_run, apply]
   pull_request:
     paths:
       - 'meta_cross_engagement.py'
@@ -61,8 +54,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       SOURCE_RUN_ID: ${{ inputs.source_run_id || 'latest' }}
       ENGAGEMENT_SCOPE: recent_window
-      # Manual runs remain read-only; scheduled ticks rotate one target account.
-      # Every individual like is recorded and Graph-verified.
+      # All triggers remain read-only; no API engagement writes are supported.
       META_AUDIT_FOCUS: ${{ github.event_name == 'workflow_dispatch' && 'ToonZone' || '' }}
 
       META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
@@ -76,13 +68,12 @@ jobs:
       ENABLE_TOONZONE_ROUTES: ${{ vars.ENABLE_TOONZONE_ROUTES }}
       ENABLE_NEW_META_ROUTES: ${{ vars.ENABLE_NEW_META_ROUTES }}
       META_NEW_ROUTES_RIGHTS_APPROVED: ${{ vars.META_NEW_ROUTES_RIGHTS_APPROVED }}
-      META_CROSS_ENGAGEMENT_ENABLED: ${{ vars.META_CROSS_ENGAGEMENT_ENABLED || 'true' }}
       META_CROSS_REPOST_ENABLED: 'false'
-      # Live scheduled ticks process one selected target's eligible recent posts.
-      # A marker push on main authorizes an immediate first bounded tick.
-      GITHUB_EVENT_NAME: ${{ github.event_name }}
+      # Task 7.3: every trigger is a read-only health audit.
+      GITHUB_EVENT_NAME: workflow_dispatch
       GITHUB_REF: ${{ github.ref }}
-      ENGAGEMENT_MODE: ${{ github.event_name == 'schedule' && 'account_batch' || github.event_name == 'push' && 'account_batch' || 'dry_run' }}
+      ENGAGEMENT_MODE: dry_run
+      META_CROSS_ENGAGEMENT_ENABLED: 'false'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -93,16 +84,8 @@ jobs:
       - run: pip install --require-hashes -r requirements.txt
       - name: Read recent publisher results and verified actor identities; prepare independent ledger
         run: python meta_cross_engagement.py plan
-      - name: Persist all intents before any engagement POST
-        if: env.META_CROSS_ENGAGEMENT_ENABLED == 'true' && (env.ENGAGEMENT_MODE == 'apply' || env.ENGAGEMENT_MODE == 'single_like' || env.ENGAGEMENT_MODE == 'account_batch')
-        uses: actions/upload-artifact@v4
-        with:
-          name: cross-engagement-intent
-          path: cross-engagement/engagement.json
-          if-no-files-found: error
-          retention-days: 90
-      - name: Execute supported operations once; preserve ambiguous results
-        run: python meta_cross_engagement.py execute
+      - name: Verify read-only audit mode
+        run: python -c "import os; assert os.environ['ENGAGEMENT_MODE'] == 'dry_run' and os.environ['META_CROSS_ENGAGEMENT_ENABLED'] == 'false'"
       - name: Preserve independent engagement ledger including partial results
         id: verified_ledger
         if: always()
@@ -112,26 +95,7 @@ jobs:
           path: cross-engagement/engagement.json
           if-no-files-found: ignore
           retention-days: 90
-      - name: Send verified like receipt or daily zero-like alert
-        id: engagement_receipt
-        if: >-
-          always() &&
-          steps.verified_ledger.outcome == 'success' &&
-          (env.ENGAGEMENT_MODE == 'apply' || env.ENGAGEMENT_MODE == 'single_like' || env.ENGAGEMENT_MODE == 'account_batch')
-        env:
-          ENGAGEMENT_RESULT_ARCHIVED: 'true'
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python meta_cross_engagement_receipts.py
-      - name: Archive daily zero-like alert marker after Telegram server ACK
-        if: always() && steps.engagement_receipt.outputs.alert_artifact_name != ''
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ steps.engagement_receipt.outputs.alert_artifact_name }}
-          path: cross-engagement/no-like-alert.json
-          if-no-files-found: error
-          retention-days: 30
-      - name: Publish verified like acceptance summary
+      - name: Publish read-only audit summary
         if: always()
         env:
           ENGAGEMENT_MODE_ACTUAL: ${{ env.ENGAGEMENT_MODE }}
@@ -143,14 +107,15 @@ jobs:
 
           ledger_path = Path("cross-engagement/engagement.json")
           report_path = Path("cross-engagement/report.json")
-          accepted = {"instagram": 0, "facebook": 0}
-          state = "NO_LEDGER"
+          accepted = {"instagram": None, "facebook": None}
+          state = "UNKNOWN_NO_LEDGER"
           if ledger_path.is_file():
               try:
                   ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
                   actions = ledger.get("actions", {})
                   if not isinstance(actions, dict):
                       raise ValueError("invalid actions")
+                  accepted = {"instagram": 0, "facebook": 0}
                   for record in actions.values():
                       if not isinstance(record, dict):
                           continue
@@ -170,16 +135,16 @@ jobs:
               except (OSError, ValueError, TypeError, AttributeError):
                   planned = "unreadable"
           summary = [
-              "## Meta cross-account like verification",
+              "## Meta engagement read-only health audit",
               "",
               f"- Mode: `{os.environ.get('ENGAGEMENT_MODE_ACTUAL', 'unknown')}`",
               f"- Verification: **{state}**",
-              f"- Instagram accepted Graph ACK records in retained ledger: **{accepted['instagram']}**",
-              f"- Facebook accepted Graph ACK records in retained ledger: **{accepted['facebook']}**",
+              f"- Instagram historical API-ACK records (not treated as verified likes): **{accepted['instagram'] if accepted['instagram'] is not None else 'unknown'}**",
+              f"- Facebook historical API-ACK records (historical acknowledgement only): **{accepted['facebook'] if accepted['facebook'] is not None else 'unknown'}**",
               f"- Planned operations: **{planned}**",
               "",
-              "A green workflow alone is not proof of a like. Only accepted, API-acknowledged ledger entries count.",
-              "Counts describe the retained ledger, not necessarily likes created by this run.",
+              "A read-only run does not create engagement. Historical API acknowledgements are retained and are not platform-side verification.",
+              "No new like actions are attempted or reported as successful.",
           ]
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as output:
               output.write("\n".join(summary) + "\n")

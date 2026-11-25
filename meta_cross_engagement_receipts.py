@@ -181,6 +181,10 @@ def mark_alert_archived(name, category, run_id):
 
 def main():
     run_id = os.getenv("GITHUB_RUN_ID", "")
+    # No action-success or zero-like alerts are emitted by the read-only audit.
+    if os.getenv("ENGAGEMENT_MODE") == "dry_run":
+        print('{"status":"read_only_no_engagement_notification"}')
+        return 0
     if os.getenv("ENGAGEMENT_MODE") not in ("apply", "single_like", "account_batch") or os.getenv("ENGAGEMENT_RESULT_ARCHIVED") != "true":
         print('{"status":"no_verified_actions_no_message"}')
         return 0
