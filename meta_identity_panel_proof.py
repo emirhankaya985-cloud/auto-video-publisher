@@ -26,7 +26,9 @@ def verify(auth, check=check_page, now=None):
             pages[canonical]=raw
     stamped=(now or datetime.now(timezone.utc)).isoformat()
     rows=[]
-    for owner,page_name,platform in META_TARGETS:
+    active_targets = [target for target in META_TARGETS
+                      if target[1] != "Filmmagrasi"]
+    for owner,page_name,platform in active_targets:
         raw=pages.get(page_name)
         if not raw:
             rows.append({"account":owner,"platform":platform,"page":page_name,

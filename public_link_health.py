@@ -44,7 +44,7 @@ def check_publication_receipts(recent, *, get, headers):
         latest = {}
         # Query every completed run in the time window. The repository-wide
         # 100-artifact page can cover only minutes when account jobs fan out.
-        expected_routes = {"tarladaki", "penguen", "gonle", "daily_laugh", "film", "film_second", "toonzone"}
+        expected_routes = {"tarladaki", "penguen", "gonle", "daily_laugh", "film", "toonzone"}
         for _, run in sorted(completed, key=lambda item: item[0], reverse=True):
             if set(latest) == expected_routes:
                 break
@@ -68,7 +68,7 @@ def check_publication_receipts(recent, *, get, headers):
                         or artifact.get("expired")):
                     continue
                 route = name.removeprefix("link-incident-report-")
-                if route not in {"tarladaki", "penguen", "gonle", "daily_laugh", "film", "film_second", "toonzone"}:
+                if route not in {"tarladaki", "penguen", "gonle", "daily_laugh", "film", "toonzone"}:
                     continue
                 latest.setdefault(route, artifact)
                 receipt_found = True
@@ -195,7 +195,7 @@ def blocked_route_alerts_acknowledged(routes, *, now=None):
     now = now or datetime.now(timezone.utc)
     local_day = now.astimezone(ZoneInfo("Europe/Istanbul")).date().isoformat()
     for route in routes:
-        if route not in {"tarladaki", "penguen", "gonle", "daily_laugh", "film", "film_second", "toonzone"}:
+        if route not in {"tarladaki", "penguen", "gonle", "daily_laugh", "film", "toonzone"}:
             return False
         try:
             history = alert_history.restore(names=(f"link-alert-intent-{route}", f"link-alert-result-{route}"))

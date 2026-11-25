@@ -7,6 +7,7 @@ _ACCOUNT_MARKERS = ("🎬 Yayın:", "📈 Bugün:", "👀 Genel:")
 _TOTAL_MARKERS = ("🎯 Video hedefi:", "✅ Tamamlanan:", "❌ Eksik:",
                   "📈 BUGÜNKÜ TOPLAM:", "👀 GENEL TOPLAM:",
                   "🚨 Yayın hatası:", "🗄️ Geçmiş:")
+_TOKEN_SECTION_TITLE = "🔐 Bağlantı/token özeti"
 
 
 def compact_phone_report(report: str, account_names, *, byte_limit: int = PHONE_BODY_LIMIT) -> str:
@@ -27,6 +28,16 @@ def compact_phone_report(report: str, account_names, *, byte_limit: int = PHONE_
     metadata = [line.strip() for line in lines[1:]
                 if line.startswith(("🕒 Ölçüm:", "⏰ Gecikmeli ölçüm:",
                                     "⚠️ Gece yarısından sonra toplandı:"))]
+    token_lines = []
+    in_token_section = False
+    for original in lines[1:]:
+        line = original.strip()
+        if line.startswith(_TOKEN_SECTION_TITLE):
+            in_token_section = True
+        if in_token_section:
+            token_lines.append(line)
+            if line.startswith("Token bitişi yalnız API açık tarih verdiğinde"):
+                in_token_section = False
     found = {}
     active = None
     in_global = False
@@ -64,7 +75,7 @@ def compact_phone_report(report: str, account_names, *, byte_limit: int = PHONE_
         if not any(row.startswith("👀 Genel:") for row in fields):
             raise ValueError("ntfy compact report missing lifetime account figure")
     heading_count = 0
-    output = kept[:2] + metadata
+    output = kept[:2] + metadata + token_lines
     for name in account_names:
         header = name.upper()
         output.append("")

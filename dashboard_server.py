@@ -23,7 +23,7 @@ SESSION_SECONDS = 8 * 60 * 60
 
 KNOWN_ACCOUNTS = {
     "🌱 Tarladaki Fasulye", "🐧 Beyinsiz Penguen", "❤️ Gönle Düşen",
-    "😂 Daily Laugh Lab", "🎬 Film Mağarası + Filmmagrasi", "📺 ToonZone",
+    "😂 Daily Laugh Lab", "🎬 Film Mağarası", "📺 ToonZone",
 }
 PLATFORM_ALIASES = {
     "facebook": "Facebook", "facebook 1": "Facebook", "facebook 2": "Facebook",

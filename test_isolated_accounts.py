@@ -1,4 +1,4 @@
-"""Offline invariants for seven isolated Meta account workers."""
+"""Offline invariants for the active isolated Meta account workers."""
 import json
 import tempfile
 import unittest
@@ -15,6 +15,12 @@ def state(entries=None):
 
 
 class IsolatedAccountTests(unittest.TestCase):
+    def test_film_second_is_archived_not_an_active_worker_scope(self):
+        self.assertNotIn("film_second", SCOPES)
+        with patch.dict("os.environ", {"PUBLISH_ACCOUNT_SCOPE": "film_second"}):
+            with self.assertRaises(RuntimeError):
+                account_scope()
+
     def test_empty_merge_report_marks_all_scopes_missing_and_unverified(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "merge-account-report.json"

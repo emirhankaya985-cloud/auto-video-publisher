@@ -108,7 +108,7 @@ def test_first_snapshot_is_labeled_na_but_failed_metric_is_unavailable():
 
 def test_daily_targets_and_film_fanout_match_requested_scope():
     assert [ACCOUNT_TARGETS[name][0] for name in ACCOUNT_TARGETS] == [5, 5, 5, 5, 5, 4]
-    assert ACCOUNT_TARGETS["🎬 Film Mağarası + Filmmagrasi"][3] == ("fb_film_1", "fb_film_2", "ig")
+    assert ACCOUNT_TARGETS["🎬 Film Mağarası"][3] == ("fb_film_1", "ig")
     assert any(account == "❤️ Gönle Düşen" for account, *_rest in YOUTUBE_TARGETS)
 
 
@@ -682,7 +682,8 @@ class ArchivedLastGoodMetricsTests(unittest.TestCase):
         from views_comparison import ViewReport
         report = ViewReport("stored", {"meta_collection": {"status": "complete"},
                     "archive_saved": True, "accounts": []})
-        with patch("stats_reporter.notify", side_effect=RuntimeError("PRIVATE_TOKEN")) as send:
+        with patch.dict(os.environ, {"GITHUB_EVENT_NAME": "workflow_dispatch"}), \
+             patch("stats_reporter.notify", side_effect=RuntimeError("PRIVATE_TOKEN")) as send:
             result = notify_report_if_usable(report)
         self.assertEqual(result, "notification_transport_failed")
         send.assert_called_once()
@@ -692,7 +693,8 @@ class ArchivedLastGoodMetricsTests(unittest.TestCase):
         from views_comparison import ViewReport
         report = ViewReport("incomplete", {"meta_collection": {"status": "unavailable"},
                  "archive_saved": False, "accounts": []})
-        with patch("stats_reporter.notify") as send:
+        with patch.dict(os.environ, {"GITHUB_EVENT_NAME": "workflow_dispatch"}), \
+             patch("stats_reporter.notify") as send:
             self.assertEqual(notify_report_if_usable(report),
                              "deferred_to_failure_alert")
         send.assert_not_called()
@@ -705,7 +707,44 @@ class ArchivedLastGoodMetricsTests(unittest.TestCase):
                         {"platform": "Instagram", "total": 7},
                         {"platform": "Facebook", "total": None},
                     ]}]})
-        with patch("stats_reporter.notify") as send:
+        with patch.dict(os.environ, {"GITHUB_EVENT_NAME": "workflow_dispatch"}), \
+             patch("stats_reporter.notify") as send:
             self.assertEqual(notify_report_if_usable(report), "notification_checked")
         send.assert_called_once()
+
+    def test_natural_scheduled_report_sends_redacted_daily_digest_once(self):
+        from stats_reporter import notify_report_if_usable
+        from views_comparison import ViewReport
+        report = ViewReport(
+            "🌙 GÜNLÜK SOSYAL MEDYA RAPORU — 25.11.2026\n"
+            "🌱 TARLADAKI FASULYE\n📈 Bugün: +1\n👀 Genel: 10\n"
+            "🐧 BEYİNSİZ PENGUEN\n📈 Bugün: +1\n👀 Genel: 10\n"
+            "❤️ GÖNLE DÜŞEN\n📈 Bugün: +1\n👀 Genel: 10\n"
+            "😂 DAILY LAUGH LAB\n📈 Bugün: +1\n👀 Genel: 10\n"
+            "🎬 FİLM MAĞARASI\n📈 Bugün: +1\n👀 Genel: 10\n"
+            "📺 TOONZONE\n📈 Bugün: +1\n👀 Genel: 10\n",
+            {"meta_collection": {"status": "complete"}, "archive_saved": True,
+             "day": "2026-11-25", "accounts": []})
+        with patch.dict(os.environ, {"GITHUB_EVENT_NAME": "schedule", "GITHUB_RUN_ATTEMPT": "1"}), \
+             patch("stats_reporter.should_send", return_value=True) as should_send, \
+             patch("stats_reporter.send_ntfy", return_value={"server_ack": True}) as send, \
+             patch("stats_reporter.mark_result") as mark:
+            result = notify_report_if_usable(report)
+        self.assertEqual(result, "notification_checked")
+        should_send.assert_called_once_with("daily-stats-report|2026-11-25")
+        send.assert_called_once()
+        self.assertIn("🌙 Günlük sosyal medya raporu — 2026-11-25", send.call_args.args[0])
+        self.assertNotIn("Film Second", send.call_args.args[1])
+        mark.assert_called_once_with("daily-stats-report|2026-11-25", True)
+
+    def test_scheduled_rerun_does_not_send_a_second_digest(self):
+        from stats_reporter import notify_report_if_usable
+        from views_comparison import ViewReport
+        report = ViewReport("report", {"meta_collection": {"status": "complete"},
+                         "archive_saved": True, "day": "2026-11-25", "accounts": []})
+        with patch.dict(os.environ, {"GITHUB_EVENT_NAME": "schedule", "GITHUB_RUN_ATTEMPT": "2"}), \
+             patch("stats_reporter.send_ntfy") as send:
+            result = notify_report_if_usable(report)
+        self.assertEqual(result, "scheduled_retry_suppressed")
+        send.assert_not_called()
 

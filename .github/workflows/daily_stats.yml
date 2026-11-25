@@ -41,6 +41,7 @@ jobs:
 
           META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
           GITHUB_TOKEN: ${{ github.token }}
+          DATABASE_URL: ${{ secrets.DASHBOARD_DATABASE_URL }}
           META_ONLY_REPORTING: 'true'
           MULTIPLATFORM_STATS_ENABLED: 'true'
           TOKEN_CHANNEL1_JSON: ${{ secrets.TOKEN_CHANNEL1_JSON }}
@@ -128,6 +129,14 @@ jobs:
           name: publication-progress
           path: link-runtime/publication_progress.json
           if-no-files-found: warn
+          retention-days: 90
+      - name: Preserve sanitized account token status inventory
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: token-status-inventory
+          path: link-runtime/token-status-inventory.json
+          if-no-files-found: ignore
           retention-days: 90
       - name: Resolve prior report incident after a clean run
         if: success()

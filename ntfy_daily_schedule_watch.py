@@ -14,7 +14,7 @@ import requests
 
 from ntfy_notifications import send_ntfy
 from telegram_notifications import send_telegram, telegram_configured
-from notification_dedup import should_send
+from notification_dedup import mark_result, should_send
 
 
 EXPECTED_REPOSITORY = "emirhankaya985-cloud/auto-video-publisher"
@@ -148,10 +148,27 @@ def main():
     if verdict["status"] == "healthy":
         print(json.dumps({"state": "healthy", "alert_sent": False}), flush=True)
         return 0
-    if os.getenv("QUIET_FAILURE_NOTIFICATIONS") == "true":
+    event = os.getenv("GITHUB_EVENT_NAME", "")
+    attempt = os.getenv("GITHUB_RUN_ATTEMPT", "1")
+    day = datetime.now(timezone.utc).date().isoformat()
+    key = f"daily-report-watch|{day}|{verdict['status']}"
+    if event and event != "schedule":
         print(json.dumps({"state": verdict["status"], "alert_sent": False,
-                          "silenced_by_owner": True}), flush=True)
-        return 1  # Retain the failed health signal in CI without sending phone alerts.
+                          "suppressed_for_event": event}), flush=True)
+        return 1
+    if attempt != "1":
+        print(json.dumps({"state": verdict["status"], "alert_sent": False,
+                          "suppressed_retry": True}), flush=True)
+        return 1
+    try:
+        if not should_send(key):
+            print(json.dumps({"state": verdict["status"], "alert_sent": False,
+                              "duplicate_suppressed": True}), flush=True)
+            return 1
+    except Exception:
+        print(json.dumps({"state": verdict["status"], "alert_sent": False,
+                          "dedupe_unavailable": True}), flush=True)
+        return 1
     try:
         if verdict["status"] == "missing_or_failed":
             title = "🚨 Günlük rapor otomasyonu eksik"
@@ -179,6 +196,11 @@ def main():
                 telegram_ack = receipt["server_ack"]
             except Exception as exc:
                 print(json.dumps({"telegram_error_type": type(exc).__name__}), flush=True)
+        if ntfy_ack or telegram_ack:
+            try:
+                mark_result(key, True)
+            except Exception:
+                pass
         print(json.dumps({"state": verdict["status"], "alert_server_ack": ntfy_ack,
                           "telegram_server_ack": telegram_ack,
                           "phone_delivery_verified": False}), flush=True)

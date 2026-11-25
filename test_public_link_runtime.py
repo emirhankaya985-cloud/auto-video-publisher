@@ -289,7 +289,8 @@ class LinkRuntimeSafety(unittest.TestCase):
         with patch.dict(os.environ, {"CATCHUP_BATCH_DATE": "2026-11-02"}):
             today = [key for key, _ in runtime.prioritized_route_items("2026-11-02")]
             tomorrow = [key for key, _ in runtime.prioritized_route_items("2026-11-03")]
-        self.assertEqual(today[:3], ["film", "film_second", "toonzone"])
+        self.assertEqual(today[:2], ["film", "toonzone"])
+        self.assertNotIn("film_second", today)
         self.assertCountEqual(today, list(runtime.ROUTES))
         self.assertEqual(tomorrow, list(runtime.ROUTES))
 

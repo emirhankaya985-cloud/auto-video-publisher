@@ -20,11 +20,11 @@ class NewMetaRouteTests(unittest.TestCase):
     def test_all_new_routes_are_disabled(self):
         self.assertTrue(all(not route.enabled for route in ROUTES.values()))
 
-    def test_film_uses_same_file_for_three_exact_targets(self):
+    def test_film_uses_same_file_for_two_exact_targets_and_excludes_second_page(self):
         video = {"id": "movie-part-1", "parents": [ROUTES["film"].folder_id]}
         plan = dry_run_route("film", auth(), video, rights_approved=True)
         self.assertTrue(assert_same_film_file(plan))
-        self.assertEqual([x["target"] for x in plan], ["film_magrasi_fb", "filmmagrasi1_fb", "film_magrasi_ig"])
+        self.assertEqual([x["target"] for x in plan], ["film_magrasi_fb", "film_magrasi_ig"])
         self.assertTrue(all(not x["publishing_enabled"] for x in plan))
 
     def test_wrong_parent_is_blocked(self):

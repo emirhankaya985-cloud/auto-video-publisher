@@ -8,14 +8,13 @@ import requests
 from api_capacity_guard import capacity_from_headers
 
 EXPECTED = {"Tarladaki Fasulye", "Beyinsiz Penguen", "Gönle Düşen",
-            "Daily Laugh Lab", "Film Mağarası", "Filmmagrasi", "ToonZone"}
+            "Daily Laugh Lab", "Film Mağarası", "ToonZone"}
 SCOPE_TO_PAGE = {
     "tarladaki": "Tarladaki Fasulye",
     "penguen": "Beyinsiz Penguen",
     "gonle": "Gönle Düşen",
     "daily_laugh": "Daily Laugh Lab",
     "film": "Film Mağarası",
-    "film_second": "Filmmagrasi",
     "toonzone": "ToonZone",
 }
 

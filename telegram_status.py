@@ -17,7 +17,7 @@ from scheduled_multi_publisher import (TARLADAKI_HOURS, PENGUEN_HOURS, GONLE_HOU
 TR = ZoneInfo('Europe/Istanbul')
 NAMES = {'tarladaki': 'Fasulye', 'penguen': 'Penguen', 'gonle': 'Gönle Düşen',
          'daily_laugh': 'Daily Laugh', 'film': 'Film Mağarası',
-         'film_second': 'Film FB 2', 'toonzone': 'ToonZone',
+         'toonzone': 'ToonZone',
          'oddframes': 'OddFrames'}
 FLAGS = ('LINK_AUTOMATION_ENABLED', 'ADAPTIVE_SCHEDULE_ENABLED',
          'ENABLE_TP_NORMAL_ROUTES', 'ENABLE_GONLE_NORMAL_ROUTES',
@@ -49,8 +49,7 @@ def status_table(*, now=None, state=None, configured=False):
         else:
             base = (daily_laugh_hours_for_date(clock.date()) if route == 'daily_laugh' else
                     {'tarladaki': TARLADAKI_HOURS, 'penguen': PENGUEN_HOURS,
-                     'gonle': GONLE_HOURS, 'film': FILM_HOURS,
-                     'film_second': FILM_HOURS}[route])
+                     'gonle': GONLE_HOURS, 'film': FILM_HOURS}[route])
             minute = 30 if route == 'penguen' else 15 if route == 'gonle' else 0
             slots = [(h, minute) for h in base]
         if os.getenv('ADAPTIVE_SCHEDULE_ENABLED', 'true') != 'false':
@@ -66,9 +65,7 @@ def status_table(*, now=None, state=None, configured=False):
         overdue_total, pending_total, local_failed_total = 0, 0, 0
         counts = []
         for platform in ('facebook', 'instagram'):
-            if route == 'film_second' and platform == 'instagram':
-                counts.append('—')
-            elif configured and platform == 'instagram' and (
+            if configured and platform == 'instagram' and (
                     (route == 'gonle' and route_paused('gonle_ig')) or
                     (route == 'daily_laugh' and route_paused('daily_laugh_instagram'))):
                 counts.append('Kapalı')
@@ -89,7 +86,7 @@ def status_table(*, now=None, state=None, configured=False):
                 counts.append(f'{len(posts)}/{target}')
         setting = 'N/A'
         if configured:
-            enabled = os.getenv('LINK_AUTOMATION_ENABLED') == 'true' and not route_paused('film' if route == 'film_second' else route)
+            enabled = os.getenv('LINK_AUTOMATION_ENABLED') == 'true' and not route_paused(route)
             setting = 'Açık' if enabled else 'Kapalı'
         gap = str(overdue_total) if entries is not None else 'N/A'
         wait = str(pending_total) if entries is not None else 'N/A'
