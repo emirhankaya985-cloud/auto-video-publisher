@@ -14,7 +14,7 @@ ROUTE_NAMES={
  "penguen":"🐧 Beyinsiz Penguen",
  "gonle":"❤️ Gönle Düşen",
  "daily_laugh":"😂 Daily Laugh Lab",
- "film":"🎬 Film Mağarası + Filmmagrasi",
+ "film":"🎬 Film Mağarası",
  "toonzone":"📺 ToonZone",
 }
 NUMERIC_ID=re.compile(r"^[0-9]{4,25}$")
