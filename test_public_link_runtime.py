@@ -253,6 +253,7 @@ class LinkRuntimeSafety(unittest.TestCase):
                     stack.enter_context(patch.object(runtime, key, value))
                 stack.enter_context(patch.dict(os.environ, {
                     "GITHUB_RUN_ID": "offline-test",
+                    "LEGACY_FILM_SECOND_ENABLED": "true",
                     "CATCHUP_BATCH_DATE": today,
                     "GITHUB_STEP_SUMMARY": str(root / "summary.md"),
                 }))
@@ -1579,6 +1580,7 @@ class LinkRuntimeSafety(unittest.TestCase):
                  "created_time": "2026-10-24T02:00:00+03:00"},
             ]
             with patch.dict(os.environ, {"GITHUB_RUN_ID": "444",
+                                         "LEGACY_FILM_SECOND_ENABLED": "true",
                                          "GITHUB_STEP_SUMMARY": str(root / "summary.md")}), \
                     patch.object(runtime, "ROOT", root), \
                     patch.object(runtime, "STATE", root / "state.json"), \

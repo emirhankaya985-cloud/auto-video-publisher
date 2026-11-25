@@ -79,7 +79,8 @@ class FilmDuplicateIdentityTests(unittest.TestCase):
             return path
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            with patch.dict(os.environ, {"GITHUB_RUN_ID": "555", "GITHUB_STEP_SUMMARY": str(root / "summary.md")}), \
+            with patch.dict(os.environ, {"GITHUB_RUN_ID": "555", "GITHUB_STEP_SUMMARY": str(root / "summary.md"),
+                                         "LEGACY_FILM_SECOND_ENABLED": "true"}), \
                     patch.object(runtime, "ROOT", root), patch.object(runtime, "STATE", root / "state.json"), \
                     patch.object(runtime, "PLAN", root / "plan.json"), \
                     patch.object(runtime, "ROUTES", {"film_second": ("film", "Filmmagrasi")}), \

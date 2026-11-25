@@ -70,7 +70,10 @@ ROUTES = {
 
 
 
-ACCOUNT_SCOPES = frozenset(ROUTES)
+ACTIVE_ACCOUNT_SCOPES = frozenset({
+    "tarladaki", "penguen", "gonle", "daily_laugh", "film", "toonzone"
+})
+ACCOUNT_SCOPES = ACTIVE_ACCOUNT_SCOPES
 
 
 def account_scope():
@@ -81,10 +84,14 @@ def account_scope():
     return scope
 
 
-def owned_humor_source(route, file_id):
+def owned_humor_source(route, file_id, file_name=None):
     """Stable disjoint ownership of shared humor Drive sources across workers."""
     if route not in {"tarladaki", "penguen"}:
         raise ValueError("Only humor routes have shared source ownership")
+    if isinstance(file_name, str) and file_name.startswith("igsrc_"):
+        # Ingestion filenames carry an explicit target route because the two
+        # legacy humor accounts share one publisher folder.
+        return file_name.startswith(f"igsrc_{route}_")
     bucket = int(hashlib.sha256(str(file_id).encode()).hexdigest(), 16) % 2
     return bucket == (0 if route == "tarladaki" else 1)
 
@@ -612,7 +619,9 @@ def clean_caption_ui(raw):
 
 def copies(route, item, files, temp, use_txt=True):
     stem = Path(item["name"]).stem
-    fixed = selected_txt(route, files) if use_txt else None
+    # Source clips carry a post-specific caption TXT. A publisher account's
+    # fixed caption must never replace attribution or the source owner's copy.
+    fixed = selected_txt(route, files) if use_txt and not item.get("instagram_source_sha256") else None
     text = fixed if fixed else (files.get(stem + ".txt") if use_txt else None)
     raw = None
     origin = "account-fixed-txt" if fixed else "matching-txt"
@@ -840,6 +849,9 @@ def route_enabled(route):
 
 
 def route_clock(route, now):
+    source_account = _instagram_source_publish_account(route)
+    if source_account:
+        return now.astimezone(ZoneInfo(source_account["publish_timezone"]))
     return now.astimezone(ZoneInfo("America/New_York")) if route == "daily_laugh" else now
 
 
@@ -990,6 +1002,11 @@ def target_count(route, now):
     if (os.getenv("IG_AUDITED_RESCUE_ONLY") == "true"
             and route in _AUDITED_IG_V3_FILES):
         return 1
+    source_account = _instagram_source_publish_account(route)
+    if source_account:
+        clock = now.astimezone(ZoneInfo(source_account["publish_timezone"]))
+        current = clock.strftime("%H:%M")
+        return sum(value <= current for value in source_account["publish_times"])
     clock = route_clock(route, now)
     hours = {"tarladaki": TARLADAKI_HOURS, "penguen": PENGUEN_HOURS,
              "gonle": GONLE_HOURS, "film": FILM_HOURS, "film_second": FILM_HOURS}
@@ -1224,6 +1241,20 @@ def prioritized_route_items(day):
     return items
 
 
+def _instagram_source_publish_account(route, *, config=None):
+    """Resolve the optional source pool only after both feature switches are on."""
+    if os.getenv("IG_SOURCE_PUBLISHING_ENABLED", "false").lower() != "true":
+        return None
+    try:
+        from instagram_source_config import active_publish_account, load_config
+        config = config or load_config()
+        return active_publish_account(route, config=config)
+    except (OSError, ValueError, TypeError, KeyError):
+        # Invalid opt-in configuration must never fall through to an alternate
+        # source path. The route remains on its existing schedule and inventory.
+        raise RuntimeError("Instagram source publishing configuration is invalid") from None
+
+
 def plan(audit=False):
     now = datetime.now(TR)
     day = now.date().isoformat()
@@ -1237,6 +1268,14 @@ def plan(audit=False):
     quarantine_weak_caption_aliases(state)
     pages = {p["page_name"]: p for p in load_meta_auth()["pages"]}
     verified_pages = preflight_verified_pages()
+    source_publish_accounts = {}
+    if os.getenv("IG_SOURCE_PUBLISHING_ENABLED", "false").lower() == "true":
+        from instagram_source_config import active_publish_account, load_config
+        source_config = load_config()
+        source_publish_accounts = {
+            route: account for route in ROUTES
+            if (account := active_publish_account(route, config=source_config))
+        }
     report = [f"# Public link publisher — {day}", "", "YouTube: disabled. Drive OAuth: not used.", ""]
     catalogs = {}
     unavailable_catalogs = set()
@@ -1248,6 +1287,16 @@ def plan(audit=False):
             unavailable_catalogs.add(key)
             report.append(f"HELD source {key}: {type(exc).__name__}")
             record_error("drive_inventory", "drive_unavailable", route=key,
+                         error=exc, safe_to_retry=True)
+    for route, account in source_publish_accounts.items():
+        catalog_key = "instagram_source_" + route
+        try:
+            catalogs[catalog_key] = inventory(account["collection_folder_id"])
+        except Exception as exc:
+            catalogs[catalog_key] = {}
+            unavailable_catalogs.add(catalog_key)
+            report.append(f"HELD Instagram source pool {route}: {type(exc).__name__}")
+            record_error("drive_inventory", "drive_unavailable", route=route,
                          error=exc, safe_to_retry=True)
     for key, files in catalogs.items():
         report.append(f"{key}: MP4={sum(n.lower().endswith('.mp4') for n in files)}, TXT={sum(n.lower().endswith('.txt') for n in files)}, total={len(files)}")
@@ -1306,6 +1355,12 @@ def plan(audit=False):
     duplicate_fingerprints = {}
     rescue_only = os.getenv("IG_AUDITED_RESCUE_ONLY") == "true"
     for route, (source, page_name) in prioritized_route_items(day):
+        if (route == "film_second"
+                and os.getenv("LEGACY_FILM_SECOND_ENABLED", "false").lower() != "true"):
+            report.extend(["", f"## {page_name}", "HELD: Film Second is inactive; legacy history is retained."])
+            continue
+        source_account = source_publish_accounts.get(route)
+        route_catalog_key = "instagram_source_" + route if source_account else source
         if scope and route != scope:
             continue
         if rescue_only and route not in _AUDITED_IG_V3_FILES:
@@ -1325,6 +1380,9 @@ def plan(audit=False):
             continue
         ig_enabled = not (route == "gonle" and route_paused("gonle_ig")) and not (route == "daily_laugh" and route_paused("daily_laugh_instagram"))
         platforms = ["facebook"] + (["instagram"] if page.get("instagram_id") and route != "film_second" and ig_enabled else [])
+        if source_account:
+            platforms = [platform for platform in platforms
+                         if platform in source_account["target_platforms"]]
         if rescue_only:
             if "instagram" not in platforms:
                 report.append("HELD: audited IG rescue requires linked Instagram identity.")
@@ -1413,6 +1471,14 @@ def plan(audit=False):
                     reconciled_in_run_id=os.getenv("GITHUB_RUN_ID", ""),
                     reconciliation_proof="unique_platform_history_caption",
                 )
+                if entry.get("instagram_source_sha256"):
+                    try:
+                        _record_instagram_source_publication(
+                            entry, entry["platform"], "published", post_id=confirmed_id,
+                            published_at=entry.get("published_at_utc"),
+                        )
+                    except Exception:
+                        report.append("WARNING: a reconciled Instagram source post could not be mirrored to Neon.")
         counts = {p: max(
             sum(route_clock(route, timestamp(row)).date() == clock.date() for row in histories[p]),
             ledger_daily_count(state, route, p, clock.date().isoformat())
@@ -1444,13 +1510,62 @@ def plan(audit=False):
         if all(counts[p] >= due for p in platforms):
             report.append("Daily target already complete.")
             continue
-        files = catalogs[source]
+        files = catalogs[route_catalog_key]
         videos = [v for n, v in files.items() if n.lower().endswith(".mp4")]
         # Humor pages share one Drive folder. Their runners may execute at
         # the same time, so ownership must be stable without a race or shared
         # in-memory ledger; existing historical posts are still reconciled.
         if scope and route in {"tarladaki", "penguen"}:
-            videos = [v for v in videos if owned_humor_source(route, v["id"])]
+            videos = [v for v in videos if owned_humor_source(route, v["id"], v.get("name"))]
+        source_assets_by_id = {}
+        held_source_plan_count = 0
+        if source_account:
+            try:
+                from instagram_source_store import connect, create_daily_plan, migrate
+                with connect() as source_conn:
+                    migrate(source_conn)
+                    source_plan = create_daily_plan(
+                        source_conn, route=route, local_day=clock.date().isoformat(),
+                        daily_new=source_account["daily_new"],
+                        daily_archive=source_account["daily_archive"],
+                        max_per_source=source_account.get("max_per_source_per_day", 2),
+                        content_keywords=source_account.get("content_keywords", []),
+                    )
+                for pool in ("new", "archive"):
+                    for asset in source_plan["selected"][pool]:
+                        if asset.get("plan_status") in {"published", "intent", "uncertain"}:
+                            held_source_plan_count += 1
+                            continue
+                        source_assets_by_id[asset["drive_video_id"]] = {
+                            "sha256": asset["sha256"], "pool": pool,
+                            "source_username": asset["source_username"],
+                        }
+                report.append(
+                    "Instagram source 3+3 plan: "
+                    f'new={len(source_plan["selected"]["new"])}/{source_account["daily_new"]}, '
+                    f'archive={len(source_plan["selected"]["archive"])}/{source_account["daily_archive"]}, '
+                    f'deficit_new={source_plan["deficit"]["new"]}, '
+                    f'deficit_archive={source_plan["deficit"]["archive"]}; '
+                    f'intake_mp4={sum(name.lower().endswith(".mp4") for name in catalogs[route_catalog_key])}'
+                    f', held_plan_items={held_source_plan_count}'
+                )
+                ordered_ids = [asset["drive_video_id"]
+                               for pool in ("new", "archive")
+                               for asset in source_plan["selected"][pool]
+                               if asset["drive_video_id"] in source_assets_by_id]
+                by_id = {video["id"]: video for video in videos}
+                videos = [dict(by_id[file_id], instagram_source_sha256=source_assets_by_id[file_id]["sha256"],
+                               instagram_source_pool=source_assets_by_id[file_id]["pool"],
+                               instagram_source_username=source_assets_by_id[file_id]["source_username"])
+                          for file_id in ordered_ids if file_id in by_id]
+                missing_ids = [file_id for file_id in ordered_ids if file_id not in by_id]
+                if missing_ids:
+                    report.append(f"HELD: {len(missing_ids)} planned source assets are missing from the isolated Drive folder.")
+            except Exception as exc:
+                report.append("HELD: Instagram source daily plan unavailable; no source video will be published.")
+                record_error("instagram_source_plan", "source_daily_plan_unavailable",
+                             route=route, error=exc, safe_to_retry=True)
+                continue
         if rescue_only:
             videos = [v for v in videos if v["name"] == _AUDITED_IG_V3_FILES[route]]
         other_humor_hashes = set()
@@ -1688,6 +1803,14 @@ def plan(audit=False):
                                 reconciled_in_run_id=os.getenv("GITHUB_RUN_ID", ""),
                                 reconciliation_proof="unique_platform_history_caption",
                             )
+                            if item.get("instagram_source_sha256"):
+                                try:
+                                    _record_instagram_source_publication(
+                                        item, p, "published", post_id=confirmed_id,
+                                        published_at=(match.get("created_time") or match.get("timestamp")),
+                                    )
+                                except Exception:
+                                    report.append("WARNING: a reconciled Instagram source post could not be mirrored to Neon.")
                         elif not existing:
                             # Same caption is NOT proof that this video was posted.
                             # Unordered routes may reuse texts. Quarantine this
@@ -1894,6 +2017,15 @@ def plan(audit=False):
                                  route=route, video=item["name"])
                     break
                 state["episode_days"][day] = ep
+            if item.get("instagram_source_sha256"):
+                source_cover = files.get(Path(item["name"]).stem + ".jpg")
+                if source_cover and str(source_cover.get("id") or "").strip():
+                    selected["cover_id"] = source_cover["id"]
+                else:
+                    report.append("HELD: Instagram source video has no matching prepared cover image.")
+                    record_error("instagram_source_cover", "cover_missing",
+                                 route=route, video=item["name"])
+                    continue
             report.append(f"NEXT: {item['name']}; caption_source={origin}; platforms={','.join(pending)}")
             if source == "toonzone":
                 report.append("Caption preview: " + captions[pending[0]][:450].replace("\n", " "))
@@ -1911,6 +2043,14 @@ def plan(audit=False):
                         "day": clock.date().isoformat(), "run_id": os.environ["GITHUB_RUN_ID"],
                         "prepublish_retry_count": old_attempts,
                     }
+                    if item.get("instagram_source_sha256"):
+                        state["entries"][key].update({
+                            "instagram_source_sha256": item["instagram_source_sha256"],
+                            "instagram_source_pool": item["instagram_source_pool"],
+                            "instagram_source_username": item["instagram_source_username"],
+                            "instagram_source_required_platforms": item["instagram_source_required_platforms"],
+                            "instagram_source_local_day": item["instagram_source_local_day"],
+                        })
                     if isinstance(old_source_sha256, str) and len(old_source_sha256) == 64:
                         state["entries"][key]["source_sha256"] = old_source_sha256
                     if p == "instagram" and old_resume:
@@ -2008,6 +2148,14 @@ def verify_source_video(path):
     return True
 
 
+def _source_sha256(path):
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def download_verified_publication_video(file_id, path):
     """Validate the downloaded MP4, with one alternate read if it is unreadable."""
     video = download(file_id, path)
@@ -2062,6 +2210,21 @@ def pending_publication_platforms(item, state):
             raise RuntimeError("Publication intent belongs to another run")
         pending.append(platform)
     return pending
+
+
+def _record_instagram_source_publication(item, platform, status, *, post_id=None,
+                                         published_at=None, error_code=None):
+    if not item.get("instagram_source_sha256"):
+        return
+    from instagram_source_store import connect, record_platform_result
+    with connect() as conn:
+        record_platform_result(
+            conn, route=item["route"], platform=platform,
+            sha256=item["instagram_source_sha256"], status=status,
+            post_id=post_id, published_at=published_at, error_code=error_code,
+            local_day=item.get("instagram_source_local_day"),
+            required_platforms=item.get("instagram_source_required_platforms"),
+        )
 
 
 def ordered_predecessors_confirmed(plans, index, item, state):
@@ -2174,6 +2337,9 @@ def publish():
             quality_diagnostic = None
             try:
                 video = download_verified_publication_video(item["id"], temp / "source.mp4")
+                expected_source_sha = item.get("instagram_source_sha256")
+                if expected_source_sha and _source_sha256(video) != expected_source_sha:
+                    raise RuntimeError("Instagram source Drive bytes do not match the Neon hash")
                 from operational_enhancements import bind_source_integrity
                 if not bind_source_integrity(item, state, video):
                     failures.append(item["page"] + ": source changed; held before Meta upload")
@@ -2397,6 +2563,21 @@ def publish():
                 if platform == "instagram" and prepared_ig is None:
                     continue
                 key = f"{item['route']}:{platform}:{item['id']}"
+                if item.get("instagram_source_sha256"):
+                    try:
+                        _record_instagram_source_publication(item, platform, "intent")
+                    except Exception as exc:
+                        entry = state["entries"][key]
+                        entry.update(status="ready", failure={
+                            "reason": "source_publication_intent_not_persisted",
+                            "error_type": type(exc).__name__, "safe_to_repost": True,
+                        })
+                        failures.append(item["page"] + " " + platform + ": source intent not persisted")
+                        record_error("instagram_source_publication", "source_publication_intent_not_persisted",
+                                     route=item["route"], platform=platform,
+                                     video=item["name"], safe_to_retry=True)
+                        save(STATE, state)
+                        continue
                 try:
                     # Persist the point of no blind retry BEFORE the external
                     # write. A crash/replayed publish step must reconcile first.
@@ -2423,6 +2604,19 @@ def publish():
                         publication_run_id=os.getenv("GITHUB_RUN_ID", ""),
                     )
                     state["entries"][key].pop("failure", None)
+                    if item.get("instagram_source_sha256"):
+                        try:
+                            _record_instagram_source_publication(
+                                item, platform, "published", post_id=str(post),
+                                published_at=state["entries"][key]["published_at_utc"],
+                            )
+                        except Exception as exc:
+                            # The confirmed post ID remains authoritative in
+                            # link-state-result even if Neon is temporarily down.
+                            failures.append(item["page"] + " " + platform + ": Neon receipt mirror failed")
+                            record_error("instagram_source_publication", "source_publication_receipt_failed",
+                                         route=item["route"], platform=platform,
+                                         video=item["name"], error=exc, safe_to_retry=True)
                     print(json.dumps({"page": item["page"], "file": item["name"], "platform": platform, "post_id": str(post)}, ensure_ascii=False), flush=True)
                 except Exception as exc:
                     # Never blindly repeat a Meta POST, including HTTP 400.
@@ -2453,6 +2647,18 @@ def publish():
                                  video=item["name"], error=exc,
                                  status=entry["status"],
                                  safe_to_retry=entry["status"] == "ready")
+                    if item.get("instagram_source_sha256"):
+                        source_status = "error" if entry["status"] == "ready" else "uncertain"
+                        try:
+                            _record_instagram_source_publication(
+                                item, platform, source_status,
+                                error_code=str(diagnostic.get("reason") or "publish_failed"),
+                            )
+                        except Exception as ledger_exc:
+                            failures.append(item["page"] + " " + platform + ": Neon failure receipt could not be saved")
+                            record_error("instagram_source_publication", "source_publication_failure_receipt_failed",
+                                         route=item["route"], platform=platform,
+                                         video=item["name"], error=ledger_exc, safe_to_retry=True)
                 finally:
                     save(STATE, state)
     if failures:
