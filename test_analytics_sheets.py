@@ -27,7 +27,7 @@ def test_account_rows_cover_brands_platforms_and_separate_film_pages():
     film_fb = [row for row in rows if row[1] in {"Film Mağarası", "Filmmagrasi"} and row[2] == "Facebook"]
     assert len(film_fb) == 2
     assert {row[1] for row in film_fb} == {"Film Mağarası", "Filmmagrasi"}
-    assert next(row for row in film_fb if row[1] == "Filmmagrasi")[5] == "archived"
+    assert next(row for row in film_fb if row[1] == "Filmmagrasi")[6] == "izleniyor / veri yok"
     assert {row[1] for row in rows} == {
         "Tarladaki Fasulye", "Beyinsiz Penguen", "Gönle Düşen", "Daily Laugh Lab",
         "Film Mağarası", "Filmmagrasi", "ToonZone",
