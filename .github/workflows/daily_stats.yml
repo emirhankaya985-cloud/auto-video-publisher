@@ -35,11 +35,14 @@ jobs:
           python-version: '3.12'
       - name: Bagimliliklari Yukle
         run: pip install --require-hashes -r requirements.txt
+      - name: Kurulu Neon rapor surucusunu ekle
+        run: python -m pip install 'psycopg[binary]==3.2.9'
       - name: Istatistikleri Telefona Gonder
         timeout-minutes: 28
         env:
 
           META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+          DASHBOARD_DATABASE_URL: ${{ secrets.DASHBOARD_DATABASE_URL }}
           GITHUB_TOKEN: ${{ github.token }}
           DATABASE_URL: ${{ secrets.DASHBOARD_DATABASE_URL }}
           META_ONLY_REPORTING: 'true'

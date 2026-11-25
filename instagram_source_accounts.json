@@ -1,0 +1,162 @@
+{
+  "schema": 1,
+  "timezone": "Europe/Istanbul",
+  "scan_interval_minutes": 30,
+  "accounts": {
+    "tarladaki": {
+      "display_name": "Tarladaki Fasulye",
+      "enabled": false,
+      "auto_collection": false,
+      "auto_publish": false,
+      "source_accounts": [],
+      "daily_new": 3,
+      "daily_archive": 3,
+      "max_per_source_per_day": 2,
+      "content_keywords": [],
+      "target_folder_id": "11zbrunHoiTZyJ8JDsj99ascO66mmCj-M",
+      "collection_folder_id": "",
+      "target_platforms": [
+        "facebook",
+        "instagram"
+      ],
+      "publish_times": [
+        "09:00",
+        "12:00",
+        "15:00",
+        "18:00",
+        "21:00"
+      ],
+      "preserve_serial_order": false,
+      "publish_timezone": "Europe/Istanbul"
+    },
+    "penguen": {
+      "display_name": "Beyinsiz Penguen",
+      "enabled": false,
+      "auto_collection": false,
+      "auto_publish": false,
+      "source_accounts": [],
+      "daily_new": 3,
+      "daily_archive": 3,
+      "max_per_source_per_day": 2,
+      "content_keywords": [],
+      "target_folder_id": "11zbrunHoiTZyJ8JDsj99ascO66mmCj-M",
+      "collection_folder_id": "",
+      "target_platforms": [
+        "facebook",
+        "instagram"
+      ],
+      "publish_times": [
+        "09:30",
+        "12:30",
+        "15:30",
+        "18:30",
+        "21:30"
+      ],
+      "preserve_serial_order": false,
+      "publish_timezone": "Europe/Istanbul"
+    },
+    "gonle": {
+      "display_name": "Gönle Düşen",
+      "enabled": false,
+      "auto_collection": false,
+      "auto_publish": false,
+      "source_accounts": [],
+      "daily_new": 3,
+      "daily_archive": 3,
+      "max_per_source_per_day": 2,
+      "content_keywords": [],
+      "target_folder_id": "1OA-qvfBEcCKBCTSMj4dCz8rg2p6t0aKt",
+      "collection_folder_id": "",
+      "target_platforms": [
+        "facebook",
+        "instagram"
+      ],
+      "publish_times": [
+        "09:15",
+        "12:15",
+        "15:15",
+        "18:15",
+        "21:15"
+      ],
+      "preserve_serial_order": false,
+      "publish_timezone": "Europe/Istanbul"
+    },
+    "daily_laugh": {
+      "display_name": "Daily Laugh Lab",
+      "enabled": false,
+      "auto_collection": false,
+      "auto_publish": false,
+      "source_accounts": [],
+      "daily_new": 3,
+      "daily_archive": 3,
+      "max_per_source_per_day": 2,
+      "content_keywords": [],
+      "target_folder_id": "137--TeBht1yikZpMfV9VSEADbKuXZtLT",
+      "collection_folder_id": "",
+      "target_platforms": [
+        "facebook",
+        "instagram"
+      ],
+      "publish_times": [
+        "09:00",
+        "12:00",
+        "15:00",
+        "18:00",
+        "21:00"
+      ],
+      "preserve_serial_order": false,
+      "publish_timezone": "America/New_York"
+    },
+    "film": {
+      "display_name": "Film Mağarası",
+      "enabled": false,
+      "auto_collection": false,
+      "auto_publish": false,
+      "source_accounts": [],
+      "daily_new": 3,
+      "daily_archive": 3,
+      "max_per_source_per_day": 2,
+      "content_keywords": [],
+      "target_folder_id": "1NvEuGQ83BmCMrzdK6ziI1nC_0zzshqJW",
+      "collection_folder_id": "",
+      "target_platforms": [
+        "facebook",
+        "instagram"
+      ],
+      "publish_times": [
+        "10:00",
+        "12:00",
+        "14:00",
+        "16:00",
+        "18:00"
+      ],
+      "preserve_serial_order": true,
+      "publish_timezone": "Europe/Istanbul"
+    },
+    "toonzone": {
+      "display_name": "ToonZone",
+      "enabled": false,
+      "auto_collection": false,
+      "auto_publish": false,
+      "source_accounts": [],
+      "daily_new": 3,
+      "daily_archive": 3,
+      "max_per_source_per_day": 2,
+      "content_keywords": [],
+      "target_folder_id": "14ee4AnUdf03dYUAdtfpHa-E9Zxyh4UZF",
+      "collection_folder_id": "",
+      "target_platforms": [
+        "facebook",
+        "instagram"
+      ],
+      "publish_times": [
+        "12:00",
+        "12:10",
+        "12:20",
+        "12:30"
+      ],
+      "preserve_serial_order": true,
+      "publish_timezone": "Europe/Istanbul"
+    }
+  }
+}

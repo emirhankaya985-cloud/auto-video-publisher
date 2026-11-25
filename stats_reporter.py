@@ -834,6 +834,15 @@ def build_report(now=None):
                  "📊 Kapsam: Meta video sayaçları (Facebook/Instagram); YouTube ölçülmedi.")
                 if meta_only else "📊 Kapsam: Erişilebilir platform video ve Threads video gönderisi sayaçları.",
                 "⚠️ Genel toplamlar erişilebilen videoların toplamıdır; tüm içerik türleri veya tüm geçmiş garanti edilmez.", ""]
+        try:
+            from instagram_source_report import daily_source_report, format_daily_source_report
+            instagram_sources = daily_source_report(report_day)
+            instagram_sources_text = format_daily_source_report(instagram_sources)
+        except Exception:
+            instagram_sources = {"day": today, "status": "unavailable",
+                                 "neon_status": "error", "routes": {},
+                                 "manual_actions": ["Instagram kaynak raporu yerel olarak hazırlanamadı"]}
+            instagram_sources_text = "📥 Instagram kaynak toplama: rapor hazırlanamadı; ayrıntı Actions günlüğünde."
         if delayed:
             rows.extend([
                 f"⏰ Gecikmeli ölçüm: {now:%d.%m.%Y %H:%M} TRT.",
@@ -966,6 +975,7 @@ def build_report(now=None):
         token_status_path.write_text(json.dumps(
             token_inventory, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
         rows.extend(["", *account_summary(token_inventory)])
+        rows.extend(["", instagram_sources_text])
         if errors:
             rows.append("\n⚠️ EKSİK VERİ / İZİN:")
             rows.extend(f"• {error}" for error in errors)
@@ -997,6 +1007,7 @@ def build_report(now=None):
             if not error.startswith("GitHub geçmişinde önceki ölçüm yok;")
         ]
         comparison["followers"] = follower_changes(records, previous)
+        comparison["instagram_source_report"] = instagram_sources
         comparison["threads_engagement"] = [
             {key: record.get(key) for key in ("account", "platform", "metric", "value", "status", "source_api", "source_metric")}
             for record in records if record.get("platform") == "Threads"
@@ -1040,11 +1051,21 @@ def notify(message):
         issues.append(f"{account_name} — {platform_name}: {detail}")
     issues.extend(other_errors)
     issues = list(dict.fromkeys(issues))
-    if not issues:
+    source_summary = comparison.get("instagram_source_report")
+    source_active = isinstance(source_summary, dict) and source_summary.get("status") in {"active", "degraded", "unavailable"}
+    if not issues and not source_active:
         return
 
-    title = "⚠️ Sosyal medya raporunda hata"
-    body = "Hata özeti:\n" + "\n".join(f"• {item}" for item in issues)
+    if source_active:
+        from instagram_source_report import format_daily_source_report
+        body = format_daily_source_report(source_summary)
+        title = "📥 Günlük Instagram kaynak özeti"
+        if issues:
+            title = "⚠️ Günlük sosyal medya ve kaynak raporu"
+            body += "\n\nHata özeti:\n" + "\n".join(f"• {item}" for item in issues)
+    else:
+        title = "⚠️ Sosyal medya raporunda hata"
+        body = "Hata özeti:\n" + "\n".join(f"• {item}" for item in issues)
     if len(body.encode("utf-8")) > 3500:
         body = body.encode("utf-8")[:3400].decode("utf-8", errors="ignore") + "\n… ayrıntılar GitHub Actions logunda."
 
@@ -1136,6 +1157,11 @@ def notify_report_if_usable(report, *, send=None):
             if not should_send(key):
                 return "duplicate_suppressed"
             body = compact_phone_report(str(report), list(ACCOUNT_TARGETS))
+            source_summary = report.comparison.get("instagram_source_report")
+            if (isinstance(source_summary, dict)
+                    and source_summary.get("status") in {"active", "degraded", "unavailable"}):
+                from instagram_source_report import format_daily_source_report
+                body += "\n\n" + format_daily_source_report(source_summary)
             send_ntfy(f"🌙 Günlük sosyal medya raporu — {day}", body,
                       timeout=20, require_ack=True)
             try:

@@ -737,6 +737,24 @@ class ArchivedLastGoodMetricsTests(unittest.TestCase):
         self.assertNotIn("Film Second", send.call_args.args[1])
         mark.assert_called_once_with("daily-stats-report|2026-11-25", True)
 
+    def test_scheduled_digest_includes_source_summary_without_second_ntfy(self):
+        from stats_reporter import notify_report_if_usable
+        from views_comparison import ViewReport
+        report = ViewReport(
+            "normal report",
+            {"meta_collection": {"status": "complete"}, "archive_saved": True,
+             "day": "2026-11-26", "accounts": [],
+             "instagram_source_report": {"status": "active", "day": "2026-11-26",
+                 "routes": {}, "manual_actions": [], "neon_status": "ok"}})
+        with patch.dict(os.environ, {"GITHUB_EVENT_NAME": "schedule", "GITHUB_RUN_ATTEMPT": "1"}), \
+             patch("stats_reporter.should_send", return_value=True), \
+             patch("stats_reporter.send_ntfy", return_value={"server_ack": True}) as send, \
+             patch("stats_reporter.mark_result"):
+            result = notify_report_if_usable(report)
+        self.assertEqual(result, "notification_checked")
+        send.assert_called_once()
+        self.assertIn("Instagram kaynak toplama", send.call_args.args[1])
+
     def test_scheduled_rerun_does_not_send_a_second_digest(self):
         from stats_reporter import notify_report_if_usable
         from views_comparison import ViewReport
