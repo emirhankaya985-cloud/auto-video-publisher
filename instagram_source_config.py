@@ -133,6 +133,17 @@ def validate_config(payload: object) -> dict:
         result["accounts"][route] = {**account, "publish_timezone": str(publish_timezone),
                                      "source_accounts": normalized,
                                      "config_errors": sorted(set(account_errors))}
+    collection_routes: dict[str, list[str]] = {}
+    for route, account in result["accounts"].items():
+        folder_id = account["collection_folder_id"]
+        if isinstance(folder_id, str) and folder_id:
+            collection_routes.setdefault(folder_id, []).append(route)
+    for routes in collection_routes.values():
+        if len(routes) > 1:
+            for route in routes:
+                account = result["accounts"][route]
+                account["config_errors"] = sorted(set(account["config_errors"])
+                                                   | {"collection_folder_reused_by_routes"})
     return result
 
 

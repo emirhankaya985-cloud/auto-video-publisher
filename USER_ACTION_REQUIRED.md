@@ -1,6 +1,6 @@
 # Kullanıcıdan gereken işlemler
 
-Teknik kod yerel branch'te hazırlandı. Canlı toplama ve yayın, aşağıdaki bilgiler ve izinler doğrulanana kadar kapalı kalacak. Film Second yeni kaynak toplama ve publisher workflow matrisinden çıkarıldı; eski verileri ve yayın geçmişi korunuyor.
+PR #324 birleştirildi. Bu görevde Drive üst klasörlerine yazma denemesi, Google Drive tarafından `403 insufficientParentPermissions` ile reddedildi; aynı klasör tarayıcıda salt okunurdu. Bu nedenle Drive alım klasörleri ve GitHub yapılandırmasına klasör ID'leri eklenmesi tamamlanamadı. Canlı toplama ve yayın kapalı. Film Second etkinleştirilmedi; eski verileri ve yayın geçmişi korunuyor.
 
 ## 1. Kaynak Instagram hesapları ve içerik izinleri
 
@@ -32,24 +32,24 @@ Kolektör her hedef için mevcut yayın klasörünün altında ayrı bir alım a
 - Film Mağarası: [Drive klasörünü aç](https://drive.google.com/drive/folders/1NvEuGQ83BmCMrzdK6ziI1nC_0zzshqJW)
 - ToonZone: [Drive klasörünü aç](https://drive.google.com/drive/folders/14ee4AnUdf03dYUAdtfpHa-E9Zxyh4UZF)
 
-Google Drive bağlantısı yanıt verdi ve beş ayrı mevcut yayın parent klasörü klasör metaverisi olarak çözümlendi. Ancak connector `source_visibility_status=access_not_verified` döndürdü; bu, GitHub Actions `DRIVE_TOKEN_JSON` erişimini doğrulamaz. Her aktif rota için uygun ayrı bir intake alt klasörü seçin; yoksa açıkça izin verip oluşturun. Klasör kimliğini ilgili `collection_folder_id` alanına ekleyin. Altı intake klasör ID'si şu anda boş; parent ilişkisi, üretim token erişimi ve kota doğrulanmadan toplama açılmamalı.
+Google Drive'da `Ortak 2 Mizah`, `islam olan`, `İngilizce Mizahh`, `Film` ve `cizgi film` klasörleri görüldü. `Yeniler` boş, Tarladaki/Penguen ortak üst klasöründe; iki hesap için ortak kullanılmamalı. ToonZone'daki `Kapaklar` klasörünü koruyun. Altı ayrı alt klasör oluşturabilmemiz için bu beş üst klasörde bağlı Google hesabına klasör oluşturma ve dosya ekleme yetkisi verin. Connector denemesi 403 ile reddedildi; klasörler oluşturulmadı, mevcut medya değişmedi. Sonrasında altı klasör ID'si ayrı ayrı `collection_folder_id` alanlarına yazılıp parent ve üretim token erişimi doğrulanmalı. Üretim `DRIVE_TOKEN_JSON` yazma testi henüz yapılmadı.
 
 ## 4. GitHub Actions ayarları ve entegrasyon
 
 [Repository Actions secrets](https://github.com/emirhankaya985-cloud/auto-video-publisher/settings/secrets/actions) içinde mevcut olması gereken secret adları: `META_ACCESS_TOKEN`, `DRIVE_TOKEN_JSON`, `DASHBOARD_DATABASE_URL`, `NTFY_TOPIC` veya `NTFY_TOPIC_URL`. Secret değerlerini paylaşmayın. [Actions variables](https://github.com/emirhankaya985-cloud/auto-video-publisher/settings/variables/actions) tarafında `IG_SOURCE_DISCOVERY_ACTOR_ID` gerekir. Bu secret/variable adlarının varlığı ve geçerliliği bağlantılı GitHub API'den okunamıyor.
 
-Neon connector bağlantısı salt-okunur sorguyla doğrulandı: `auto-video-publisher-free` projesinin `main` branch'inde DB adı `auto_video_publisher_live`, schema `public`. Bu, GitHub `DASHBOARD_DATABASE_URL` değerinin aynı veritabanına işaret ettiğini kanıtlamaz. Repo secret'ının doğru DB'yi hedeflediğini, değeri paylaşmadan GitHub Actions ayarlarından kontrol edin. Migration çalıştırılmadı.
+Neon bağlantısının geçmiş salt-okunur denetiminde `auto-video-publisher-free` / `main` için DB `auto_video_publisher_live`, şema `public` görülmüştü. Bu görevde endpoint'i uyandırıp maliyet doğurmamak için SQL tekrarlanmadı. GitHub `DASHBOARD_DATABASE_URL` hedefi doğrulanmış değil. Secret'ın doğru DB'yi hedeflediğini gizli değeri paylaşmadan Actions ayarlarından kontrol edin. Migration çalıştırılmadı.
 
-PR #324 oluşturuldu ve ilk düzeltilmiş branch'te 13 otomatik no-publish/read-only CI workflow'u geçti. `main` sonrasında yeni bir commit aldığı için branch yeniden hizalanıyor ve latest-head CI bekleniyor. Merge ancak güncel branch kontrolleri geçerse yapılacak. Kaynak toplama/yayın anahtarları kapalı; production secret değerleri değiştirilmedi.
+PR #324 zaten birleştirildi (merge SHA `1e63e0417c35eb04bdd598316245d6b2f4634285`). PR başlığı CI'sinde 13 workflow başarılı, 2 kontrol atlandı. Birleştirme sonrası watchdog Film ve ToonZone için `publication_blocked` üretim uyarısı verdi; bu CI sonucu değildir ve tekrar çalıştırılmadı. Kaynak toplama/yayın anahtarları kapalı; production ayarlarına dokunulmadı.
 
 ## 5. NTFY telefon teslimatı
 
-Mevcut gece raporu NTFY yoluna kaynak özeti eklendi; yeni workflow veya yeni ücretli bildirim servisi eklenmedi. GitHub secret'larında geçerli `NTFY_TOPIC` veya `NTFY_TOPIC_URL` olduğunu doğrulayın. NTFY uygulamasında ilgili topic'e abone olun ve bir sonraki normal gece raporunda sunucu onayı ile telefon ekranındaki görünür bildirimi ayrı ayrı kontrol edin. Sunucu ACK telefonda teslimi kanıtlamaz.
+Mevcut gece raporunun NTFY gönderimi dedupe anahtarıyla yinelenmeye karşı korunuyor; hata yolu mevcut Telegram bağlantısını kullanabiliyor. Yeni workflow, topic veya bot oluşturulmadı. Canlı bildirim gönderilmedi; gerçek telefon teslimi doğrulanmadı. Bir sonraki normal gece raporunda sunucu onayını ve telefondaki bildirimi ayrı ayrı kontrol edin.
 
 ## Etkinleştirme sırası
 
-1. Her kaynak için username, Instagram user ID, kategori ve yayın izni kanıtını ekleyin.
-2. Her aktif hedef için ayrı Drive alt klasörünü ve parent ilişkisini doğrulayın.
-3. Meta actor ID ve mevcut GitHub secrets/variables adlarını kontrol edin.
-4. PR #324 latest-head CI tamamlandıktan sonra merge durumunu kontrol edin.
-5. Önce yalnız `IG_SOURCE_COLLECTION_ENABLED=true` ile toplamayı etkinleştirin; sonuçlar doğru görünürse rota bazlı anahtarları açın. `IG_SOURCE_PUBLISHING_ENABLED` ve mevcut publisher anahtarı izinler, sıralama ve raporlar doğrulanana kadar kapalı kalsın.
+1. Drive paylaşım ayarlarında bağlı Google hesabına klasör oluşturma ve dosya ekleme izni verin.
+2. Her kaynak için username, Instagram user ID, kategori ve yazılı yayın izni kanıtını sağlayın.
+3. Altı ayrı Drive alt klasörü ve parent ilişkisini doğrulayın; GitHub Actions `DRIVE_TOKEN_JSON` ve `DASHBOARD_DATABASE_URL` hedeflerini gizli değerleri açmadan teyit edin.
+4. Meta actor ID'si ile mevcut GitHub secrets/variables adlarını kontrol edin; NTFY telefon teslimini normal raporda doğrulayın.
+5. Kaynak toplama/yayın anahtarlarını ancak izinler ve Drive/Neon bağlantıları doğrulandıktan sonra açın. Mevcut yayın saatleri değiştirilmemeli; Film Second kapalı kalmalı.
