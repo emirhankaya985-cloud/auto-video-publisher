@@ -96,6 +96,12 @@ class EngagementTests(unittest.TestCase):
         enabled_for_legacy_repost_tests.start()
         self.addCleanup(enabled_for_legacy_repost_tests.stop)
 
+    def test_active_engagement_inventory_excludes_retired_film_second(self):
+        self.assertEqual(set(m.ROUTE_NAMES), {
+            "tarladaki", "penguen", "gonle", "daily_laugh", "film", "toonzone",
+        })
+        self.assertNotIn("Filmmagrasi", m.verified_inventory(actors())["unverified_account_routes"])
+
     def test_like_coverage_only_accepted_identity_matched_and_permissioned(self):
         aa = actors()
         ledger = {"schema": 1, "actions": {}}
