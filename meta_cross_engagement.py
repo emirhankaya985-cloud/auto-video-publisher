@@ -35,7 +35,7 @@ REPORT = ROOT / "report.json"
 ROUTE_NAMES = {
     "tarladaki": "Tarladaki Fasulye", "penguen": "Beyinsiz Penguen",
     "gonle": "Gönle Düşen", "daily_laugh": "Daily Laugh Lab",
-    "film": "Film Mağarası", "film_second": "Filmmagrasi", "toonzone": "ToonZone",
+    "film": "Film Mağarası", "toonzone": "ToonZone",
 }
 OPERATIONS = ("like", "save", "repost")
 
@@ -205,7 +205,6 @@ def account_enabled(name, platform):
     route = next((r for r, n in ROUTE_NAMES.items() if n == name), None)
     if route is None:
         return False
-    route = "film" if route == "film_second" else route
     if platform == "instagram" and route in {"gonle", "daily_laugh"}:
         route = "gonle_ig" if route == "gonle" else "daily_laugh_instagram"
     return not route_paused(route)
