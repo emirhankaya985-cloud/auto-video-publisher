@@ -1,12 +1,7 @@
-name: One-time NTFY server receipt check
+name: Manual NTFY server receipt check
 
 on:
-  # The workflow is newly introduced by this PR. Its initial master merge
-  # triggers exactly one test message; subsequent unrelated pushes do not.
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/ntfy_server_smoke.yml'
+  # Sending a real test notification must always be an explicit manual action.
   workflow_dispatch:
 
 permissions:
@@ -18,7 +13,7 @@ concurrency:
 
 jobs:
   smoke:
-    if: vars.AUTOMATION_ENABLED == 'true'
+    if: vars.LINK_AUTOMATION_ENABLED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 6
     steps:
