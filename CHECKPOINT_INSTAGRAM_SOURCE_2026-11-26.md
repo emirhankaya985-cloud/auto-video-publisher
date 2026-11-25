@@ -5,7 +5,8 @@
 - PR #324 birleştirildi; merge commit: `1e63e0417c35eb04bdd598316245d6b2f4634285`.
 - `main` için PR CI'sinde 13 workflow başarılı, 2 kontrol atlandı. PR başlığında 1.506 testin geçtiği ve 16 testin atlandığı raporlanmıştı.
 - Birleştirme sonrası Meta publisher health watchdog ayrı bir üretim alarmı verdi: Film ve ToonZone `publication_blocked`; son raporda 14 onaylı yayın makbuzu vardı. Bu alarm PR başlığı CI hatası değil. Tekrar çalıştırılmadı ve üretim ayarlarına dokunulmadı.
-- Bu görev için yerel branch: `feat/drive-source-folders-20261126`, taban `origin/main` (`1e63e041`). Açık PR #324 değildir; bu branch'teki güvenlik düzeltmeleri için gerekiyorsa yeni PR açılmalıdır.
+- Bu görev için yerel branch: `feat/drive-source-folders-20261126`, taban güncel `origin/main` (`56d3164a`, PR #327 merge sonrası). Yerel commit `da4e969`; GitHub bağlantısı üzerinden aynı dosya ağacını taşıyan branch commit'i `bbf5398` olarak oluştu (tree SHA aynı: `7304185d`). PR #328 açık.
+- PR #328 başlığı için GitHub bağlantısı henüz workflow run veya check kaydı döndürmedi. Bu nedenle yeni commit için CI sonucu yok; CI başarılı sayılmadı ve PR birleştirilmedi. PR #324'ün geçmiş kontrolleri bu commit'in CI'si değildir.
 - Bu branch için güncel tam yerel test: `python -m unittest discover -q` — 1.508 başarılı, 16 atlandı. Kaynak alım testleri 31 başarılı. Python derleme, iki ilgili Actions YAML dosyasının parse edilmesi ve `git diff --check` geçti.
 
 ## Drive denetimi
@@ -36,4 +37,4 @@
 2. Altı rota için kaynak Instagram kullanıcı adı/ID, kategori ve yazılı yeniden yayın izni kanıtını sağlayın.
 3. GitHub Actions'ta mevcut `DRIVE_TOKEN_JSON`, `DASHBOARD_DATABASE_URL`, `META_ACCESS_TOKEN`, `NTFY_TOPIC`/`NTFY_TOPIC_URL` değerlerinin doğru ve geçerli olduğunu gizli değerleri paylaşmadan doğrulayın; `IG_SOURCE_DISCOVERY_ACTOR_ID` değişkenini kontrol edin.
 4. Gerekirse normal çalışma sırasında NTFY'nin telefona ulaştığını kontrol edin; test bildirimi gönderilmedi.
-5. Güvenlik düzeltmeleri için yeni PR/CI durumu ve varsa merge SHA'sini bu dosyaya ekleyin.
+5. PR #328 için CI koşumlarını sağlayın/inceleyin. Kontroller geçerse birleştirin; ardından merge SHA'sini bu dosyaya ekleyin.
