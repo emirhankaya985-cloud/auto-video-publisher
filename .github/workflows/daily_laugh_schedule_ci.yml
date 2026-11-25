@@ -6,6 +6,8 @@ on:
       - 'scheduled_multi_publisher.py'
       - 'toonzone_schedule.py'
       - 'test_toonzone_schedule.py'
+      - 'toonzone_asset_matcher.py'
+      - 'test_toonzone_asset_matcher.py'
       - 'test_scheduled_multi_publisher.py'
       - 'stats_reporter.py'
       - 'test_daily_laugh_five_schedule.py'
