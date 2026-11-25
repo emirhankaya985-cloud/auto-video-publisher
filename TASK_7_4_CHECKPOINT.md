@@ -4,8 +4,10 @@ Date: 2026-11-26 (Europe/Istanbul)
 
 ## Scope and current code
 
-- Repository: `emirhankaya985-cloud/auto-video-publisher`; working branch: `feat/task74-engagement-health`.
+- Repository: `emirhankaya985-cloud/auto-video-publisher`; merged PR [#327](https://github.com/emirhankaya985-cloud/auto-video-publisher/pull/327).
 - Base `main` at start: `1e63e0417c35eb04bdd598316245d6b2f4634285`.
+- Final `main`: `56d3164a700a01328b57139e93f6351838939b38` (merge commit `56d3164a700a01328b57139e93f6351838939b38`).
+- PR #327 checks passed: `regression`, `no-publish-tests`, `schedule-and-regression`, `report-regression`, `no-send-tests`, `tests`; `setup-status` and `measure` were skipped by workflow conditions.
 - Preserved the 7.3 read-only engagement controls and the six active accounts: Tarladaki Fasulye, Gönle Düşen, Beyinsiz Penguen, Daily Laugh Lab, Film Mağarası, ToonZone. Film Second is not added; old history is untouched.
 - Added a redacted engagement health report sourced only from existing completed main-branch isolated audit artifacts. It does not call Meta or create interactions. Missing history remains “unknown”; platform API acknowledgements are clearly marked as not platform-side proof.
 - The daily report includes Facebook/Instagram route status, permission status, history, errors, blocked operations, last audit time and intervention. Instagram like writes are reported unsupported; Facebook automated likes remain disabled by policy.
@@ -16,7 +18,7 @@ Date: 2026-11-26 (Europe/Istanbul)
 
 - Current GitHub identity: `emirhankaya985-cloud` (active). No AFK identity was used.
 - Latest isolated health run before this branch: #45718418035 (`workflow_dispatch`) and #45718400844 (`push`), both on `0a1b0ce56cff4aa904a27e57f1dca2dab7c9c7e7`; both evaluated the six-account read-only audit. They are not natural schedule evidence and are older than current main.
-- Latest natural 15-minute isolated run observed: #45696797572, event `schedule`, SHA `aa4029036b25592721a10b1918d83762689e205b` (stale). No schedule run exists on current main SHA `1e63e0417c35eb04bdd598316245d6b2f4634285`. No workflow was manually dispatched for this check.
+- Latest natural 15-minute isolated run observed: #45696797572, event `schedule`, SHA `aa4029036b25592721a10b1918d83762689e205b` (stale). No schedule run exists on final main SHA `56d3164a700a01328b57139e93f6351838939b38`. No workflow was manually dispatched for this check.
 - Latest scheduled daily stats run observed: #45542901186 on `9e13baa19a81d1030fc03c2aa4a6affc545f1212` (stale); current SHA not yet naturally sampled.
 - Secret names for `DASHBOARD_DATABASE_URL`, Telegram, and ntfy are configured in repository settings; their values were not read or printed. A prior publication sync run #45713566865 succeeded on stale SHA `aa4029036b25592721a10b1918d83762689e205b`.
 - Neon discovery did not expose the production project in the connected Neon tool. Existing schema evidence covers publication receipts and `notification_events` dedupe, not engagement-health rows. No Neon health query/write or fabricated receipt was made. Health snapshots are retained as GitHub artifacts; dedupe may use the existing notification table when the secret connection works.
@@ -30,7 +32,7 @@ Date: 2026-11-26 (Europe/Istanbul)
 
 ## Pending before completion
 
-- PR and CI status: not created/observed yet.
+- PR #327 is merged and its required CI checks passed.
 - A future natural schedule on merged/current main is needed to verify the new workflow code runs in GitHub Actions. This checkpoint does not claim that evidence.
 - Per-account historical verified interaction counts cannot be recovered from aggregate legacy API-ACK rows; report says unknown rather than zero.
 - Neon health persistence needs the owner to expose/confirm an authorized existing Neon project and approve a compatible health-record schema. Do not write this into `publication_events`.
