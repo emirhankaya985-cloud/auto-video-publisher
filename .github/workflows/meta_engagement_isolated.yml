@@ -85,11 +85,30 @@ jobs:
           from pathlib import Path
           p = Path('cross-engagement/report.json')
           summary = {'account': os.environ['META_AUDIT_FOCUS'], 'mode': 'read_only', 'likes_sent': 0}
-          if p.exists():
-              report = json.loads(p.read_text(encoding='utf-8'))
-              for key in ('source_posts', 'planned', 'source_run_id', 'like_coverage', 'blocked_counts'):
-                  if key in report:
-                      summary[key] = report[key]
+          summary['evidence_status'] = 'unknown'
+          if p.is_file():
+              try:
+                  report = json.loads(p.read_text(encoding='utf-8'))
+                  if not isinstance(report, dict):
+                      raise ValueError('invalid audit report')
+                  for key in ('source_posts', 'planned', 'source_run_id',
+                              'verified_like_coverage', 'blocked_counts',
+                              'runtime_status', 'runtime_reason_code',
+                              'verified_account_names', 'unverified_account_routes',
+                              'facebook_unverified_routes', 'instagram_unverified_routes',
+                              'provider_holds'):
+                      if key in report:
+                          summary[key] = report[key]
+                  status = report.get('runtime_status')
+                  if status in ('held', 'source_not_ready'):
+                      summary['evidence_status'] = status
+                  elif (report.get('mode') == 'dry_run'
+                        and isinstance(report.get('verified_like_coverage'), dict)):
+                      summary['evidence_status'] = 'read_only_evidence_available'
+                  else:
+                      summary['error'] = 'audit_evidence_incomplete'
+              except (OSError, ValueError):
+                  summary['error'] = 'audit_report_invalid'
           else:
               summary['error'] = 'audit_report_missing'
           print(json.dumps(summary, ensure_ascii=False, default=str))
