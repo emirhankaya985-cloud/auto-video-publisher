@@ -124,14 +124,23 @@ def collect_instagram_snapshot(*, targets=None, get_page_info=None, snapshot_loa
             continue
         key = (account, "Instagram")
         try:
-            page = get_page_info(page_name)
-            data = snapshot_loader(page)
+            try:
+                page = get_page_info(page_name)
+            except Exception as exc:
+                snapshot[key] = None
+                errors.append(f"{account} / Instagram: identity_lookup_failed ({type(exc).__name__})")
+                continue
+            try:
+                data = snapshot_loader(page)
+            except Exception as exc:
+                snapshot[key] = None
+                errors.append(f"{account} / Instagram: instagram_metrics_read_failed ({type(exc).__name__})")
+                continue
             if not isinstance(data, dict):
                 raise RuntimeError("invalid_snapshot")
             snapshot[key] = data
         except Exception as exc:
             snapshot[key] = None
-            # Exception bodies can include provider URLs or credential material.
             errors.append(f"{account} / Instagram: {type(exc).__name__}")
     return snapshot, errors
 
