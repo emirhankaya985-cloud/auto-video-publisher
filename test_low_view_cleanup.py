@@ -13,14 +13,14 @@ class LowViewAssessmentTests(unittest.TestCase):
     def report(self, snapshot):
         return assess(snapshot, NOW.isoformat(), now=NOW, excluded_accounts=set())
 
-    def test_under_48_hours_is_held_even_with_zero_views(self):
-        row = {"acct": {"views": 0, "published_at": (NOW - timedelta(hours=47)).isoformat()}}
+    def test_under_36_hours_is_held_even_with_zero_views(self):
+        row = {"acct": {"views": 0, "published_at": (NOW - timedelta(hours=35, minutes=59)).isoformat()}}
         result = self.report({("A", "Instagram"): row})
         self.assertEqual(result["candidates"], [])
-        self.assertEqual(result["held"][0]["reason"], "younger_than_48h")
+        self.assertEqual(result["held"][0]["reason"], "younger_than_36h")
 
-    def test_48_hours_zero_and_nine_are_review_candidates(self):
-        published = (NOW - timedelta(hours=48)).isoformat()
+    def test_36_hours_zero_and_nine_are_review_candidates(self):
+        published = (NOW - timedelta(hours=36)).isoformat()
         result = self.report({("A", "Instagram"): {
             "zero": {"views": 0, "published_at": published},
             "nine": {"views": 9, "published_at": published},
@@ -176,6 +176,22 @@ class LowViewAssessmentTests(unittest.TestCase):
         self.assertEqual(deleted_ids, ["1", "3", "2"])
         self.assertEqual(len(result["deleted"]), 3)
         self.assertEqual(result["skipped_before_start"], 1)
+        self.assertEqual(result["held"], 1)
+
+    def test_default_per_account_cap_is_ten_and_deletes_oldest_first(self):
+        report = {"collection_complete": True, "candidates": [
+            {"account": "A", "content_id": str(i), "views": 2,
+             "published_at": (NOW - timedelta(hours=36 + i)).isoformat()}
+            for i in range(11)
+        ]}
+        page = {"page_token": "test-token", "user_access_token": "test-user-token",
+                "instagram_id": "9"}
+        deleted_ids = []
+        result = delete_review_candidates(report, {"A": page},
+            lambda _page, media_id: deleted_ids.append(media_id) or True,
+            delete_start_at=(NOW - timedelta(hours=72)).isoformat(), now=NOW)
+        self.assertEqual(deleted_ids, [str(i) for i in range(10, 0, -1)])
+        self.assertEqual(result["max_per_account_per_run"], 10)
         self.assertEqual(result["held"], 1)
 
     def test_invalid_or_future_activation_timestamp_never_deletes(self):
