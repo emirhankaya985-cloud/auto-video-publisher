@@ -5,6 +5,9 @@ permissions:
 
 on:
   workflow_dispatch:
+  # Daily read-only credential and Page identity check (06:00 UTC / 09:00 Istanbul).
+  schedule:
+    - cron: '0 6 * * *'
   # One-shot auth diagnosis after the reviewed safe patch is merged to main.
   # No Meta POST, video upload, credentials logging or secret mutation.
   push:
@@ -30,7 +33,7 @@ jobs:
 
   audit:
     if: >-
-      (github.event_name == 'workflow_dispatch' || github.event_name == 'push') && github.ref == 'refs/heads/main'
+      (github.event_name == 'workflow_dispatch' || github.event_name == 'push' || github.event_name == 'schedule') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
