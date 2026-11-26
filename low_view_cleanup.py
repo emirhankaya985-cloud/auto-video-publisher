@@ -11,7 +11,7 @@ import re
 from pathlib import Path
 
 
-AGE = timedelta(hours=48)
+AGE = timedelta(hours=36)
 MIN_VIEWS = 10
 # Ordered serialized content is held until a separate safe policy is designed.
 EXCLUDED_ACCOUNTS = {"🎬 Film Mağarası", "📺 ToonZone"}
@@ -95,7 +95,8 @@ def assess(snapshot, measured_at, *, now=None, excluded_accounts=EXCLUDED_ACCOUN
                 continue
             age = now - published
             if age < AGE:
-                result["held"].append({**row, "views": views, "reason": "younger_than_48h"})
+                result["held"].append({**row, "views": views,
+                                       "reason": f"younger_than_{int(AGE.total_seconds() // 3600)}h"})
             elif views < MIN_VIEWS:
                 result["candidates"].append({**row, "views": views,
                                              "published_at": published.isoformat(),
@@ -157,7 +158,7 @@ def collect_instagram_snapshot(*, targets=None, get_page_info=None, snapshot_loa
 
 
 def delete_review_candidates(report, pages, delete_call, *, delete_start_at, now=None,
-                             max_per_account=3):
+                             max_per_account=10):
     """Delete only new owned Instagram videos after a complete inventory.
 
     Videos published before the activation timestamp remain untouched. The
