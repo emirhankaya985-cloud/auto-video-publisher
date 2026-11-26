@@ -2,7 +2,7 @@ name: Low-view video cleanup assessment (read-only)
 
 on:
   schedule:
-    - cron: '17 */3 * * *'
+    - cron: '17 0 */2 * *'
   workflow_dispatch:
   pull_request:
     paths:
