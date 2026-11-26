@@ -1,4 +1,4 @@
-name: Low-view video cleanup assessment (read-only)
+name: Low-view Instagram cleanup
 
 on:
   schedule:
@@ -40,15 +40,17 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install --require-hashes -r requirements.txt
-      - name: Collect account-bound view counts and assess candidates (read only)
+      - name: Collect account-bound metrics and apply safe cleanup rules
         env:
           META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+          LOW_VIEW_DELETE_ENABLED: ${{ vars.LOW_VIEW_DELETE_ENABLED || 'false' }}
+          LOW_VIEW_DELETE_START_AT: ${{ vars.LOW_VIEW_DELETE_START_AT }}
         run: python -u low_view_cleanup.py
-      - name: Preserve private read-only assessment (IDs retained for review)
+      - name: Preserve private cleanup report (IDs retained privately)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: low-view-cleanup-assessment-${{ github.run_id }}
+          name: low-view-cleanup-report-${{ github.run_id }}
           path: low-view-cleanup-report.json
           if-no-files-found: warn
           retention-days: 90
