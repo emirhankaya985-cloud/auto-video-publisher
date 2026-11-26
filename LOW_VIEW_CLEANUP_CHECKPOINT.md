@@ -15,8 +15,9 @@ Date: 2026-11-26 (Europe/Istanbul)
 
 - Added whole-inventory completeness gating, expected-platform checks, and regression coverage for missing identities/platforms and collection errors.
 - Local focused tests: `test_low_view_cleanup.py` 9 passed; `test_stats_reporter.py` 13 passed. No CI result yet.
+- PR #334 opened from `fix/low-view-fail-closed` at head `b2aac010145b81b8869fa97df6c70c4602448dcb`; base main remains `7f104ccdb496b6b9c322d8cf44569d642fc31115`. PR is open as draft. Its CI run is pending at the last check.
 - Required user configuration before a future complete Threads scan: set each of the six `*_THREADS_USER_ID` repository variables to the correct numeric ID after confirming account identity. Do not put token values in chat; check/edit existing token secrets only in GitHub's secure Actions settings.
-- Pending: push branch, open PR, inspect CI, and refresh this note with PR/CI status. No production workflow was dispatched from this local work.
+- No production workflow was dispatched from this branch. Merge awaits PR CI and verified Threads IDs in secure repository variables.
 
 ## Implemented in this change
 
