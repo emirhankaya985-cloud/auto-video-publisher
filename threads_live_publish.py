@@ -16,7 +16,7 @@ from meta_auth_loader import load_meta_auth
 from publication_github_progress import restore_publication_state
 from publication_safety import route_paused
 from publisher_recovery import read_with_retry
-from threads_accounts import THREADS_ROUTE_PREFIXES, threads_account_config
+from threads_accounts import THREADS_ROUTE_PREFIXES, threads_account_config, threads_route_enabled
 
 WORKFLOW = ".github/workflows/threads_live_publish.yml"
 NAMES = ("threads-publish-intent", "threads-publish-result")
@@ -258,16 +258,25 @@ def account_config(route):
 def prepare(run_id):
     history = archive.restore(names=NAMES, workflow_path=WORKFLOW)
     state = restore_publication_state()
-    pages = {p["page_name"]: p for p in load_meta_auth()["pages"]}
     now = archive.now_utc()
     plans, status = [], {}
+    enabled_routes = []
     for route, name in ROUTES.items():
-        if (os.getenv(f"ENABLE_{THREADS_ROUTE_PREFIXES[route]}_THREADS", "true").lower() == "false"
+        # Publishing is opt-in per account. Missing/blank variables must never
+        # silently authorize an account; only the literal value "true" opens it.
+        if (not threads_route_enabled(route)
                 or route_paused(route)
                 or (route == "daily_laugh" and route_paused("daily_laugh_instagram"))
                 or (route == "gonle" and route_paused("gonle_ig"))):
             status[route] = "route_or_rights_disabled"
             continue
+        enabled_routes.append((route, name))
+
+    # A fully opt-out configuration is a successful no-op. Do not require
+    # unrelated Meta credentials when no Threads route is authorized.
+    pages = ({p["page_name"]: p for p in load_meta_auth()["pages"]}
+             if enabled_routes else {})
+    for route, name in enabled_routes:
         try:
             account = account_config(route)
             target = profile(account)

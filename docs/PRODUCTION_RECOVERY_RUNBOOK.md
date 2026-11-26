@@ -883,3 +883,10 @@ Run 42103999147: full exact Drive cover plus compact profile created 13739862-by
 - **Güvenli düzeltme:** Yalnız aynı Drive ID ve SHA-256 için günler arası kaynak inceleme beklemesi ekle. Aynı adla farklı Drive ID'si veya farklı baytlar bu beklemeyi devralmaz; yeni adaylar mevcut kalite, sıra ve duplicate kontrollerinden geçer. Yayın geçmişi ve intent kayıtları değişmez.
 - **Daily Laugh hedefi:** Kullanıcı başına günlük hedefi 5 olarak belirtti. Eski sekiz slot 09:00, 12:00, 15:00, 18:00, 21:00 New York yerel saatleriyle değiştirildi; GitHub cron, DST için gereken UTC saatlerinin birleşimini çalıştırır. Günlük hedef, rapor, kotalar ve sayaçlar 5 ile eşleştirildi. Kişi başı limit ve duplicate koruması korunur.
 - **Test / canlı durumu:** Kaynak kimliği/hash karantinası ile kotanın beşe indirilmesi için regresyon testleri eklendi; CI ve PR sonrası ana dal doğrulaması ayrıca gereklidir. Bu kod değişiklikleri kendi başına canlı yayın kanıtı değildir; sonraki doğal publisher koşumu ve gerçek makbuzlar ayrıca incelenmelidir.
+
+## 26 Kasım 2026 — Threads yayın worker'ında boş opt-in ayarları
+
+- **Kanıt:** [45880079212](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/45880079212) `prepare` adımında `RuntimeError` ile durdu; yayın adımları çalışmadı. Logda altı `ENABLE_*_THREADS` değişkeni boş görünüyordu. Exception ayrıntısı bilinçli olarak loga yazılmadığından API/credential kök nedeni doğrulanmadı.
+- **Kod nedeni:** `threads_live_publish.prepare` yalnızca opt-in değeri `false` ise route'u atlıyordu; boş değerler yayın izni gibi ele alınıyor ve hiçbir route açık değilken Meta kimlik doğrulaması yine de yükleniyordu.
+- **Güvenli düzeltme:** Yalnız tam `true` olan hesapları etkin say; etkin hesap yoksa boş planı arşivleyip Meta veya Threads kimlik bilgilerine dokunmadan başarılı no-op yap. Otomatik yayın için hesap bazlı opt-in hâlâ gerekir; bu düzeltme hiçbir hesapta yayın açmaz.
+- **Test / canlı durumu:** Yerel Threads yayıncı regresyon paketi 50 testle geçti. PR/CI ve sonraki doğal schedule doğrulaması bekleniyor; gerçek gönderi yapılmadı.

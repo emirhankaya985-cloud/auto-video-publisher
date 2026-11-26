@@ -1,5 +1,7 @@
 import unittest
+from contextlib import redirect_stdout
 from datetime import datetime, timedelta, timezone
+from io import StringIO
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -7,6 +9,21 @@ import threads_live_publish as live
 
 
 class ThreadsNativeVideoTest(unittest.TestCase):
+    def test_prepare_keeps_every_unconfigured_threads_route_disabled(self):
+        history = {"schema": 1, "records": {}}
+        with patch.dict(live.os.environ, {}, clear=True), \
+             patch.object(live.archive, "restore", return_value=history), \
+             patch.object(live, "restore_publication_state", return_value={}), \
+             patch.object(live, "load_meta_auth", side_effect=AssertionError("disabled routes must not read Meta")), \
+             patch.object(live.archive, "now_utc", return_value=datetime(2026, 11, 4, 16, tzinfo=timezone.utc)), \
+             patch.object(live.archive, "save") as save, \
+             patch.object(live, "account_config", side_effect=AssertionError("disabled routes must not load credentials")), \
+             redirect_stdout(StringIO()):
+            live.prepare("77")
+        plan = save.call_args_list[-1].args[1]
+        self.assertEqual(plan["plans"], [])
+        self.assertEqual(set(plan["routes"].values()), {"route_or_rights_disabled"})
+
     def test_account_prepare_error_fails_after_healthy_reservation_is_published(self):
         plan = {"key": "healthy", "route": "gonle", "url": "https://a.fbcdn.net/v",
                 "text": "Instagram: verified-source"}
