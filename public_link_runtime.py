@@ -15,7 +15,7 @@ import time
 import tempfile
 import zipfile
 from types import SimpleNamespace
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -41,6 +41,8 @@ from ordered_channels import TOONZONE_ETSY_LINK, parse_order, toonzone_metadata
 from publication_safety import route_paused
 from publisher_recovery import (
     read_with_retry, classify_meta_failure, known_pre_publish_media_rejection,
+    ordered_recovery_profile_index, ordered_recovery_cooldown_hours,
+    ordered_retry_cooldown_active,
 )
 from scheduled_multi_publisher import (
     platform_content_from_txt, TARLADAKI_HOURS, PENGUEN_HOURS,
@@ -1707,6 +1709,15 @@ def plan(audit=False):
                 key = f"{route}:{p}:{item['id']}"
                 existing = state["entries"].get(key, {})
                 cap_hash = caption_key(captions[p])
+                if (route in {"film", "toonzone"}
+                        and p == "instagram"
+                        and ordered_retry_cooldown_active(existing, now)):
+                    report.append(
+                        "HELD: ordered Instagram part remains at the queue head; "
+                        "retry cooldown has not elapsed."
+                    )
+                    held = True
+                    continue
                 if (existing.get("route") == route
                         and existing.get("platform") == p
                         and existing.get("file") == item["name"]
@@ -1838,7 +1849,10 @@ def plan(audit=False):
                 prior_failure = existing.get("failure") if isinstance(existing, dict) else None
                 if (not audit and p == "instagram" and existing.get("status") == "uncertain"
                         and existing.get("caption_hash") == cap_hash
-                        and isinstance(prior_failure, dict)):
+                        and isinstance(prior_failure, dict)
+                        and not audited_ig_v3_eligible(route, p, item["name"], existing)
+                        and not audited_ig_v4_eligible(route, p, item["name"], existing)
+                        and not audited_avanak_part10_recovery_eligible(route, p, item, existing)):
                     prior = SimpleNamespace(
                         stage=prior_failure.get("stage"),
                         http_status=prior_failure.get("http_status"),
@@ -1851,7 +1865,7 @@ def plan(audit=False):
                         existing.update(status="ready", prepublish_retry_count=previous_attempts + 1)
                         report.append(
                             f"RECOVERY: {item['name']} instagram previously rejected "
-                            "before media_publish; safe alternate encoding authorized once."
+                            "before media_publish; next profile queued after history reconciliation."
                         )
                 if (not audit and existing.get("caption_hash") == cap_hash
                         and audited_ig_v3_eligible(
@@ -1860,21 +1874,24 @@ def plan(audit=False):
                     # ambiguous caption match was found above. Old 400 belongs
                     # to the binary upload stage BEFORE media_publish. Preserve
                     # all Facebook results and allow one new 720p/96k encode.
-                    existing.update(status="ready", prepublish_retry_count=2)
+                    existing.update(status="ready", prepublish_retry_count=2,
+                                    recovery_profile_override=1)
                     report.append(
                         f"RECOVERY V3: {item['name']} instagram audited "
                         "pre-media_publish HTTP 400; one low-bitrate attempt."
                     )
                 if (not audit and existing.get("caption_hash") == cap_hash
                         and audited_ig_v4_eligible(route, p, item["name"], existing)):
-                    existing.update(status="ready", prepublish_retry_count=3)
+                    existing.update(status="ready", prepublish_retry_count=3,
+                                    recovery_profile_override=0)
                     report.append(
                         f"RECOVERY V4: {item['name']} instagram 180s compact "
                         "profile validated FINISHED in no-publish test."
                     )
                 if (not audit and existing.get("caption_hash") == cap_hash
                         and audited_avanak_part10_recovery_eligible(route, p, item, existing)):
-                    existing.update(status="ready", prepublish_retry_count=2)
+                    existing.update(status="ready", prepublish_retry_count=2,
+                                    recovery_profile_override=1)
                     report.append(
                         "RECOVERY: audited Avanak Apti Part 10 binary rejection; "
                         "one bounded 720p/96k attempt after remote reconciliation."
@@ -2471,14 +2488,18 @@ def publish():
             prepared_ig = None
             if "instagram" in item["platforms"]:
                 try:
-                    retry_count = state["entries"][
-                        f"{item['route']}:instagram:{item['id']}"
-                    ].get("prepublish_retry_count", 0)
+                    upload_entry = state["entries"][f"{item['route']}:instagram:{item['id']}"]
+                    retry_count = upload_entry.get("prepublish_retry_count", 0)
+                    ordered_route = item["route"] in {"film", "toonzone"}
+                    ordered_profile = (
+                        ordered_recovery_profile_index(retry_count) if ordered_route else None
+                    )
+                    if ordered_route:
+                        override = upload_entry.get("recovery_profile_override")
+                        if type(override) is int and 0 <= override < 5:
+                            ordered_profile = override
                     alternate_compact_profile = (
-                        retry_count == 1 and item["route"] in {"film", "film_second", "toonzone"}
-                        and not (retry_count == 3 and
-                                 item["route"] in _AUDITED_IG_V3_FILES and
-                                 item["name"] == _AUDITED_IG_V3_FILES[item["route"]])
+                        ordered_route and ordered_profile == 1
                     )
                     # Bounded, different FFmpeg encodings for short Reels.
                     # We never change Facebook state or replay media_publish.
@@ -2500,22 +2521,23 @@ def publish():
                         # short humour/Daily Reels to 30fps H.264 + AAC instead.
                         prefer_remux=item["route"] not in {"tarladaki", "penguen", "daily_laugh"},
                         film_compact=(
-                            not alternate_compact_profile
-                            and not short_recovery_v3
-                            and not gonle_alt_vertical
-                            and not (retry_count == 2 and item["route"] in {"film", "film_second", "toonzone"})
-                            and (item["route"] in {"film", "film_second", "gonle"}
-                                 or retry_count > 0)
+                            (ordered_route and ordered_profile == 0
+                             and item["route"] in {"film", "film_second"})
+                            or (not ordered_route and not short_recovery_v3
+                                and not gonle_alt_vertical
+                                and (item["route"] in {"film", "film_second", "gonle"}
+                                     or retry_count > 0))
                         ),
                         toonzone_compact=(
-                            item["route"] == "toonzone" and not alternate_compact_profile
-                            and retry_count != 2
+                            item["route"] == "toonzone" and ordered_profile == 0
                         ),
-                        # Last verified prepublish rejection gets a THIRD, distinct
-                        # locally validated full-length MP4 bitstream. This does
-                        # not authorize repeating uncertain Meta writes.
-                        recovery_v4=(retry_count == 2 and item["route"] in
-                                     {"film", "film_second", "toonzone"}),
+                        # Rotate through validated profiles, then repeat
+                        # the cycle only after a terminal pre-publish rejection.
+                        recovery_v4=(ordered_route and ordered_profile == 2 and not (
+                            retry_count == 2
+                            and item["route"] in _AUDITED_IG_V3_FILES
+                            and item["name"] == _AUDITED_IG_V3_FILES[item["route"]]
+                        )),
                         # Apparent MP4/codec compliance did not prevent the
                         # repeated short-Reels rupload ProcessingFailedError.
                         # Always encode first-pass humour/Daily reels into a
@@ -2524,7 +2546,7 @@ def publish():
                         # established profiles and one-shot retry gates.
                         force_transcode=(
                             alternate_compact_profile or gonle_alt_vertical
-                            or (retry_count == 2 and item["route"] in {"film", "film_second", "toonzone"})
+                            or (ordered_route and ordered_profile != 0)
                             or short_recovery_v3
                             or item["route"] in {"tarladaki", "penguen", "daily_laugh"}
                         ),
@@ -2538,6 +2560,7 @@ def publish():
                                 item["route"] in _AUDITED_IG_V3_FILES and
                                 item["name"] == _AUDITED_IG_V3_FILES[item["route"]])
                         ),
+                        recovery_v5=(ordered_route and ordered_profile == 4),
                     )
                     if item["route"] == "toonzone":
                         # Historical five live IG thumbnails disagree with
@@ -2627,16 +2650,28 @@ def publish():
                     previous = entry.get("prepublish_retry_count", 0)
                     if (platform == "instagram" and isinstance(exc, MetaAPIError)
                             and known_pre_publish_media_rejection(exc, item["route"], previous)):
-                        # This native uploader has not reached media_publish.
-                        # The next scheduled job rechecks remote posts before
-                        # creating a new container with a distinct encoding.
-                        # At most two additional short-Reel profiles are tried.
+                        # Only a terminal, proven pre-publish rejection reaches
+                        # here. Ordered routes keep the same part at queue head,
+                        # rotate profiles, and back off repeated container attempts.
+                        next_retry_count = previous + 1
+                        failure = dict(
+                            diagnostic,
+                            recovery_next_profile=next_retry_count,
+                            recovery_action="reconcile_then_retry_same_ordered_part",
+                        )
+                        retry_fields = {}
+                        if item["route"] in {"film", "toonzone"}:
+                            cooldown_hours = ordered_recovery_cooldown_hours(next_retry_count)
+                            retry_at = datetime.now(timezone.utc) + timedelta(hours=cooldown_hours)
+                            failure["recovery_profile_index"] = ordered_recovery_profile_index(next_retry_count)
+                            failure["retry_cooldown_hours"] = cooldown_hours
+                            retry_fields["recovery_retry_not_before"] = retry_at.isoformat()
+                        entry.pop("recovery_profile_override", None)
                         entry.update(
                             status="ready",
-                            prepublish_retry_count=previous + 1,
-                            failure=dict(diagnostic,
-                                         recovery_next_profile=previous + 1,
-                                         recovery_action="normalize_then_reconcile_at_next_tick"),
+                            prepublish_retry_count=next_retry_count,
+                            failure=failure,
+                            **retry_fields,
                         )
                     else:
                         entry.update(status="uncertain", failure=diagnostic)

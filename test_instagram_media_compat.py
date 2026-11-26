@@ -148,6 +148,31 @@ class InstagramMediaCompatibilityTests(unittest.TestCase):
             prepare_instagram_upload("source.mp4", "output.mp4",
                                      force_transcode=True, recovery_v4=True, recovery_v3=True)
 
+    def test_ordered_v5_profile_is_validated_and_forced(self):
+        from instagram_media_compat import _transcode_recovery_v5, prepare_instagram_upload
+        with patch("instagram_media_compat.subprocess.run") as run:
+            _transcode_recovery_v5(Path("source.mp4"), Path("output.mp4"))
+        command = run.call_args.args[0]
+        self.assertIn("scale=720:1280", " ".join(command))
+        self.assertEqual(command[command.index("-b:v") + 1], "2500k")
+        self.assertEqual(command[command.index("-ar") + 1], "48000")
+        self.assertIn("+faststart", command)
+        source_probe = supported_probe()
+        output_probe = supported_probe()
+        output_probe["streams"][0].update(width=720, height=1280, avg_frame_rate="30/1")
+        with patch("instagram_media_compat.probe", side_effect=[source_probe, output_probe]), \
+             patch("instagram_media_compat.mp4_atom_structure", side_effect=[ATOM_LATE, ATOM_OK]), \
+             patch("instagram_media_compat.os.path.getsize", return_value=1024), \
+             patch("instagram_media_compat._transcode_recovery_v5") as transcode, \
+             patch("instagram_media_compat.check_full_decode") as decode:
+            result = prepare_instagram_upload(
+                "source.mp4", "output.mp4", force_transcode=True, recovery_v5=True)
+        self.assertEqual(result, Path("output.mp4"))
+        transcode.assert_called_once_with(Path("source.mp4"), Path("output.mp4"))
+        decode.assert_called_once_with(Path("output.mp4"))
+        with self.assertRaisesRegex(ValueError, "forced noncompact"):
+            prepare_instagram_upload("source.mp4", "output.mp4", recovery_v5=True)
+
     def test_film_compact_command_matches_successful_full_length_profile(self):
         with patch("instagram_media_compat.subprocess.run") as run:
             _transcode_film_compact(Path("source.mp4"), Path("output.mp4"))
