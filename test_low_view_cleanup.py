@@ -126,8 +126,21 @@ class LowViewAssessmentTests(unittest.TestCase):
 
         self.assertFalse(result["collection_complete"])
         self.assertEqual(result["candidates"], [])
-        self.assertEqual(errors, ["B / Instagram: RuntimeError"])
+        self.assertEqual(errors, ["B / Instagram: instagram_metrics_read_failed (RuntimeError)"])
         self.assertNotIn("provider detail", str(result))
+
+    def test_identity_lookup_failure_is_reported_without_exception_message(self):
+        targets = [("A", "Page A", "Instagram")]
+        def lookup(_name):
+            raise RuntimeError("sensitive token-like error details")
+
+        snapshot, errors = collect_instagram_snapshot(
+            targets=targets, get_page_info=lookup,
+            snapshot_loader=mock.Mock())
+
+        self.assertIsNone(snapshot[("A", "Instagram")])
+        self.assertEqual(errors, ["A / Instagram: identity_lookup_failed (RuntimeError)"])
+        self.assertNotIn("sensitive", str(errors))
 
 
 if __name__ == "__main__":
