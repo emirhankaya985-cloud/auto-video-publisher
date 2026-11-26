@@ -1,7 +1,8 @@
 import unittest
+from unittest import mock
 from datetime import datetime, timedelta, timezone
 
-from low_view_cleanup import assess
+from low_view_cleanup import assess, collect_instagram_snapshot
 
 
 NOW = datetime(2026, 11, 26, 12, 0, tzinfo=timezone.utc)
@@ -26,6 +27,38 @@ class LowViewAssessmentTests(unittest.TestCase):
         self.assertEqual({x["content_id"] for x in result["candidates"]}, {"zero", "nine"})
         self.assertTrue(all(x["action"] == "review_only_no_delete" for x in result["candidates"]))
         self.assertFalse(result["deletion_enabled"])
+
+    def test_missing_expected_platform_makes_whole_scan_incomplete_and_holds_rows(self):
+        old = (NOW - timedelta(days=3)).isoformat()
+        result = assess({("A", "Instagram"): {
+            "private-id": {"views": 0, "published_at": old},
+        }}, NOW.isoformat(), now=NOW, excluded_accounts=set(),
+            expected_sources={("A", "Instagram"), ("B", "Threads")})
+        self.assertFalse(result["collection_complete"])
+        self.assertEqual(result["candidates"], [])
+        self.assertIn(["B", "Threads"], result["missing_sources"])
+        self.assertEqual(result["held"][0]["reason"], "collection_incomplete")
+
+    def test_collection_error_and_none_snapshot_never_create_candidate(self):
+        old = (NOW - timedelta(days=3)).isoformat()
+        result = assess({("A", "Instagram"): {
+            "private-id": {"views": 0, "published_at": old},
+        }, ("B", "Threads"): None}, NOW.isoformat(), now=NOW,
+            excluded_accounts=set(), collection_errors=["B / Threads: identity missing"])
+        self.assertFalse(result["collection_complete"])
+        self.assertEqual(result["candidates"], [])
+        self.assertTrue(any(row["reason"] == "platform_collection_unavailable"
+                            for row in result["held"]))
+
+    def test_complete_inventory_still_applies_review_only_threshold(self):
+        old = (NOW - timedelta(hours=48)).isoformat()
+        result = assess({("A", "Instagram"): {
+            "private-id": {"views": 9, "published_at": old},
+        }}, NOW.isoformat(), now=NOW, excluded_accounts=set(),
+            expected_sources={("A", "Instagram")})
+        self.assertTrue(result["collection_complete"])
+        self.assertEqual(len(result["candidates"]), 1)
+        self.assertEqual(result["candidates"][0]["action"], "review_only_no_delete")
 
     def test_ten_views_are_kept(self):
         row = {"id": {"views": 10, "published_at": (NOW - timedelta(hours=72)).isoformat()}}
@@ -59,6 +92,42 @@ class LowViewAssessmentTests(unittest.TestCase):
             assess({}, "2026-11-26T12:00:00", now=NOW)
         with self.assertRaises(ValueError):
             assess({}, (NOW + timedelta(hours=1)).isoformat(), now=NOW)
+
+    def test_live_collector_queries_only_instagram_routes(self):
+        targets = [("A", "Page A", "Facebook"), ("A", "Page A", "Instagram"),
+                   ("B", "Page B", "YouTube"), ("C", "Page C", "Instagram")]
+        page_lookup = mock.Mock(side_effect=lambda name: {"page": name})
+        snapshot_loader = mock.Mock(side_effect=lambda page: {page["page"]: {
+            "views": 4, "published_at": (NOW - timedelta(days=3)).isoformat()}})
+
+        snapshot, errors = collect_instagram_snapshot(
+            targets=targets, get_page_info=page_lookup, snapshot_loader=snapshot_loader)
+
+        self.assertEqual(set(snapshot), {("A", "Instagram"), ("C", "Instagram")})
+        self.assertEqual(page_lookup.call_args_list, [mock.call("Page A"),
+                                                     mock.call("Page C")])
+        self.assertEqual(snapshot_loader.call_count, 2)
+        self.assertEqual(errors, [])
+
+    def test_one_failed_instagram_account_suppresses_all_preview_candidates(self):
+        targets = [("A", "Page A", "Instagram"), ("B", "Page B", "Instagram")]
+        page_lookup = mock.Mock(side_effect=lambda name: {"page": name})
+        def loader(page):
+            if page["page"] == "Page B":
+                raise RuntimeError("provider detail is intentionally not returned")
+            return {"private-id": {"views": 1,
+                    "published_at": (NOW - timedelta(days=3)).isoformat()}}
+
+        snapshot, errors = collect_instagram_snapshot(
+            targets=targets, get_page_info=page_lookup, snapshot_loader=loader)
+        result = assess(snapshot, NOW.isoformat(), now=NOW,
+                        expected_sources={("A", "Instagram"), ("B", "Instagram")},
+                        collection_errors=errors)
+
+        self.assertFalse(result["collection_complete"])
+        self.assertEqual(result["candidates"], [])
+        self.assertEqual(errors, ["B / Instagram: RuntimeError"])
+        self.assertNotIn("provider detail", str(result))
 
 
 if __name__ == "__main__":

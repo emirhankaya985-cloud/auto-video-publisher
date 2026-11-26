@@ -29,8 +29,10 @@ def _parse_time(value):
     return parsed.astimezone(timezone.utc)
 
 
-def assess(snapshot, measured_at, *, now=None, excluded_accounts=EXCLUDED_ACCOUNTS):
+def assess(snapshot, measured_at, *, now=None, excluded_accounts=EXCLUDED_ACCOUNTS,
+           expected_sources=None, collection_errors=()):
     """Classify a complete read-only snapshot; malformed or unknown => hold."""
+    collection_errors = list(collection_errors)
     now = now or datetime.now(timezone.utc)
     if now.tzinfo is None:
         raise ValueError("now must be timezone-aware")
@@ -38,9 +40,33 @@ def assess(snapshot, measured_at, *, now=None, excluded_accounts=EXCLUDED_ACCOUN
     measured = _parse_time(measured_at)
     if measured is None or measured > now + timedelta(minutes=5):
         raise ValueError("measurement time is missing or invalid")
-    result = {"schema_version": 1, "mode": "read_only_assessment",
+    expected_sources = set(expected_sources or ())
+    actual_sources = set(snapshot)
+    missing_sources = expected_sources - actual_sources
+    invalid_sources = {key for key, value in snapshot.items() if value is None}
+    complete = not collection_errors and not missing_sources and not invalid_sources
+    result = {"schema_version": 2, "mode": "read_only_assessment",
               "measured_at": measured.isoformat(), "deletion_enabled": False,
+              "collection_complete": complete,
+              "missing_sources": [list(key) for key in sorted(missing_sources, key=str)],
+              "unavailable_sources": [list(key) for key in sorted(invalid_sources, key=str)],
+              "collection_errors": list(collection_errors),
               "candidates": [], "held": []}
+    # A partial read can never produce review candidates. Hold every measured
+    # row so a missing account/platform cannot turn into an actionable report.
+    if not complete:
+        for key, videos in sorted(snapshot.items(), key=lambda item: str(item[0])):
+            account, platform = key if isinstance(key, tuple) and len(key) == 2 else (None, None)
+            if isinstance(videos, dict):
+                for content_id in videos:
+                    result["held"].append({"account": account, "platform": platform,
+                                           "content_id": str(content_id),
+                                           "reason": "collection_incomplete"})
+        for key in missing_sources | invalid_sources:
+            account, platform = key if isinstance(key, tuple) and len(key) == 2 else (None, None)
+            result["held"].append({"account": account, "platform": platform,
+                                   "reason": "platform_collection_unavailable"})
+        return result
     for key, videos in sorted(snapshot.items(), key=lambda item: str(item[0])):
         if not isinstance(key, tuple) or len(key) != 2:
             result["held"].append({"reason": "invalid_account_platform_key"})
@@ -80,19 +106,53 @@ def assess(snapshot, measured_at, *, now=None, excluded_accounts=EXCLUDED_ACCOUN
     return result
 
 
+def collect_instagram_snapshot(*, targets=None, get_page_info=None, snapshot_loader=None):
+    """Read only Instagram video views for each configured Meta account.
+
+    Facebook, Threads and YouTube are intentionally not queried for this
+    Instagram-only cleanup preview. A failed Instagram account is unavailable,
+    never an empty/zero-view inventory.
+    """
+    if targets is None or get_page_info is None or snapshot_loader is None:
+        from stats_reporter import META_TARGETS, get_meta_page_info, instagram_video_snapshot
+        targets = META_TARGETS if targets is None else targets
+        get_page_info = get_meta_page_info if get_page_info is None else get_page_info
+        snapshot_loader = instagram_video_snapshot if snapshot_loader is None else snapshot_loader
+    snapshot, errors = {}, []
+    for account, page_name, platform in targets:
+        if platform != "Instagram":
+            continue
+        key = (account, "Instagram")
+        try:
+            page = get_page_info(page_name)
+            data = snapshot_loader(page)
+            if not isinstance(data, dict):
+                raise RuntimeError("invalid_snapshot")
+            snapshot[key] = data
+        except Exception as exc:
+            snapshot[key] = None
+            # Exception bodies can include provider URLs or credential material.
+            errors.append(f"{account} / Instagram: {type(exc).__name__}")
+    return snapshot, errors
+
+
 def main():
-    # Reuse the existing account-bound, read-only collectors.  No notifier or
-    # publisher path is called from this entry point.
-    from stats_reporter import TZ, _collect_snapshot
+    # Reuse the existing account-bound, read-only Instagram collector only.
+    from stats_reporter import META_TARGETS, TZ
 
     measured = datetime.now(TZ)
-    snapshot, _records, errors = _collect_snapshot(measured)
-    report = assess(snapshot, measured.isoformat(timespec="seconds"), now=measured)
-    report["collection_errors"] = errors
-    report["collection_complete"] = not errors and all(value is not None
-                                                        for value in snapshot.values())
-    # Fail closed: if any route failed, candidates are still surfaced for
-    # inspection but the workflow records that this is not a complete sweep.
+    snapshot, errors = collect_instagram_snapshot()
+    required = {(account, "Instagram") for account, _page, platform in META_TARGETS
+                if platform == "Instagram"}
+    report = assess(snapshot, measured.isoformat(timespec="seconds"), now=measured,
+                    expected_sources=required, collection_errors=errors)
+    report["platform_scope"] = "Instagram only; Facebook, Threads and YouTube are excluded."
+    report["excluded_platforms"] = {
+        "Facebook": "out_of_scope; its view counters are not used for this Instagram preview",
+        "Threads": "out_of_scope; no Threads content can become a candidate",
+        "YouTube": "out_of_scope; no YouTube content can become a candidate",
+    }
+    # Incomplete sweeps contain held records only and always fail the job.
     output = Path(os.environ.get("LOW_VIEW_REPORT_PATH", "low-view-cleanup-report.json"))
     output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n",
                       encoding="utf-8")
@@ -103,7 +163,7 @@ def main():
             handle.write("## Low-view cleanup assessment (read-only)\n\n")
             handle.write(f"Candidates: {len(report['candidates'])}; held: {len(report['held'])}; ")
             handle.write(f"complete snapshot: {report['collection_complete']}\n\n")
-            handle.write("No platform content was deleted.\n")
+            handle.write("Instagram scope only. No platform content was deleted.\n")
     print(json.dumps({"mode": report["mode"], "candidates": len(report["candidates"]),
                       "held": len(report["held"]),
                       "collection_complete": report["collection_complete"]}, sort_keys=True))
