@@ -27,6 +27,38 @@ class LowViewAssessmentTests(unittest.TestCase):
         self.assertTrue(all(x["action"] == "review_only_no_delete" for x in result["candidates"]))
         self.assertFalse(result["deletion_enabled"])
 
+    def test_missing_expected_platform_makes_whole_scan_incomplete_and_holds_rows(self):
+        old = (NOW - timedelta(days=3)).isoformat()
+        result = assess({("A", "Instagram"): {
+            "private-id": {"views": 0, "published_at": old},
+        }}, NOW.isoformat(), now=NOW, excluded_accounts=set(),
+            expected_sources={("A", "Instagram"), ("B", "Threads")})
+        self.assertFalse(result["collection_complete"])
+        self.assertEqual(result["candidates"], [])
+        self.assertIn(["B", "Threads"], result["missing_sources"])
+        self.assertEqual(result["held"][0]["reason"], "collection_incomplete")
+
+    def test_collection_error_and_none_snapshot_never_create_candidate(self):
+        old = (NOW - timedelta(days=3)).isoformat()
+        result = assess({("A", "Instagram"): {
+            "private-id": {"views": 0, "published_at": old},
+        }, ("B", "Threads"): None}, NOW.isoformat(), now=NOW,
+            excluded_accounts=set(), collection_errors=["B / Threads: identity missing"])
+        self.assertFalse(result["collection_complete"])
+        self.assertEqual(result["candidates"], [])
+        self.assertTrue(any(row["reason"] == "platform_collection_unavailable"
+                            for row in result["held"]))
+
+    def test_complete_inventory_still_applies_review_only_threshold(self):
+        old = (NOW - timedelta(hours=48)).isoformat()
+        result = assess({("A", "Instagram"): {
+            "private-id": {"views": 9, "published_at": old},
+        }}, NOW.isoformat(), now=NOW, excluded_accounts=set(),
+            expected_sources={("A", "Instagram")})
+        self.assertTrue(result["collection_complete"])
+        self.assertEqual(len(result["candidates"]), 1)
+        self.assertEqual(result["candidates"][0]["action"], "review_only_no_delete")
+
     def test_ten_views_are_kept(self):
         row = {"id": {"views": 10, "published_at": (NOW - timedelta(hours=72)).isoformat()}}
         result = self.report({("A", "Facebook"): row})

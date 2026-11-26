@@ -29,8 +29,10 @@ def _parse_time(value):
     return parsed.astimezone(timezone.utc)
 
 
-def assess(snapshot, measured_at, *, now=None, excluded_accounts=EXCLUDED_ACCOUNTS):
+def assess(snapshot, measured_at, *, now=None, excluded_accounts=EXCLUDED_ACCOUNTS,
+           expected_sources=None, collection_errors=()):
     """Classify a complete read-only snapshot; malformed or unknown => hold."""
+    collection_errors = list(collection_errors)
     now = now or datetime.now(timezone.utc)
     if now.tzinfo is None:
         raise ValueError("now must be timezone-aware")
@@ -38,9 +40,33 @@ def assess(snapshot, measured_at, *, now=None, excluded_accounts=EXCLUDED_ACCOUN
     measured = _parse_time(measured_at)
     if measured is None or measured > now + timedelta(minutes=5):
         raise ValueError("measurement time is missing or invalid")
-    result = {"schema_version": 1, "mode": "read_only_assessment",
+    expected_sources = set(expected_sources or ())
+    actual_sources = set(snapshot)
+    missing_sources = expected_sources - actual_sources
+    invalid_sources = {key for key, value in snapshot.items() if value is None}
+    complete = not collection_errors and not missing_sources and not invalid_sources
+    result = {"schema_version": 2, "mode": "read_only_assessment",
               "measured_at": measured.isoformat(), "deletion_enabled": False,
+              "collection_complete": complete,
+              "missing_sources": [list(key) for key in sorted(missing_sources, key=str)],
+              "unavailable_sources": [list(key) for key in sorted(invalid_sources, key=str)],
+              "collection_errors": list(collection_errors),
               "candidates": [], "held": []}
+    # A partial read can never produce review candidates. Hold every measured
+    # row so a missing account/platform cannot turn into an actionable report.
+    if not complete:
+        for key, videos in sorted(snapshot.items(), key=lambda item: str(item[0])):
+            account, platform = key if isinstance(key, tuple) and len(key) == 2 else (None, None)
+            if isinstance(videos, dict):
+                for content_id in videos:
+                    result["held"].append({"account": account, "platform": platform,
+                                           "content_id": str(content_id),
+                                           "reason": "collection_incomplete"})
+        for key in missing_sources | invalid_sources:
+            account, platform = key if isinstance(key, tuple) and len(key) == 2 else (None, None)
+            result["held"].append({"account": account, "platform": platform,
+                                   "reason": "platform_collection_unavailable"})
+        return result
     for key, videos in sorted(snapshot.items(), key=lambda item: str(item[0])):
         if not isinstance(key, tuple) or len(key) != 2:
             result["held"].append({"reason": "invalid_account_platform_key"})
@@ -87,12 +113,39 @@ def main():
 
     measured = datetime.now(TZ)
     snapshot, _records, errors = _collect_snapshot(measured)
-    report = assess(snapshot, measured.isoformat(timespec="seconds"), now=measured)
-    report["collection_errors"] = errors
-    report["collection_complete"] = not errors and all(value is not None
-                                                        for value in snapshot.values())
-    # Fail closed: if any route failed, candidates are still surfaced for
-    # inspection but the workflow records that this is not a complete sweep.
+    required = set()
+    from stats_reporter import META_TARGETS, YOUTUBE_TARGETS
+    required.update((account, platform) for account, _page, platform in META_TARGETS)
+    if os.getenv("META_ONLY_REPORTING", "").lower() != "true":
+        required.update((account, platform) for account, _env, _fallback, _id, platform
+                        in YOUTUBE_TARGETS)
+    if os.getenv("MULTIPLATFORM_STATS_ENABLED") == "true":
+        from threads_accounts import THREADS_ROUTE_PREFIXES
+        route_account = {
+            "tarladaki": "🌱 Tarladaki Fasulye",
+            "penguen": "🐧 Beyinsiz Penguen",
+            "gonle": "❤️ Gönle Düşen",
+            "daily_laugh": "😂 Daily Laugh Lab",
+            "film": "🎬 Film Mağarası",
+            "toonzone": "📺 ToonZone",
+        }
+        for route, prefix in THREADS_ROUTE_PREFIXES.items():
+            account = route_account[route]
+            if not os.getenv(f"{prefix}_THREADS_ACCESS_TOKEN", "").strip() and not (
+                    route == "penguen" and os.getenv("THREADS_ACCESS_TOKEN", "").strip()):
+                errors.append(f"{account} / Threads: erişim izni veya token yapılandırması eksik")
+                continue
+            if not os.getenv(f"{prefix}_THREADS_USERNAME", "").strip():
+                errors.append(f"{account} / Threads: hesap kullanıcı adı yapılandırması eksik")
+                continue
+            expected_id = os.getenv(f"{prefix}_THREADS_USER_ID", "").strip()
+            if not expected_id:
+                errors.append(f"{account} / Threads: doğrulanmış kullanıcı kimliği eksik")
+                continue
+            required.add((account, "Threads"))
+    report = assess(snapshot, measured.isoformat(timespec="seconds"), now=measured,
+                    expected_sources=required, collection_errors=errors)
+    # Incomplete sweeps contain held records only and always fail the job.
     output = Path(os.environ.get("LOW_VIEW_REPORT_PATH", "low-view-cleanup-report.json"))
     output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n",
                       encoding="utf-8")
