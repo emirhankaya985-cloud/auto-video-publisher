@@ -1,0 +1,51 @@
+name: One-time Buffer X queue test (explicit confirmation)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_public_queue:
+        description: "Confirm one visible test post will enter the TarladaFasulye X queue and publish at its next slot."
+        required: true
+        type: boolean
+        default: false
+  pull_request:
+    paths:
+      - 'buffer_queue_test_post.py'
+      - 'test_buffer_queue_test_post.py'
+      - '.github/workflows/buffer_queue_test_post.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: buffer-queue-test-post-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - run: pip install --require-hashes -r requirements.txt
+      - run: python -m unittest -v test_buffer_queue_test_post.py
+
+  queue-test:
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'emirhankaya985-cloud/auto-video-publisher' && github.ref == 'refs/heads/main' && inputs.confirm_public_queue == true && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - run: pip install --require-hashes -r requirements.txt
+      - name: Queue exactly one test post for the verified X channel
+        env:
+          BUFFER_API_KEY_1: ${{ secrets.BUFFER_API_KEY_1 }}
+          BUFFER_TEST_POST_CONFIRMED: ${{ inputs.confirm_public_queue }}
+        run: python -u buffer_queue_test_post.py
