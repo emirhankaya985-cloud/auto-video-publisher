@@ -5,6 +5,7 @@ Meta 400 may require video normalization, permissions, captions or API
 parameters; classify it without assuming one specific fix.
 """
 import time
+from datetime import datetime, timezone
 
 
 READ_RETRY_HTTP = frozenset({429, 500, 502, 503, 504})
@@ -121,20 +122,20 @@ def confirmed_media_error_is_pre_publish(exc):
 _TWO_ALTERNATE_PROFILE_ROUTES = frozenset({
     "tarladaki", "penguen", "daily_laugh", "gonle",
 })
-_ORDERED_ALTERNATE_PROFILE_ROUTES = frozenset({"film", "film_second", "toonzone"})
+_ORDERED_ALTERNATE_PROFILE_ROUTES = frozenset({"film", "toonzone"})
+ORDERED_RECOVERY_PROFILE_COUNT = 5
 _PRE_PUBLISH_STAGES = frozenset({
     "Instagram ikili video aktarımı", "Instagram video işleme durumu",
 })
 
 
 def known_pre_publish_media_rejection(exc, route, previous_retries=0):
-    """Allow a bounded NEXT encoding profile after a proven no-publish IG 400.
+    """Allow the next Film/ToonZone profile after a proven no-publish IG 400.
 
     A short Reel can try the initial profile followed by two distinct
     validated local transcodes, on separate scheduled runs. Ordered Film and
-    ToonZone also get two distinct bounded profiles only when binary processing
-    was definitively rejected before media_publish; historical one-off
-    rescue approvals remain separate and unchanged.
+    ToonZone rotate through validated profiles on later scheduled runs only
+    when binary processing was definitively rejected before media_publish.
 
     This NEVER retries a timed-out POST, container creation, media_publish,
     a 401/403/limit error, or a return without a definite HTTP response.
@@ -147,7 +148,10 @@ def known_pre_publish_media_rejection(exc, route, previous_retries=0):
     if route in _TWO_ALTERNATE_PROFILE_ROUTES:
         allowed = previous_retries < 2
     elif route in _ORDERED_ALTERNATE_PROFILE_ROUTES:
-        allowed = previous_retries < 2
+        # Ordered series keep their current part at the head of the queue and
+        # rotate through validated encodings on later scheduled runs.
+        # This is still restricted to terminal, proven pre-publish rejection.
+        allowed = True
     else:
         return False
     if not allowed or getattr(exc, "stage", None) not in _PRE_PUBLISH_STAGES:
@@ -157,3 +161,33 @@ def known_pre_publish_media_rejection(exc, route, previous_retries=0):
     code = getattr(exc, "code", None)
     subcode = getattr(exc, "subcode", None)
     return code in (None, 100) or (code == -1 and subcode in (2207001, 2207053))
+
+
+def ordered_recovery_profile_index(retry_count):
+    """Cycle ordered-series recoveries through five distinct media profiles."""
+    if type(retry_count) is not int or retry_count < 0:
+        raise ValueError("ordered retry count must be a nonnegative integer")
+    return retry_count % ORDERED_RECOVERY_PROFILE_COUNT
+
+
+def ordered_recovery_cooldown_hours(retry_count):
+    """Back off repeated terminal failures, capped at one attempt per 6 hours."""
+    if type(retry_count) is not int or retry_count < 0:
+        raise ValueError("ordered retry count must be a nonnegative integer")
+    return min(6, 2 ** min(retry_count, 3))
+
+
+def ordered_retry_cooldown_active(entry, now):
+    """Fail closed while the next ordered-series attempt is in backoff."""
+    raw = entry.get("recovery_retry_not_before") if isinstance(entry, dict) else None
+    if raw is None:
+        return False
+    if not isinstance(raw, str):
+        return True
+    try:
+        until = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    if until.tzinfo is None or now.tzinfo is None:
+        return True
+    return now.astimezone(timezone.utc) < until.astimezone(timezone.utc)

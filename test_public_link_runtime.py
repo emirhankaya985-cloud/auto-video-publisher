@@ -2014,6 +2014,26 @@ class MalformedQuarantineProofTests(unittest.TestCase):
                 {"failure": failure}, "hash"))
 
 
+class OrderedRetrySequenceTests(unittest.TestCase):
+    def test_successor_stays_blocked_until_retried_part_has_both_real_receipts(self):
+        plans = [
+            {"route": "film", "id": "part16", "name": "Part16.mp4",
+             "platforms": ["facebook", "instagram"]},
+            {"route": "film", "id": "part17", "name": "Part17.mp4",
+             "platforms": ["facebook", "instagram"]},
+        ]
+        state = {"entries": {
+            "film:facebook:part16": {"status": "done", "post_id": "fb-real", "file": "Part16.mp4"},
+            "film:instagram:part16": {"status": "ready", "prepublish_retry_count": 8,
+                                       "recovery_retry_not_before": "2999-01-01T00:00:00+00:00",
+                                       "file": "Part16.mp4"},
+        }}
+        self.assertFalse(runtime.ordered_predecessors_confirmed(plans, 1, plans[1], state))
+        state["entries"]["film:instagram:part16"].update(
+            status="done", post_id="ig-real")
+        self.assertTrue(runtime.ordered_predecessors_confirmed(plans, 1, plans[1], state))
+
+
 if __name__ == "__main__":
     unittest.main()
 

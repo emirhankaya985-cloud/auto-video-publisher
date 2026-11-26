@@ -11,7 +11,7 @@ from test_public_link_runtime import runtime
 
 class FilmToonZoneRecoveryTests(unittest.TestCase):
     def _run(self, route, name, retry_count=0, run_id="40107188749", source_id="clip",
-             history_error=None, saved_caption_hash=None):
+             history_error=None, saved_caption_hash=None, retry_not_before=None):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             caption = "RECOVERY-IG-EXACT"
@@ -26,6 +26,8 @@ class FilmToonZoneRecoveryTests(unittest.TestCase):
                     "caption_hash": saved_caption_hash or runtime.caption_key(caption), "file": name,
                     "day": "2026-10-24", "run_id": run_id,
                     "prepublish_retry_count": retry_count,
+                    **({"recovery_retry_not_before": retry_not_before}
+                       if retry_not_before else {}),
                     "failure": {
                         "stage": "Instagram ikili video aktarımı",
                         "http_status": 400, "graph_code": None,
@@ -154,17 +156,18 @@ class FilmToonZoneRecoveryTests(unittest.TestCase):
                 self.assertEqual(state[f"{route}:instagram:clip"]["status"], "intent")
                 self.assertEqual(state[f"{route}:instagram:clip"]["prepublish_retry_count"], 2)
                 self.assertEqual(state[f"{route}:facebook:clip"]["status"], "done")
-                self.assertIn("RECOVERY:", report)
+                self.assertIn("RECOVERY", report)
 
-    def test_no_fourth_try_and_no_non_audited_video_override(self):
+    def test_ordered_part_keeps_retrying_but_nonprepublish_errors_stay_blocked(self):
         for route, filename in (
             ("film", "Yoksul_1986_Part_16.mp4"),
             ("toonzone", "S01E03_Caffeinated_Concert_Tickets_Part3.mp4"),
         ):
             plans, state, report = self._run(
                 route, filename, retry_count=2, run_id="40224351466")
-            self.assertEqual(plans, [])
-            self.assertEqual(state[f"{route}:instagram:clip"]["status"], "uncertain")
+            self.assertEqual(len(plans), 1)
+            self.assertEqual(plans[0]["platforms"], ["instagram"])
+            self.assertEqual(state[f"{route}:instagram:clip"]["status"], "intent")
         wrong = {"status": "uncertain", "run_id": "40224351466",
                  "prepublish_retry_count": 1,
                  "failure": {"stage": "Instagram media_publish", "http_status": 400}}
@@ -189,15 +192,16 @@ class FilmToonZoneRecoveryTests(unittest.TestCase):
                 self.assertEqual(state[f"{route}:facebook:clip"]["status"], "done")
                 self.assertIn("RECOVERY V4", text)
 
-    def test_fourth_failure_does_not_auto_repost_compact_v4(self):
+    def test_later_confirmed_pre_publish_failure_still_retries_same_part(self):
         for route, filename in (
             ("film", "Yoksul_1986_Part_16.mp4"),
             ("toonzone", "S01E03_Caffeinated_Concert_Tickets_Part3.mp4"),
         ):
             planned, state, text = self._run(
                 route, filename, retry_count=3, run_id="40281812561")
-            self.assertEqual(planned, [])
-            self.assertEqual(state[f"{route}:instagram:clip"]["status"], "uncertain")
+            self.assertEqual(len(planned), 1)
+            self.assertEqual(planned[0]["platforms"], ["instagram"])
+            self.assertEqual(state[f"{route}:instagram:clip"]["status"], "intent")
         prior = {"status": "uncertain", "prepublish_retry_count": 2,
                  "run_id": "40281812561",
                  "failure": {"stage": "Instagram media_publish", "http_status": 400}}
@@ -206,6 +210,14 @@ class FilmToonZoneRecoveryTests(unittest.TestCase):
         prior["failure"]["stage"] = "Instagram ikili video aktarımı"
         self.assertFalse(runtime.audited_ig_v4_eligible(
             "film", "instagram", "Yoksul_1986_Part_17.mp4", prior))
+
+    def test_ordered_retry_cooldown_holds_current_part(self):
+        plans, state, report = self._run(
+            "film", "Yoksul_1986_Part_16.mp4", retry_count=4,
+            retry_not_before="2999-01-01T00:00:00+00:00")
+        self.assertEqual(plans, [])
+        self.assertEqual(state["film:instagram:clip"]["status"], "uncertain")
+        self.assertIn("retry cooldown has not elapsed", report)
 
     def test_second_confirmed_binary_rejection_advances_bounded_film_profile(self):
         plans, state, report = self._run("film", "Yoksul_1986_Part_16.mp4", retry_count=1)
