@@ -52,6 +52,24 @@ def assess(snapshot, measured_at, *, now=None, excluded_accounts=EXCLUDED_ACCOUN
               "unavailable_sources": [list(key) for key in sorted(invalid_sources, key=str)],
               "collection_errors": list(collection_errors),
               "candidates": [], "held": []}
+    # Validate each account and metric without exposing provider error details.
+    malformed_sources = set()
+    for key, videos in snapshot.items():
+        if not isinstance(key, tuple) or len(key) != 2 or not isinstance(videos, dict):
+            malformed_sources.add(key)
+            continue
+        for content_id, item in videos.items():
+            if (not isinstance(content_id, str) or not content_id.strip()
+                    or not isinstance(item, dict)
+                    or _parse_time(item.get("published_at")) is None
+                    or type(item.get("views")) is not int or item.get("views") < 0):
+                malformed_sources.add(key)
+                break
+    for account, platform in sorted(malformed_sources, key=str):
+        result["collection_errors"].append(
+            f"{account} / {platform}: invalid or incomplete measurement")
+    if malformed_sources:
+        result["collection_complete"] = False
     # A partial read can never produce review candidates. Hold every measured
     # row so a missing account/platform cannot turn into an actionable report.
     if not complete:
@@ -66,6 +84,10 @@ def assess(snapshot, measured_at, *, now=None, excluded_accounts=EXCLUDED_ACCOUN
             account, platform = key if isinstance(key, tuple) and len(key) == 2 else (None, None)
             result["held"].append({"account": account, "platform": platform,
                                    "reason": "platform_collection_unavailable"})
+        for key in malformed_sources:
+            account, platform = key if isinstance(key, tuple) and len(key) == 2 else (None, None)
+            result["held"].append({"account": account, "platform": platform,
+                                   "reason": "platform_measurement_invalid"})
         return result
     for key, videos in sorted(snapshot.items(), key=lambda item: str(item[0])):
         if not isinstance(key, tuple) or len(key) != 2:
@@ -106,45 +128,46 @@ def assess(snapshot, measured_at, *, now=None, excluded_accounts=EXCLUDED_ACCOUN
     return result
 
 
+def collect_instagram_snapshot(*, targets=None, get_page_info=None, snapshot_loader=None):
+    """Collect only configured Instagram snapshots; any failure remains unavailable."""
+    if targets is None or get_page_info is None or snapshot_loader is None:
+        from stats_reporter import META_TARGETS, get_meta_page_info, instagram_video_snapshot
+        targets = META_TARGETS if targets is None else targets
+        get_page_info = get_meta_page_info if get_page_info is None else get_page_info
+        snapshot_loader = instagram_video_snapshot if snapshot_loader is None else snapshot_loader
+    snapshot, errors = {}, []
+    for account, page_name, platform in targets:
+        if platform != "Instagram":
+            continue
+        key = (account, "Instagram")
+        page = None
+        try:
+            page = get_page_info(page_name)
+            data = snapshot_loader(page)
+            if not isinstance(data, dict):
+                raise RuntimeError("invalid_snapshot")
+            snapshot[key] = data
+        except Exception as exc:
+            snapshot[key] = None
+            stage = "identity_lookup_failed" if page is None else "instagram_metrics_read_failed"
+            errors.append(f"{account} / Instagram: {stage} ({type(exc).__name__})")
+    return snapshot, errors
+
+
 def main():
-    # Reuse the existing account-bound, read-only collectors.  No notifier or
-    # publisher path is called from this entry point.
-    from stats_reporter import TZ, _collect_snapshot
+    # Reuse only account-bound Instagram reads. No publisher path is invoked.
+    from stats_reporter import META_TARGETS, TZ
 
     measured = datetime.now(TZ)
-    snapshot, _records, errors = _collect_snapshot(measured)
-    required = set()
-    from stats_reporter import META_TARGETS, YOUTUBE_TARGETS
-    required.update((account, platform) for account, _page, platform in META_TARGETS)
-    if os.getenv("META_ONLY_REPORTING", "").lower() != "true":
-        required.update((account, platform) for account, _env, _fallback, _id, platform
-                        in YOUTUBE_TARGETS)
-    if os.getenv("MULTIPLATFORM_STATS_ENABLED") == "true":
-        from threads_accounts import THREADS_ROUTE_PREFIXES
-        route_account = {
-            "tarladaki": "🌱 Tarladaki Fasulye",
-            "penguen": "🐧 Beyinsiz Penguen",
-            "gonle": "❤️ Gönle Düşen",
-            "daily_laugh": "😂 Daily Laugh Lab",
-            "film": "🎬 Film Mağarası",
-            "toonzone": "📺 ToonZone",
-        }
-        for route, prefix in THREADS_ROUTE_PREFIXES.items():
-            account = route_account[route]
-            if not os.getenv(f"{prefix}_THREADS_ACCESS_TOKEN", "").strip() and not (
-                    route == "penguen" and os.getenv("THREADS_ACCESS_TOKEN", "").strip()):
-                errors.append(f"{account} / Threads: erişim izni veya token yapılandırması eksik")
-                continue
-            if not os.getenv(f"{prefix}_THREADS_USERNAME", "").strip():
-                errors.append(f"{account} / Threads: hesap kullanıcı adı yapılandırması eksik")
-                continue
-            expected_id = os.getenv(f"{prefix}_THREADS_USER_ID", "").strip()
-            if not expected_id:
-                errors.append(f"{account} / Threads: doğrulanmış kullanıcı kimliği eksik")
-                continue
-            required.add((account, "Threads"))
+    snapshot, errors = collect_instagram_snapshot()
+    required = {(account, "Instagram") for account, _page, platform in META_TARGETS
+                if platform == "Instagram"}
     report = assess(snapshot, measured.isoformat(timespec="seconds"), now=measured,
                     expected_sources=required, collection_errors=errors)
+    report["platform_scope"] = "Instagram only; Facebook, Threads and YouTube are excluded."
+    report["excluded_platforms"] = {
+        "Facebook": "out_of_scope", "Threads": "out_of_scope", "YouTube": "out_of_scope",
+    }
     # Incomplete sweeps contain held records only and always fail the job.
     output = Path(os.environ.get("LOW_VIEW_REPORT_PATH", "low-view-cleanup-report.json"))
     output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n",
@@ -156,7 +179,7 @@ def main():
             handle.write("## Low-view cleanup assessment (read-only)\n\n")
             handle.write(f"Candidates: {len(report['candidates'])}; held: {len(report['held'])}; ")
             handle.write(f"complete snapshot: {report['collection_complete']}\n\n")
-            handle.write("No platform content was deleted.\n")
+            handle.write("Instagram scope only. No platform content was deleted.\n")
     print(json.dumps({"mode": report["mode"], "candidates": len(report["candidates"]),
                       "held": len(report["held"]),
                       "collection_complete": report["collection_complete"]}, sort_keys=True))
