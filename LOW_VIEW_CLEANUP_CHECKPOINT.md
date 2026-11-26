@@ -4,9 +4,9 @@ Date: 2026-11-26 (Europe/Istanbul)
 
 ## Latest status checked 2026-11-26
 
-- PR #334 merged; PR #335 merged the follow-up that scopes assessment to Instagram and reports per-account metric failures. `main` is `2d0ac7a`. Run #45807133431 succeeded. No content was deleted.
+- PR #334 merged as `1de43066b1210129caa7da919951c7fdd6c22eb3`; PR #335 merged as `2d0ac7abb6f90892e28190db0d444e068cb4e23e`. Current `main`: `2d0ac7a`. Run #45807133431 succeeded. No content was deleted.
 - The assessment now covers six Instagram accounts only. Facebook, Threads, and YouTube are explicitly excluded. An identity lookup failure, incomplete Instagram inventory, or invalid publication/view measurement marks the run incomplete and suppresses all candidates.
-- Local verification after merging upstream changes: `test_low_view_cleanup.py` 11 passed; `test_stats_reporter.py` 13 passed.
+- GitHub Actions run #45807133431: `test` job success; `assess` skipped for the PR event. Local tests after syncing main: `test_low_view_cleanup.py` 12 passed; `test_stats_reporter.py` 13 passed.
 - The 484 candidate / 1,397 held values are historical counts from failed run #45801967238, not current totals. No content was deleted in that run.
 - Automatic deletion remains disabled. The 48-hour and fewer-than-10 rule can only produce review candidates from a complete Instagram scan.
 
