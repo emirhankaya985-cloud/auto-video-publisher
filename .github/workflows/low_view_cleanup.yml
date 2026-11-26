@@ -14,7 +14,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: low-view-cleanup-assessment
+  group: low-view-cleanup-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: false
 
 jobs:
