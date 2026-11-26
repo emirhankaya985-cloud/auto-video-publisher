@@ -2,6 +2,17 @@
 
 Date: 2026-11-26 (Europe/Istanbul)
 
+## Current state — supersedes the historical status below
+
+- Current `main`: `2d0ac7abb6f90892e28190db0d444e068cb4e23e` (PRs #334 and #335 merged). Current work is isolated on `feat/instagram-low-view-auto-delete`.
+- Latest fresh live run [#45828662906](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/45828662906) completed successfully at 16:34 Istanbul. The six-account Instagram collection was complete: 307 threshold candidates, 1,318 held, 0 unavailable accounts, 0 collection errors. It was read-only and deleted nothing. These are historical candidates and will be deliberately excluded at activation, so enabling the future policy will not bulk-delete old posts.
+- Automatic cleanup is being added for Instagram only. A post is eligible only after it is at least 48 hours old, has fewer than 10 lifetime views, is from a fully complete six-account scan, belongs to a verified account, and was published at or after the explicit activation timestamp. At most 3 posts per account are deleted per run. Film Mağarası and ToonZone remain excluded. A current-view recheck occurs immediately before DELETE; a missing/rejected metric or API error stops further deletion in the run.
+- The collector uses the existing page token for account-bound reads and the existing Facebook user token for DELETE, as required by [Meta's Instagram Media deletion documentation](https://developers.facebook.com/docs/instagram-platform/reference/instagram-media/v21.0/). Permission audit previously confirmed `instagram_basic` and `instagram_manage_contents`; no new token or paid service is needed.
+- Local verification after the current edits: `test_low_view_cleanup.py` 16 passed; `test_stats_reporter.py` 13 passed; `py_compile` and `git diff --check` passed. PR CI, merge, and production enablement are still pending.
+- Do not claim the feature is enabled until PR CI passes, the change is merged, and repository variables `LOW_VIEW_DELETE_ENABLED=true` and `LOW_VIEW_DELETE_START_AT=<activation UTC timestamp>` are set. At that point only videos posted from the activation timestamp onward can be deleted. Existing candidates from run #45828662906 will remain untouched.
+
+## Historical checkpoint (before PR #334/#335)
+
 ## Live state checked 2026-11-26
 
 - GitHub `main` is `7f104ccdb496b6b9c322d8cf44569d642fc31115` (includes PR #332). The requested filename `MEDIA_AUTOMATION_CHECKPOINT_2026-11-26.md` is absent; this file is the current low-view checkpoint.

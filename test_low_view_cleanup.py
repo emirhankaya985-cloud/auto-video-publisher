@@ -2,7 +2,8 @@ import unittest
 from unittest import mock
 from datetime import datetime, timedelta, timezone
 
-from low_view_cleanup import assess, collect_instagram_snapshot
+from low_view_cleanup import (assess, collect_instagram_snapshot,
+                              delete_review_candidates)
 
 
 NOW = datetime(2026, 11, 26, 12, 0, tzinfo=timezone.utc)
@@ -96,7 +97,8 @@ class LowViewAssessmentTests(unittest.TestCase):
     def test_live_collector_queries_only_instagram_routes(self):
         targets = [("A", "Page A", "Facebook"), ("A", "Page A", "Instagram"),
                    ("B", "Page B", "YouTube"), ("C", "Page C", "Instagram")]
-        page_lookup = mock.Mock(side_effect=lambda name: {"page": name})
+        page_lookup = mock.Mock(side_effect=lambda name: {"page": name,
+                                "instagram_id": "9", "page_token": "test"})
         snapshot_loader = mock.Mock(side_effect=lambda page: {page["page"]: {
             "views": 4, "published_at": (NOW - timedelta(days=3)).isoformat()}})
 
@@ -111,7 +113,8 @@ class LowViewAssessmentTests(unittest.TestCase):
 
     def test_one_failed_instagram_account_suppresses_all_preview_candidates(self):
         targets = [("A", "Page A", "Instagram"), ("B", "Page B", "Instagram")]
-        page_lookup = mock.Mock(side_effect=lambda name: {"page": name})
+        page_lookup = mock.Mock(side_effect=lambda name: {"page": name,
+                                "instagram_id": "9", "page_token": "test"})
         def loader(page):
             if page["page"] == "Page B":
                 raise RuntimeError("provider detail is intentionally not returned")
@@ -141,6 +144,55 @@ class LowViewAssessmentTests(unittest.TestCase):
         self.assertIsNone(snapshot[("A", "Instagram")])
         self.assertEqual(errors, ["A / Instagram: identity_lookup_failed (RuntimeError)"])
         self.assertNotIn("sensitive", str(errors))
+
+    def test_automatic_delete_requires_complete_scan(self):
+        report = {"collection_complete": False, "candidates": [
+            {"account": "A", "content_id": "123", "views": 1,
+             "published_at": (NOW - timedelta(days=3)).isoformat()},
+        ]}
+        delete_call = mock.Mock(return_value=True)
+        result = delete_review_candidates(report, {"A": {"page_token": "x", "user_access_token": "u",
+                                                         "instagram_id": "9"}},
+            delete_call, delete_start_at=(NOW - timedelta(hours=1)).isoformat(), now=NOW)
+        self.assertEqual(result["status"], "blocked_incomplete_collection")
+        delete_call.assert_not_called()
+
+    def test_auto_delete_skips_pre_activation_content_and_caps_per_account(self):
+        start = NOW - timedelta(hours=72)
+        old = (start - timedelta(hours=1)).isoformat()
+        new = (NOW - timedelta(hours=50)).isoformat()
+        report = {"collection_complete": True, "candidates": [
+            {"account": "A", "content_id": "old", "views": 1, "published_at": old},
+            *[{"account": "A", "content_id": str(i), "views": 2, "published_at": new}
+              for i in range(4)],
+        ]}
+        page = {"page_token": "test-token", "user_access_token": "test-user-token",
+                "instagram_id": "9"}
+        deleted_ids = []
+        result = delete_review_candidates(report, {"A": page},
+            lambda _page, media_id: deleted_ids.append(media_id) or True,
+            delete_start_at=start.isoformat(), now=NOW, max_per_account=3)
+        self.assertEqual(deleted_ids, ["0", "1", "2"])
+        self.assertEqual(len(result["deleted"]), 3)
+        self.assertEqual(result["skipped_before_start"], 1)
+        self.assertEqual(result["held"], 1)
+
+    def test_invalid_or_future_activation_timestamp_never_deletes(self):
+        result = delete_review_candidates({"collection_complete": True, "candidates": []}, {},
+            mock.Mock(), delete_start_at=(NOW + timedelta(minutes=1)).isoformat(), now=NOW)
+        self.assertEqual(result["status"], "blocked_invalid_delete_start")
+
+    def test_auto_delete_requires_verified_account_token(self):
+        report = {"collection_complete": True, "candidates": [
+            {"account": "A", "content_id": "123", "views": 1,
+             "published_at": (NOW - timedelta(hours=50)).isoformat()},
+        ]}
+        call = mock.Mock(return_value=True)
+        result = delete_review_candidates(report, {"A": {"page_token": "test-token",
+                                                           "instagram_id": "9"}}, call,
+            delete_start_at=(NOW - timedelta(hours=72)).isoformat(), now=NOW)
+        self.assertEqual(result["status"], "halted_on_error")
+        call.assert_not_called()
 
 
 if __name__ == "__main__":
