@@ -13,12 +13,12 @@ Date: 2026-11-26 (Europe/Istanbul)
 
 ## Current work
 
-- Added whole-inventory completeness gating, expected-platform checks, and regression coverage for missing identities/platforms and collection errors.
-- Local focused tests: `test_low_view_cleanup.py` 9 passed; `test_stats_reporter.py` 13 passed. GitHub PR CI remains pending.
-- PR #334: https://github.com/emirhankaya985-cloud/auto-video-publisher/pull/334, branch `fix/low-view-fail-closed`, current head `5f94976cf4fe51dbfc2e7541c77794bbc7f6f9e8`; base main `7f104ccdb496b6b9c322d8cf44569d642fc31115`. Open, draft, mergeable.
-- PR #334 was reviewed; the completeness guard and regression cases are scoped to assessment only. GitHub CI run #45806885853 has been pending with no jobs visible at last check.
-- Required user configuration before a future complete Threads scan: set each of the six `*_THREADS_USER_ID` repository variables to the correct numeric ID after confirming account identity. Do not put token values in chat; check/edit existing token secrets only in GitHub's secure Actions settings.
-- No production workflow was dispatched from this branch. Merge awaits PR CI and verified Threads IDs in secure repository variables.
+- Read-only Meta permission audit [45805151378](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/45805151378) passed: `instagram_basic`, `instagram_manage_contents`, and `pages_manage_posts` are granted. Page identity audit [45804776622](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/45804776622) passed.
+- Fresh-token stats run [45805382927](https://github.com/emirhankaya985-cloud/auto-video-publisher/actions/runs/45805382927) failed overall due to non-Instagram sources: six Facebook snapshots hit the existing zero-heavy metric guard, four YouTube OAuth refreshes returned `invalid_grant`, and Beyinsiz Penguen Threads failed. Its private artifact had 307 Instagram and 177 Threads historical candidates. Those mixed-scope candidates are not eligible for action; none were deleted.
+- Updating PR #334 to scope the read-only scan to the six configured Instagram routes only. Facebook, Threads, and YouTube are excluded from candidate generation. Any missing/error Instagram route suppresses all candidates; Film Mağarası and ToonZone remain protected. No deletion endpoint is added or enabled.
+- Local focused tests: `test_low_view_cleanup.py` 11 passed; `test_stats_reporter.py` 13 passed. PR CI is pending after this narrow update.
+- PR #334: https://github.com/emirhankaya985-cloud/auto-video-publisher/pull/334, branch `fix/low-view-fail-closed`, base main `7f104ccdb496b6b9c322d8cf44569d642fc31115`.
+- No Threads variables/secrets are required by the Instagram-only assessment. No production deletion is authorized by this checkpoint.
 
 ## Implemented in this change
 

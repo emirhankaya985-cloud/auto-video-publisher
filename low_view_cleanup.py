@@ -106,45 +106,52 @@ def assess(snapshot, measured_at, *, now=None, excluded_accounts=EXCLUDED_ACCOUN
     return result
 
 
+def collect_instagram_snapshot(*, targets=None, get_page_info=None, snapshot_loader=None):
+    """Read only Instagram video views for each configured Meta account.
+
+    Facebook, Threads and YouTube are intentionally not queried for this
+    Instagram-only cleanup preview. A failed Instagram account is unavailable,
+    never an empty/zero-view inventory.
+    """
+    if targets is None or get_page_info is None or snapshot_loader is None:
+        from stats_reporter import META_TARGETS, get_meta_page_info, instagram_video_snapshot
+        targets = META_TARGETS if targets is None else targets
+        get_page_info = get_meta_page_info if get_page_info is None else get_page_info
+        snapshot_loader = instagram_video_snapshot if snapshot_loader is None else snapshot_loader
+    snapshot, errors = {}, []
+    for account, page_name, platform in targets:
+        if platform != "Instagram":
+            continue
+        key = (account, "Instagram")
+        try:
+            page = get_page_info(page_name)
+            data = snapshot_loader(page)
+            if not isinstance(data, dict):
+                raise RuntimeError("invalid_snapshot")
+            snapshot[key] = data
+        except Exception as exc:
+            snapshot[key] = None
+            # Exception bodies can include provider URLs or credential material.
+            errors.append(f"{account} / Instagram: {type(exc).__name__}")
+    return snapshot, errors
+
+
 def main():
-    # Reuse the existing account-bound, read-only collectors.  No notifier or
-    # publisher path is called from this entry point.
-    from stats_reporter import TZ, _collect_snapshot
+    # Reuse the existing account-bound, read-only Instagram collector only.
+    from stats_reporter import META_TARGETS, TZ
 
     measured = datetime.now(TZ)
-    snapshot, _records, errors = _collect_snapshot(measured)
-    required = set()
-    from stats_reporter import META_TARGETS, YOUTUBE_TARGETS
-    required.update((account, platform) for account, _page, platform in META_TARGETS)
-    if os.getenv("META_ONLY_REPORTING", "").lower() != "true":
-        required.update((account, platform) for account, _env, _fallback, _id, platform
-                        in YOUTUBE_TARGETS)
-    if os.getenv("MULTIPLATFORM_STATS_ENABLED") == "true":
-        from threads_accounts import THREADS_ROUTE_PREFIXES
-        route_account = {
-            "tarladaki": "🌱 Tarladaki Fasulye",
-            "penguen": "🐧 Beyinsiz Penguen",
-            "gonle": "❤️ Gönle Düşen",
-            "daily_laugh": "😂 Daily Laugh Lab",
-            "film": "🎬 Film Mağarası",
-            "toonzone": "📺 ToonZone",
-        }
-        for route, prefix in THREADS_ROUTE_PREFIXES.items():
-            account = route_account[route]
-            if not os.getenv(f"{prefix}_THREADS_ACCESS_TOKEN", "").strip() and not (
-                    route == "penguen" and os.getenv("THREADS_ACCESS_TOKEN", "").strip()):
-                errors.append(f"{account} / Threads: erişim izni veya token yapılandırması eksik")
-                continue
-            if not os.getenv(f"{prefix}_THREADS_USERNAME", "").strip():
-                errors.append(f"{account} / Threads: hesap kullanıcı adı yapılandırması eksik")
-                continue
-            expected_id = os.getenv(f"{prefix}_THREADS_USER_ID", "").strip()
-            if not expected_id:
-                errors.append(f"{account} / Threads: doğrulanmış kullanıcı kimliği eksik")
-                continue
-            required.add((account, "Threads"))
+    snapshot, errors = collect_instagram_snapshot()
+    required = {(account, "Instagram") for account, _page, platform in META_TARGETS
+                if platform == "Instagram"}
     report = assess(snapshot, measured.isoformat(timespec="seconds"), now=measured,
                     expected_sources=required, collection_errors=errors)
+    report["platform_scope"] = "Instagram only; Facebook, Threads and YouTube are excluded."
+    report["excluded_platforms"] = {
+        "Facebook": "out_of_scope; its view counters are not used for this Instagram preview",
+        "Threads": "out_of_scope; no Threads content can become a candidate",
+        "YouTube": "out_of_scope; no YouTube content can become a candidate",
+    }
     # Incomplete sweeps contain held records only and always fail the job.
     output = Path(os.environ.get("LOW_VIEW_REPORT_PATH", "low-view-cleanup-report.json"))
     output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n",
@@ -156,7 +163,7 @@ def main():
             handle.write("## Low-view cleanup assessment (read-only)\n\n")
             handle.write(f"Candidates: {len(report['candidates'])}; held: {len(report['held'])}; ")
             handle.write(f"complete snapshot: {report['collection_complete']}\n\n")
-            handle.write("No platform content was deleted.\n")
+            handle.write("Instagram scope only. No platform content was deleted.\n")
     print(json.dumps({"mode": report["mode"], "candidates": len(report["candidates"]),
                       "held": len(report["held"]),
                       "collection_complete": report["collection_complete"]}, sort_keys=True))
