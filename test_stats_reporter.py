@@ -812,3 +812,16 @@ class ArchivedLastGoodMetricsTests(unittest.TestCase):
         self.assertEqual(result, "scheduled_retry_suppressed")
         send.assert_not_called()
 
+
+
+
+def test_facebook_zero_heavy_video_library_is_valid_and_reportable():
+    from stats_reporter import facebook_video_snapshot
+
+    page = {"page_id": "page", "page_token": "token"}
+    rows = [{"id": f"video-{i}", "views": 0 if i < 57 else 2,
+             "created_time": "2026-11-26T10:00:00+03:00"} for i in range(60)]
+    with patch("stats_reporter.graph_pages", return_value=iter(rows)):
+        snapshot = facebook_video_snapshot(page)
+    assert len(snapshot) == 60
+    assert sum(video["views"] for video in snapshot.values()) == 6
