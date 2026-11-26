@@ -189,6 +189,11 @@ def delete_review_candidates(report, pages, delete_call, *, delete_start_at, now
             continue
         eligible.append((row, published, content_id))
 
+    # When a per-account cap applies, always work from the oldest eligible
+    # publication toward the newest. Stable tie breakers keep runs repeatable.
+    eligible.sort(key=lambda item: (item[1], str(item[0].get("account", "")),
+                                    str(item[2])))
+
     deleted, held, errors = [], 0, []
     per_account = {}
     for index, (row, published, content_id) in enumerate(eligible):

@@ -160,10 +160,11 @@ class LowViewAssessmentTests(unittest.TestCase):
     def test_auto_delete_skips_pre_activation_content_and_caps_per_account(self):
         start = NOW - timedelta(hours=72)
         old = (start - timedelta(hours=1)).isoformat()
-        new = (NOW - timedelta(hours=50)).isoformat()
+        hours_old_by_id = {"0": 49, "1": 52, "2": 50, "3": 51}
         report = {"collection_complete": True, "candidates": [
             {"account": "A", "content_id": "old", "views": 1, "published_at": old},
-            *[{"account": "A", "content_id": str(i), "views": 2, "published_at": new}
+            *[{"account": "A", "content_id": str(i), "views": 2,
+               "published_at": (NOW - timedelta(hours=hours_old_by_id[str(i)])).isoformat()}
               for i in range(4)],
         ]}
         page = {"page_token": "test-token", "user_access_token": "test-user-token",
@@ -172,7 +173,7 @@ class LowViewAssessmentTests(unittest.TestCase):
         result = delete_review_candidates(report, {"A": page},
             lambda _page, media_id: deleted_ids.append(media_id) or True,
             delete_start_at=start.isoformat(), now=NOW, max_per_account=3)
-        self.assertEqual(deleted_ids, ["0", "1", "2"])
+        self.assertEqual(deleted_ids, ["1", "3", "2"])
         self.assertEqual(len(result["deleted"]), 3)
         self.assertEqual(result["skipped_before_start"], 1)
         self.assertEqual(result["held"], 1)
