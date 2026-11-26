@@ -8,9 +8,11 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
+import time
 from datetime import datetime, timezone
 from typing import Any, Callable
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse
 
 import requests
 
@@ -37,6 +39,12 @@ CREATE_POST_MUTATION = """mutation BufferXCreateVideo($input: CreatePostInput!) 
 POST_QUERY = """query BufferXPost($id: PostId!) {
   post(input: {id: $id}) { id status dueAt externalLink channelId text sentAt }
 }"""
+QUEUED_POSTS_QUERY = """query BufferXScheduledPosts($org: OrganizationId!, $channel: ChannelId!) {
+  posts(input: {organizationId: $org, filter: {channelIds: [$channel], status: [scheduled, sending]}}, first: 11) {
+    edges { node { id status } }
+    pageInfo { hasNextPage }
+  }
+}"""
 
 
 class BufferError(RuntimeError):
@@ -55,14 +63,25 @@ def _safe_retry_after(headers: Any) -> int | None:
 class BufferClient:
     """Thin, redacted GraphQL client; injectable transport enables offline tests."""
     def __init__(self, api_key: str, post: Callable[..., Any] | None = None,
-                 on_usage: Callable[[str, Any, int | None, str], None] | None = None):
+                 on_usage: Callable[[str, Any, int | None, str], None] | None = None,
+                 on_quota_threshold: Callable[[str, int, int], None] | None = None):
         if not api_key or not api_key.strip():
             raise BufferError("api_key_missing")
         self._key = api_key.strip()
         self._post = post or requests.post
         self._on_usage = on_usage
+        self._on_quota_threshold = on_quota_threshold
+        self._latest_limits: dict[str, int | None] = {}
 
     def graphql(self, query: str, variables: dict[str, Any] | None = None) -> tuple[dict[str, Any], Any]:
+        blocked = []
+        for window in ("15m", "24h", "30d"):
+            limit = self._latest_limits.get(f"{window}_limit")
+            remaining = self._latest_limits.get(f"{window}_remaining")
+            if limit and remaining is not None and (limit - remaining) / limit >= 0.90:
+                blocked.append(self._latest_limits.get(f"{window}_reset") or 900)
+        if blocked:
+            raise BufferError("quota_pause", retry_after=max(1, min(blocked)))
         try:
             response = self._post(API_URL, headers={"Authorization": f"Bearer {self._key}",
                 "Content-Type": "application/json"}, json={"query": query, "variables": variables or {}}, timeout=30)
@@ -70,9 +89,27 @@ class BufferClient:
             if self._on_usage:
                 self._on_usage("graphql", {}, None, "network_error")
             raise BufferError("network_error", uncertain=query == CREATE_POST_MUTATION) from exc
+        self._latest_limits.update(parse_rate_limit_headers(response.headers))
+        if self._on_quota_threshold:
+            for window in ("15m", "24h", "30d"):
+                limit = self._latest_limits.get(f"{window}_limit")
+                remaining = self._latest_limits.get(f"{window}_remaining")
+                reset = self._latest_limits.get(f"{window}_reset") or 0
+                if limit and remaining is not None:
+                    used_percent = int((limit - remaining) * 100 / limit)
+                    if used_percent >= 80:
+                        try:
+                            self._on_quota_threshold(window, used_percent, int(time.time()) + reset)
+                        except Exception:
+                            # A notification outage must not turn a successful create into
+                            # an uncertain result that could strand the durable job.
+                            pass
         if self._on_usage:
-            self._on_usage("graphql", response.headers, response.status_code,
-                           "rate_limited" if response.status_code == 429 else "completed")
+            try:
+                self._on_usage("graphql", response.headers, response.status_code,
+                               "rate_limited" if response.status_code == 429 else "completed")
+            except Exception as exc:
+                raise BufferError("usage_log_failed", uncertain=query == CREATE_POST_MUTATION) from exc
         if response.status_code == 429:
             raise BufferError("rate_limited", retry_after=_safe_retry_after(response.headers))
         if response.status_code == 401:
@@ -117,6 +154,16 @@ class BufferClient:
             raise BufferError("post_not_found")
         return post
 
+    def scheduled_count(self, organization_id: str, channel_id: str) -> int:
+        data, _ = self.graphql(QUEUED_POSTS_QUERY, {"org": organization_id, "channel": channel_id})
+        result = data.get("posts")
+        if not isinstance(result, dict) or not isinstance(result.get("edges"), list):
+            raise BufferError("scheduled_posts_check_failed")
+        # Eleven records are enough to fail closed above the Free plan cap.
+        if (result.get("pageInfo") or {}).get("hasNextPage"):
+            return FREE_LIMITS["queued_per_channel"] + 1
+        return len(result["edges"])
+
     def create_video_post(self, *, channel_id: str, video_url: str, text: str,
                           due_at: datetime | None = None) -> tuple[dict[str, Any], Any]:
         parsed = urlparse(video_url)
@@ -145,10 +192,30 @@ class BufferClient:
 
 
 def validate_media_url(url: str, *, head: Callable[..., Any] = requests.head) -> bool:
-    """Check a public video URL without downloading it or logging its query string."""
+    """Check a public MP4 URL with a bounded metadata/range read."""
     parsed = urlparse(url)
     if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
         return False
+    if parsed.hostname == "drive.usercontent.google.com" and parsed.path == "/download":
+        file_id = dict(parse_qsl(parsed.query)).get("id", "")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{20,128}", file_id):
+            return False
+        response = None
+        try:
+            response = requests.get(url, headers={"Range": "bytes=0-63", "Accept": "video/mp4"},
+                                    allow_redirects=True, stream=True, timeout=(10, 20))
+            first = next(response.iter_content(64), b"")
+            final = urlparse(response.url)
+            return (response.status_code == 206 and final.scheme == "https"
+                    and ((final.hostname or "").endswith("googleusercontent.com")
+                         or final.hostname in {"drive.google.com", "drive.usercontent.google.com"})
+                    and response.headers.get("Content-Type", "").split(";", 1)[0].lower() == "video/mp4"
+                    and len(first) >= 8 and first[4:8] == b"ftyp")
+        except requests.RequestException:
+            return False
+        finally:
+            if response is not None:
+                response.close()
     if not parsed.path.lower().endswith(".mp4"):
         return False
     try:
@@ -164,6 +231,14 @@ def validate_media_url(url: str, *, head: Callable[..., Any] = requests.head) ->
     return response.status_code == 200 and content_type == "video/mp4" and size > 0
 
 
+def drive_public_video_url(file_id: str) -> str:
+    """Construct the unauthenticated direct download URL for one shared file."""
+    if not re.fullmatch(r"[A-Za-z0-9_-]{20,128}", str(file_id)):
+        raise BufferError("drive_file_id_invalid")
+    return "https://drive.usercontent.google.com/download?" + urlencode(
+        {"id": file_id, "export": "download", "confirm": "t"})
+
+
 def fingerprint(channel_key: str, source_id: str, text: str, video_url: str) -> str:
     value = "\0".join((channel_key, source_id, text.strip(), video_url.split("?", 1)[0]))
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
@@ -171,8 +246,8 @@ def fingerprint(channel_key: str, source_id: str, text: str, video_url: str) -> 
 
 def parse_rate_limit_headers(headers: Any) -> dict[str, int | None]:
     """Parse Buffer's documented structured RateLimit headers by window size."""
-    result: dict[str, int | None] = {"15m_remaining": None, "15m_reset": None,
-        "24h_remaining": None, "24h_reset": None, "30d_remaining": None, "30d_reset": None}
+    result: dict[str, int | None] = {f"{window}_{part}": None for window in ("15m", "24h", "30d")
+                                    for part in ("remaining", "reset", "limit")}
     raw_values = headers.get_all("RateLimit", []) if hasattr(headers, "get_all") else [
         value for key, value in headers.items() if str(key).lower() == "ratelimit"]
     for raw in raw_values:
@@ -183,6 +258,14 @@ def parse_rate_limit_headers(headers: Any) -> dict[str, int | None]:
             prefix = {900: "15m", 86400: "24h", 2592000: "30d"}[window]
             result[f"{prefix}_remaining"] = int(remaining)
             result[f"{prefix}_reset"] = int(reset)
+    policy_values = headers.get_all("RateLimit-Policy", []) if hasattr(headers, "get_all") else [
+        value for key, value in headers.items() if str(key).lower() == "ratelimit-policy"]
+    for raw in policy_values:
+        for match in __import__("re").finditer(
+                r"(\d+)-in-(15min|1day|24h|30days).*?q=(\d+).*?w=(\d+)", str(raw)):
+            _, label, quota, seconds = match.groups()
+            window = {"15min": "15m", "1day": "24h", "24h": "24h", "30days": "30d"}[label]
+            result[f"{window}_limit"] = int(quota)
     return result
 
 
@@ -199,6 +282,27 @@ class NeonBufferStore:
             connect = psycopg.connect
         self._connect = connect
         self._url = database_url
+
+    def apply_migration(self) -> None:
+        sql = __import__("pathlib").Path(__file__).with_name("migrations").joinpath(
+            "20261126_buffer_x.sql").read_text(encoding="utf-8")
+        with self._connect(self._url, connect_timeout=10, sslmode="require") as conn:
+            # psycopg simple-query protocol supports this static, additive SQL file.
+            conn.execute(sql, prepare=False)
+
+    def active_channels(self, *, max_age_hours: int = 12) -> list[dict[str, Any]]:
+        with self._connect(self._url, connect_timeout=10, sslmode="require") as conn:
+            rows = conn.execute("""SELECT channel_key,channel_name,organization_id,
+              buffer_channel_id,external_link,is_disconnected,is_locked FROM buffer_x_channels
+              WHERE active AND NOT is_disconnected AND NOT is_locked
+                AND last_checked_at > now()-(%s * interval '1 hour')""", (max_age_hours,)).fetchall()
+        keys = ("channel_key", "name", "organization_id", "id", "external_link", "isDisconnected", "isLocked")
+        return [dict(zip(keys, row)) for row in rows]
+
+    def source_exists(self, channel_key: str, source_id: str) -> bool:
+        with self._connect(self._url, connect_timeout=10, sslmode="require") as conn:
+            return conn.execute("SELECT 1 FROM buffer_x_jobs WHERE channel_key=%s AND source_id=%s",
+                                (channel_key, source_id)).fetchone() is not None
 
     def record_usage(self, operation: str, headers: Any, *, status: int | None = None,
                      outcome: str = "completed") -> None:
@@ -284,17 +388,58 @@ class NeonBufferStore:
 
     def finish(self, job_id: int, status: str, *, post_id: str | None = None,
                post_url: str | None = None, error_code: str | None = None,
-               retry_seconds: int | None = None) -> None:
-        if status not in {"uncertain", "scheduled", "sent", "failed", "pending"}:
+               retry_seconds: int | None = None, buffer_due_at: str | None = None) -> None:
+        if status not in {"uncertain", "scheduled", "sent", "failed", "pending", "held"}:
             raise BufferError("invalid_job_state")
         with self._connect(self._url, connect_timeout=10, sslmode="require") as conn:
             conn.execute("""UPDATE buffer_x_jobs SET status=%s,buffer_post_id=COALESCE(%s,buffer_post_id),
-              post_url=COALESCE(%s,post_url),last_error_code=%s,
+              post_url=COALESCE(%s,post_url),buffer_due_at=COALESCE(%s::timestamptz,buffer_due_at),
+              last_error_code=%s,
               retry_after=CASE WHEN %s IS NULL THEN NULL ELSE now()+(%s * interval '1 second') END,
               updated_at=now() WHERE id=%s""",
-              (status, post_id, post_url, error_code, retry_seconds, retry_seconds, job_id))
+              (status, post_id, post_url, buffer_due_at, error_code, retry_seconds, retry_seconds, job_id))
             conn.execute("INSERT INTO buffer_x_events(job_id,event_type,detail_code) VALUES (%s,%s,%s)",
                          (job_id, status, error_code))
+
+    def due_for_verification(self, limit: int = 20) -> list[dict[str, Any]]:
+        with self._connect(self._url, connect_timeout=10, sslmode="require") as conn:
+            rows = conn.execute("""SELECT id,buffer_post_id,channel_key FROM buffer_x_jobs
+              WHERE status='scheduled' AND buffer_post_id IS NOT NULL
+                AND COALESCE(buffer_due_at,due_at) < now()-interval '5 minutes'
+                AND (last_verified_at IS NULL OR last_verified_at < now()-interval '6 hours')
+              ORDER BY COALESCE(buffer_due_at,due_at) LIMIT %s""", (limit,)).fetchall()
+        return [dict(zip(("id", "post_id", "channel_key"), row)) for row in rows]
+
+    def verify_post(self, job_id: int, status: str, post_url: str | None) -> None:
+        if status not in {"scheduled", "sent", "error"}:
+            status = "scheduled"
+        new_status = "sent" if status == "sent" else "failed" if status == "error" else "scheduled"
+        with self._connect(self._url, connect_timeout=10, sslmode="require") as conn:
+            conn.execute("""UPDATE buffer_x_jobs SET status=%s,post_url=COALESCE(%s,post_url),
+              last_verified_at=now(),updated_at=now(),
+              last_error_code=CASE WHEN %s='error' THEN 'buffer_post_failed' ELSE last_error_code END
+              WHERE id=%s""", (new_status, post_url, status, job_id))
+            conn.execute("INSERT INTO buffer_x_events(job_id,event_type,detail_code) VALUES (%s,%s,%s)",
+                         (job_id, "status_verified", status))
+
+    def queue_summary(self) -> dict[str, int]:
+        with self._connect(self._url, connect_timeout=10, sslmode="require") as conn:
+            rows = conn.execute("SELECT status,count(*) FROM buffer_x_jobs GROUP BY status").fetchall()
+        return {str(status): int(count) for status, count in rows}
+
+    def claim_notification(self, notification_key: str, event_type: str) -> bool:
+        with self._connect(self._url, connect_timeout=10, sslmode="require") as conn:
+            row = conn.execute("""INSERT INTO buffer_x_notifications(notification_key,event_type)
+              VALUES (%s,%s) ON CONFLICT(notification_key) DO NOTHING RETURNING notification_key""",
+              (notification_key, event_type)).fetchone()
+            return row is not None
+
+    def mark_notification_delivery(self, notification_key: str, *, ntfy_ack: bool = False,
+                                   telegram_ack: bool = False) -> None:
+        with self._connect(self._url, connect_timeout=10, sslmode="require") as conn:
+            conn.execute("""UPDATE buffer_x_notifications SET ntfy_ack=ntfy_ack OR %s,
+              telegram_ack=telegram_ack OR %s WHERE notification_key=%s""",
+              (ntfy_ack, telegram_ack, notification_key))
 
 
 def process_one(store: NeonBufferStore, client: BufferClient,
@@ -311,19 +456,28 @@ def process_one(store: NeonBufferStore, client: BufferClient,
         store.finish(job["id"], "held", error_code="media_preflight_failed")
         return "held"
     try:
+        queued = client.scheduled_count(channel["organization_id"], channel["id"])
+        if queued >= FREE_LIMITS["queued_per_channel"]:
+            store.finish(job["id"], "pending", error_code="free_channel_queue_full",
+                         retry_seconds=6 * 60 * 60)
+            return "queue_full"
         post, headers = client.create_video_post(channel_id=channel["id"], video_url=job["video_url"],
                                                   text=job["text"], due_at=job["due_at"])
-        store.record_usage("create_video_post", headers)
-        store.finish(job["id"], "scheduled", post_id=post["id"], post_url=post.get("externalLink"))
+        if post.get("status") != "scheduled":
+            store.finish(job["id"], "uncertain", post_id=post.get("id"),
+                         error_code="buffer_status_not_scheduled")
+            return "uncertain"
+        store.finish(job["id"], "scheduled", post_id=post["id"], post_url=post.get("externalLink"),
+                     buffer_due_at=post.get("dueAt"))
         return "scheduled"
     except BufferError as exc:
         if exc.uncertain:
             store.finish(job["id"], "uncertain", error_code=exc.code)
             return "uncertain"
-        if exc.code == "rate_limited":
+        if exc.code in {"rate_limited", "quota_pause"}:
             store.finish(job["id"], "pending", error_code=exc.code,
                          retry_seconds=exc.retry_after or 900)
-            return "rate_limited"
+            return exc.code
         store.finish(job["id"], "failed", error_code=exc.code)
         return "failed"
 

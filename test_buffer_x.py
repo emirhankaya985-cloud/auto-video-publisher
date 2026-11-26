@@ -38,10 +38,62 @@ class BufferClientTests(unittest.TestCase):
 
     def test_rate_limit_header_windows_are_parsed(self):
         from buffer_x import parse_rate_limit_headers
-        values = parse_rate_limit_headers({"RateLimit": '"150-in-15min";r=120;t=60, "600-in-1day";r=590;t=3600, "3000-in-30days";r=2990;t=1000'})
+        values = parse_rate_limit_headers({
+            "RateLimit": '"150-in-15min";r=120;t=60, "600-in-1day";r=590;t=3600, "3000-in-30days";r=2990;t=1000',
+            "RateLimit-Policy": '"150-in-15min";q=150;w=900, "600-in-1day";q=600;w=86400, "3000-in-30days";q=3000;w=2592000'})
         self.assertEqual(values["15m_remaining"], 120)
+        self.assertEqual(values["15m_limit"], 150)
         self.assertEqual(values["24h_remaining"], 590)
+        self.assertEqual(values["24h_limit"], 600)
         self.assertEqual(values["30d_remaining"], 2990)
+
+    def test_drive_url_is_single_file_and_unambiguous(self):
+        from buffer_x import drive_public_video_url, BufferError
+        url = drive_public_video_url("1Zl7Uf_TgRSU71iGS4xeWH67KYXTxFiuQ")
+        self.assertIn("drive.usercontent.google.com/download", url)
+        self.assertIn("export=download", url)
+        with self.assertRaisesRegex(BufferError, "drive_file_id_invalid"):
+            drive_public_video_url("not-a-file-id")
+
+    def test_quota_pause_stops_further_calls_before_network(self):
+        from buffer_x import BufferClient
+        calls = []
+        response = FakeResponse(body={"data": {"account": {"organizations": []}}}, headers={
+            "RateLimit": '"150-in-15min";r=15;t=800',
+            "RateLimit-Policy": '"150-in-15min";q=150;w=900'})
+        client = BufferClient("secret", post=lambda *a, **k: (calls.append(1) or response))
+        client.graphql("query { account { id } }")
+        with self.assertRaisesRegex(BufferError, "quota_pause"):
+            client.graphql("query { account { id } }")
+        self.assertEqual(len(calls), 1)
+
+
+class BufferWorkerTests(unittest.TestCase):
+    def test_three_channel_free_plan_guard_and_exact_mapping_names(self):
+        from buffer_x_worker import configured_channels
+        from unittest.mock import patch
+        env = {"BUFFER_X_CHANNEL_ID_TARLADAKI": "x1", "BUFFER_X_CHANNEL_ID_FILM": "x2",
+               "BUFFER_X_CHANNEL_ID_FILM_SAHNELERI": "x3"}
+        with patch.dict("os.environ", env, clear=True):
+            self.assertEqual(len(configured_channels()), 3)
+        env["BUFFER_X_CHANNEL_ID_TOONZONE"] = "x4"
+        with patch.dict("os.environ", env, clear=True):
+            with self.assertRaisesRegex(Exception, "free_channel_limit_exceeded"):
+                configured_channels()
+
+    def test_plan_artifact_reuses_only_known_routes(self):
+        import json
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from buffer_x_worker import plan_artifacts
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "link-state-intent-film"
+            path.mkdir()
+            (path / "plan.json").write_text(json.dumps([
+                {"route": "film", "id": "id1"}, {"route": "film_second", "id": "id2"}]), encoding="utf-8")
+            rows = plan_artifacts(Path(tmp))
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0][0], "film")
 
     def test_video_payload_uses_documented_graphql_shape_and_timing(self):
         seen = {}

@@ -3,9 +3,12 @@ on:
   pull_request:
     paths:
       - 'buffer_x.py'
+      - 'buffer_x_worker.py'
       - 'test_buffer_x.py'
+      - 'test_buffer_x_worker.py'
       - 'migrations/20261126_buffer_x.sql'
       - 'BUFFER_X_INTEGRATION.md'
+      - '.github/workflows/public_link_schedule.yml'
       - '.github/workflows/buffer_x_ci.yml'
 permissions:
   contents: read
@@ -18,4 +21,4 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install 'requests==2.32.3'
-      - run: python -m unittest -v test_buffer_x.py
+      - run: python -m unittest -v test_buffer_x.py test_buffer_x_worker.py

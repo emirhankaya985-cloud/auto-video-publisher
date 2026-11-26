@@ -20,6 +20,8 @@ CREATE TABLE IF NOT EXISTS buffer_x_jobs (
   video_url TEXT NOT NULL,
   text TEXT NOT NULL,
   due_at TIMESTAMPTZ,
+  buffer_due_at TIMESTAMPTZ,
+  last_verified_at TIMESTAMPTZ,
   rights_approved BOOLEAN NOT NULL DEFAULT FALSE,
   status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN
     ('pending','submitting','uncertain','scheduled','sent','failed','held')),
@@ -57,4 +59,12 @@ CREATE TABLE IF NOT EXISTS buffer_x_events (
   event_type TEXT NOT NULL,
   detail_code TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS buffer_x_notifications (
+  notification_key TEXT PRIMARY KEY,
+  event_type TEXT NOT NULL,
+  attempted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  ntfy_ack BOOLEAN NOT NULL DEFAULT FALSE,
+  telegram_ack BOOLEAN NOT NULL DEFAULT FALSE
 );
