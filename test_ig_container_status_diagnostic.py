@@ -3,6 +3,12 @@ from unittest.mock import Mock
 import ig_container_status_diagnostic as diag
 
 class ReadOnlyIGTests(unittest.TestCase):
+    def test_nov27_failure_containers_are_pinned_to_exact_accounts(self):
+        self.assertEqual(diag.NAMED_PINNED["tarladaki_573_nov27"],
+                         ("Tarladaki Fasulye", "18117148490133751"))
+        self.assertEqual(diag.NAMED_PINNED["film_saban_part17_nov27"],
+                         ("Film Mağarası", "17908115514599675"))
+
     def test_film_read_is_get_only_and_redacted(self):
         pid, ig, cid = diag.PINNED["film_part16"]
         page = [{"page_id":pid, "instagram_id":ig, "page_token":"SENSITIVE"}]

@@ -20,10 +20,15 @@ PINNED = {
 NAMED_PINNED = {
  "tarladaki_192_nov01": ("Tarladaki Fasulye", "18111440750133751"),
  "tarladaki_194_nov01": ("Tarladaki Fasulye", "18111509597133751"),
+ # Exact container IDs from the 27 Nov scheduled publisher incidents.
+ # GET-only checks determine whether a 400 container has reached a terminal
+ # state before the publisher considers any safe recovery.
+ "tarladaki_573_nov27": ("Tarladaki Fasulye", "18117148490133751"),
  "penguen_193_nov01": ("Beyinsiz Penguen", "18120540917054769"),
  # 12 Nov Film Mağarası Part 17: binary upload returned HTTP 400 ProcessingFailedError.
  # Read this exact container after live page/Instagram identity verification; never resend media here.
  "film_part17_nov12": ("Film Mağarası", "17906869221599675"),
+ "film_saban_part17_nov27": ("Film Mağarası", "17908115514599675"),
 }
 STATES = frozenset(("IN_PROGRESS", "FINISHED", "PUBLISHED", "ERROR", "EXPIRED"))
 
