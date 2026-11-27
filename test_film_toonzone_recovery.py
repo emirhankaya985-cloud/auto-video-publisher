@@ -11,7 +11,7 @@ from test_public_link_runtime import runtime
 
 class FilmToonZoneRecoveryTests(unittest.TestCase):
     def _run(self, route, name, retry_count=0, run_id="40107188749", source_id="clip",
-             history_error=None, saved_caption_hash=None, retry_not_before=None):
+             history_error=None, saved_caption_hash=None):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             caption = "RECOVERY-IG-EXACT"
@@ -26,8 +26,6 @@ class FilmToonZoneRecoveryTests(unittest.TestCase):
                     "caption_hash": saved_caption_hash or runtime.caption_key(caption), "file": name,
                     "day": "2026-10-24", "run_id": run_id,
                     "prepublish_retry_count": retry_count,
-                    **({"recovery_retry_not_before": retry_not_before}
-                       if retry_not_before else {}),
                     "failure": {
                         "stage": "Instagram ikili video aktarımı",
                         "http_status": 400, "graph_code": None,
@@ -211,13 +209,13 @@ class FilmToonZoneRecoveryTests(unittest.TestCase):
         self.assertFalse(runtime.audited_ig_v4_eligible(
             "film", "instagram", "Yoksul_1986_Part_17.mp4", prior))
 
-    def test_ordered_retry_cooldown_holds_current_part(self):
+    def test_ordered_retry_has_no_artificial_cooldown(self):
         plans, state, report = self._run(
-            "film", "Yoksul_1986_Part_16.mp4", retry_count=4,
-            retry_not_before="2999-01-01T00:00:00+00:00")
-        self.assertEqual(plans, [])
-        self.assertEqual(state["film:instagram:clip"]["status"], "uncertain")
-        self.assertIn("retry cooldown has not elapsed", report)
+            "film", "Yoksul_1986_Part_16.mp4", retry_count=4)
+        self.assertEqual(len(plans), 1)
+        self.assertEqual(state["film:instagram:clip"]["status"], "intent")
+        self.assertNotIn("recovery_retry_not_before", state["film:instagram:clip"])
+        self.assertIn("NEXT: Yoksul_1986_Part_16.mp4", report)
 
     def test_second_confirmed_binary_rejection_advances_bounded_film_profile(self):
         plans, state, report = self._run("film", "Yoksul_1986_Part_16.mp4", retry_count=1)

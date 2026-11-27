@@ -15,7 +15,7 @@ import time
 import tempfile
 import zipfile
 from types import SimpleNamespace
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -41,8 +41,7 @@ from ordered_channels import TOONZONE_ETSY_LINK, parse_order, toonzone_metadata
 from publication_safety import route_paused
 from publisher_recovery import (
     read_with_retry, classify_meta_failure, known_pre_publish_media_rejection,
-    ordered_recovery_profile_index, ordered_recovery_cooldown_hours,
-    ordered_retry_cooldown_active,
+    ordered_recovery_profile_index,
 )
 from scheduled_multi_publisher import (
     platform_content_from_txt, TARLADAKI_HOURS, PENGUEN_HOURS,
@@ -1709,15 +1708,6 @@ def plan(audit=False):
                 key = f"{route}:{p}:{item['id']}"
                 existing = state["entries"].get(key, {})
                 cap_hash = caption_key(captions[p])
-                if (route in {"film", "toonzone"}
-                        and p == "instagram"
-                        and ordered_retry_cooldown_active(existing, now)):
-                    report.append(
-                        "HELD: ordered Instagram part remains at the queue head; "
-                        "retry cooldown has not elapsed."
-                    )
-                    held = True
-                    continue
                 if (existing.get("route") == route
                         and existing.get("platform") == p
                         and existing.get("file") == item["name"]
@@ -2651,27 +2641,21 @@ def publish():
                     if (platform == "instagram" and isinstance(exc, MetaAPIError)
                             and known_pre_publish_media_rejection(exc, item["route"], previous)):
                         # Only a terminal, proven pre-publish rejection reaches
-                        # here. Ordered routes keep the same part at queue head,
-                        # rotate profiles, and back off repeated container attempts.
+                        # here. Ordered routes keep the same part at queue head
+                        # and retry on the next scheduled workflow tick.
                         next_retry_count = previous + 1
                         failure = dict(
                             diagnostic,
                             recovery_next_profile=next_retry_count,
-                            recovery_action="reconcile_then_retry_same_ordered_part",
+                            recovery_action="reconcile_then_retry_same_ordered_part_on_next_tick",
                         )
-                        retry_fields = {}
                         if item["route"] in {"film", "toonzone"}:
-                            cooldown_hours = ordered_recovery_cooldown_hours(next_retry_count)
-                            retry_at = datetime.now(timezone.utc) + timedelta(hours=cooldown_hours)
                             failure["recovery_profile_index"] = ordered_recovery_profile_index(next_retry_count)
-                            failure["retry_cooldown_hours"] = cooldown_hours
-                            retry_fields["recovery_retry_not_before"] = retry_at.isoformat()
                         entry.pop("recovery_profile_override", None)
                         entry.update(
                             status="ready",
                             prepublish_retry_count=next_retry_count,
                             failure=failure,
-                            **retry_fields,
                         )
                     else:
                         entry.update(status="uncertain", failure=diagnostic)
