@@ -32,6 +32,32 @@ def reserved(t):
 
 
 class EngagementTests(unittest.TestCase):
+    def test_manual_review_requires_provider_owner_age_and_safe_link(self):
+        posts = [{"platform": "facebook", "post_id": "123", "owner": "11", "source_run_id": "100"},
+                 {"platform": "instagram", "post_id": "456", "owner": "33", "source_run_id": "100"}]
+        with patch.object(m, "graph", side_effect=[
+            {"id": "123", "from": {"id": "11"}, "created_time": NOW.isoformat()},
+            {"id": "456", "owner": {"id": "33"}, "media_type": "VIDEO", "timestamp": NOW.isoformat()},
+            {"id": "456", "permalink": "https://www.instagram.com/reel/verified/"},
+        ]) as graph:
+            result = m.manual_review_candidates(posts, actors(), now=NOW)
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0]["url"], "https://www.facebook.com/watch/?v=123")
+        self.assertEqual(result[1]["url"], "https://www.instagram.com/reel/verified/")
+        self.assertTrue(all("actor" not in item for item in result))
+        self.assertTrue(all(call.args[0] == "GET" for call in graph.call_args_list))
+
+    def test_manual_review_rejects_unverified_or_foreign_links(self):
+        posts = [{"platform": "instagram", "post_id": "456", "owner": "33"}]
+        with patch.object(m, "graph", side_effect=[
+            {"id": "456", "owner": {"id": "33"}, "media_type": "VIDEO", "timestamp": NOW.isoformat()},
+            {"id": "456", "permalink": "https://evil.example/reel/456"},
+        ]):
+            self.assertEqual(m.manual_review_candidates(posts, actors(), now=NOW), [])
+        with patch.object(m, "graph", return_value={"id": "456", "owner": {"id": "44"},
+                                                 "media_type": "VIDEO", "timestamp": NOW.isoformat()}):
+            self.assertEqual(m.manual_review_candidates(posts, actors(), now=NOW), [])
+
     def test_known_meta_token_expiry_has_safe_distinct_reason(self):
         reason = m.safe_hold_reason(RuntimeError(
             "Meta hesap erişimi reddedildi (HTTP 401, kod 190, alt_kod 463)"))

@@ -157,5 +157,6 @@ jobs:
           path: |
             cross-engagement/report.json
             cross-engagement/plan.json
+            cross-engagement/manual-review.json
           if-no-files-found: warn
           retention-days: 30

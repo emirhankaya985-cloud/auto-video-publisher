@@ -32,6 +32,7 @@ ROOT = Path("cross-engagement")
 STATE = ROOT / "engagement.json"
 PLAN = ROOT / "plan.json"
 REPORT = ROOT / "report.json"
+MANUAL_REVIEW = ROOT / "manual-review.json"
 ROUTE_NAMES = {
     "tarladaki": "Tarladaki Fasulye", "penguen": "Beyinsiz Penguen",
     "gonle": "Gönle Düşen", "daily_laugh": "Daily Laugh Lab",
@@ -466,6 +467,48 @@ def verified_media(task, actors, *, recent_now=None):
             raise ValueError("unverified Facebook permalink")
         return link
     return None
+
+
+def manual_review_candidates(posts, actors, *, now):
+    """Return only current owned media confirmed by a read-only provider GET.
+
+    Links are for a human to inspect in the native app. They are not evidence
+    of a like, an instruction to another account, or an action queue.
+    """
+    candidates = []
+    seen = set()
+    for post in posts[:50]:
+        platform, post_id, owner_id = post["platform"], post["post_id"], post["owner"]
+        if (platform, post_id) in seen or (platform, owner_id) not in actors:
+            continue
+        seen.add((platform, post_id))
+        task = {"platform": platform, "post_id": post_id, "owner": owner_id,
+                "operation": "like"}
+        try:
+            verified_media(task, actors, recent_now=now)
+            if platform == "facebook" and post_id.isdecimal():
+                link = f"https://www.facebook.com/watch/?v={post_id}"
+            elif platform == "instagram":
+                body = graph("GET", post_id, actors[(platform, owner_id)]["token"],
+                             {"fields": "id,permalink"})
+                if str(body.get("id")) != post_id:
+                    continue
+                link = body.get("permalink")
+            else:
+                continue
+            parsed = urlsplit(link) if isinstance(link, str) else None
+            hosts = ({"www.facebook.com"} if platform == "facebook" else
+                     {"www.instagram.com", "instagram.com"})
+            if (not parsed or parsed.scheme != "https" or parsed.hostname not in hosts
+                    or parsed.username or parsed.password or parsed.fragment):
+                continue
+            candidates.append({"platform": platform, "owner_account": actors[(platform, owner_id)]["name"],
+                               "post_id": post_id, "url": link,
+                               "source_run_id": post.get("source_run_id"),
+                               "status": "provider_owner_and_recent_media_verified"})
+        except (GraphFailure, ValueError, KeyError, TypeError):
+            continue
+    return candidates
 
 
 def perform(task, actor, link):
@@ -961,6 +1004,8 @@ def main():
         ))
         like_coverage = verified_like_coverage(actors, ledger)
         save(PLAN, tasks)
+        save(MANUAL_REVIEW, {"mode": "manual_review_only", "generated_at": now.isoformat(),
+                             "candidates": manual_review_candidates(posts, actors, now=now)})
         save(REPORT, {"mode": "apply" if live else "dry_run", "planned": len(tasks),
                       "source_run_id": source_id, "source_posts": len(posts),
                       "source_fallback_skipped_runs": skipped_sources,
