@@ -1,13 +1,11 @@
 """Recoverability is based on known history and API stages, not wishful retries."""
 import unittest
-from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 from publisher_recovery import (
     classify_meta_failure, read_with_retry, known_pre_publish_media_rejection,
-    ordered_recovery_profile_index, ordered_recovery_cooldown_hours,
-    ordered_retry_cooldown_active,
+    ordered_recovery_profile_index,
 )
 
 
@@ -169,17 +167,9 @@ class RecoveryPolicyTests(unittest.TestCase):
             SimpleNamespace(stage="Instagram ikili video aktarımı", http_status=403, code=190),
             "penguen", 0))
 
-    def test_ordered_retry_cycles_profiles_and_backs_off(self):
+    def test_ordered_retry_cycles_five_profiles_without_artificial_delay(self):
         self.assertEqual([ordered_recovery_profile_index(n) for n in range(8)],
                          [0, 1, 2, 3, 4, 0, 1, 2])
-        self.assertEqual([ordered_recovery_cooldown_hours(n) for n in range(1, 6)],
-                         [2, 4, 6, 6, 6])
-        now = datetime.fromisoformat("2026-11-26T12:00:00+00:00")
-        entry = {"recovery_retry_not_before": "2026-11-26T14:00:00+00:00"}
-        self.assertTrue(ordered_retry_cooldown_active(entry, now))
-        self.assertFalse(ordered_retry_cooldown_active(entry, now.replace(hour=14)))
-        self.assertTrue(ordered_retry_cooldown_active(
-            {"recovery_retry_not_before": "invalid"}, now))
 
     def test_unknown_transport_failure_remains_uncertain(self):
         result = classify_meta_failure(TimeoutError())

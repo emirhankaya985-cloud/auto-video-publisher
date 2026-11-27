@@ -5,7 +5,6 @@ Meta 400 may require video normalization, permissions, captions or API
 parameters; classify it without assuming one specific fix.
 """
 import time
-from datetime import datetime, timezone
 
 
 READ_RETRY_HTTP = frozenset({429, 500, 502, 503, 504})
@@ -168,26 +167,3 @@ def ordered_recovery_profile_index(retry_count):
     if type(retry_count) is not int or retry_count < 0:
         raise ValueError("ordered retry count must be a nonnegative integer")
     return retry_count % ORDERED_RECOVERY_PROFILE_COUNT
-
-
-def ordered_recovery_cooldown_hours(retry_count):
-    """Back off repeated terminal failures, capped at one attempt per 6 hours."""
-    if type(retry_count) is not int or retry_count < 0:
-        raise ValueError("ordered retry count must be a nonnegative integer")
-    return min(6, 2 ** min(retry_count, 3))
-
-
-def ordered_retry_cooldown_active(entry, now):
-    """Fail closed while the next ordered-series attempt is in backoff."""
-    raw = entry.get("recovery_retry_not_before") if isinstance(entry, dict) else None
-    if raw is None:
-        return False
-    if not isinstance(raw, str):
-        return True
-    try:
-        until = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-    except ValueError:
-        return True
-    if until.tzinfo is None or now.tzinfo is None:
-        return True
-    return now.astimezone(timezone.utc) < until.astimezone(timezone.utc)
