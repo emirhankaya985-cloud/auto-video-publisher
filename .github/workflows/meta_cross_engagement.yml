@@ -74,6 +74,9 @@ jobs:
       GITHUB_REF: ${{ github.ref }}
       ENGAGEMENT_MODE: dry_run
       META_CROSS_ENGAGEMENT_ENABLED: 'false'
+      X_AUTO_LIKE_ENABLED: 'false'
+      YOUTUBE_AUTO_LIKE_ENABLED: 'false'
+      INSTAGRAM_AUTO_LIKE_ENABLED: 'false'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -84,6 +87,8 @@ jobs:
       - run: pip install --require-hashes -r requirements.txt
       - name: Read recent publisher results and verified actor identities; prepare independent ledger
         run: python meta_cross_engagement.py plan
+      - name: Record disabled per-platform like switches
+        run: python platform_like_switches.py
       - name: Verify read-only audit mode
         run: python -c "import os; assert os.environ['ENGAGEMENT_MODE'] == 'dry_run' and os.environ['META_CROSS_ENGAGEMENT_ENABLED'] == 'false'"
       - name: Preserve independent engagement ledger including partial results
@@ -158,5 +163,6 @@ jobs:
             cross-engagement/report.json
             cross-engagement/plan.json
             cross-engagement/manual-review.json
+            cross-engagement/platform-like-status.json
           if-no-files-found: warn
           retention-days: 30
