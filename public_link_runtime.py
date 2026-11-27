@@ -36,6 +36,7 @@ from expired_ig_container_recovery import (
     authorize_exact_expired_recovery, authorize_film_part17_expired_recovery,
     terminal_recovery_reserved,
 )
+from instagram_container_reconcile import refresh_pre_publish_container_status
 from meta_auth_loader import load_meta_auth
 from ordered_channels import TOONZONE_ETSY_LINK, parse_order, toonzone_metadata
 from publication_safety import route_paused
@@ -1831,6 +1832,15 @@ def plan(audit=False):
                             route, p, item, existing, page, history_reconciled=True):
                         report.append("RECOVERY: Film Part17 exact expired IG container; one bounded re-encoding reserved.")
                     bind_legacy_ig_container(route, p, item, existing, page)
+                    if p == "instagram" and existing.get("status") == "uncertain":
+                        live_container_status = refresh_pre_publish_container_status(
+                            route, existing, page, history_reconciled=True,
+                        )
+                        if live_container_status:
+                            report.append(
+                                f"READ ONLY: refreshed prior Instagram container status: "
+                                f"{live_container_status}."
+                            )
                 # Historical compact IG uploads that failed *before*
                 # media_publish were incorrectly treated as uncertain forever.
                 # Reclassify only exact, persisted pre-publish HTTP400 evidence,
