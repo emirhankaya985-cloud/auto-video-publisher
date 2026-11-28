@@ -138,6 +138,52 @@ class LinkRuntimeSafety(unittest.TestCase):
                 self.assertEqual(state["entries"][f"{route}:instagram:old"], old)
                 self.assertNotIn(f"{route}:facebook:old", state["entries"])
 
+    def test_humor_planner_skips_only_facebook_code6000_video(self):
+        from contextlib import ExitStack
+        with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
+            root = Path(tmp)
+            route, page = "tarladaki", "Tarladaki Fasulye"
+            old = {"route": route, "platform": "facebook", "file": "192.mp4",
+                   "source_id": "old", "caption_hash": runtime.caption_key("old caption"),
+                   "publish_caption": "old caption", "status": "held", "video_quarantined": True,
+                   "failure": {"stage": "Facebook video_reels binary upload", "http_status": 400,
+                               "graph_code": 6000, "recovery_action": "skip_this_video"}}
+            state = {"schema": 1, "entries": {f"{route}:facebook:old": dict(old)}, "episode_days": {}}
+            sources = {"192.mp4": {"id": "old", "name": "192.mp4"},
+                       "194.mp4": {"id": "new", "name": "194.mp4"}}
+            replacements = {"ROOT": root, "STATE": root / "state.json", "PLAN": root / "plan.json",
+                            "ROUTES": {route: ("humor", page), "penguen": ("humor", "Beyinsiz Penguen")},
+                            "FOLDERS": {"humor": "folder"}}
+            for key, value in replacements.items():
+                stack.enter_context(patch.object(runtime, key, value))
+            stack.enter_context(patch.dict(os.environ, {"PUBLISH_ACCOUNT_SCOPE": route,
+                "GITHUB_RUN_ID": "456", "GITHUB_STEP_SUMMARY": str(root / "summary.md")}))
+            stack.enter_context(patch.object(runtime, "restore", return_value=state))
+            stack.enter_context(patch.object(runtime, "apply_verified_migration"))
+            stack.enter_context(patch.object(runtime, "owned_humor_source", return_value=True))
+            stack.enter_context(patch.object(runtime, "load_meta_auth", return_value={"pages": [
+                {"page_name": "Tarladaki Fasulye", "instagram_id": "ig"},
+                {"page_name": "Beyinsiz Penguen", "instagram_id": "other-ig"}]}))
+            stack.enter_context(patch.object(runtime, "inventory", return_value=sources))
+            stack.enter_context(patch.object(runtime, "graph_rows", return_value=[]))
+            stack.enter_context(patch.object(runtime, "target_count", return_value=5))
+            stack.enter_context(patch.object(runtime, "seed_done", return_value=False))
+            def copies(_route, item, _files, _tmp):
+                body = "old caption" if item["id"] == "old" else "new unique caption"
+                return {"facebook": body, "instagram": body}, "matching-txt"
+            stack.enter_context(patch.object(runtime, "copies", side_effect=copies))
+
+            runtime.plan()
+
+            plans = json.loads((root / "plan.json").read_text())
+            self.assertEqual([item["id"] for item in plans], ["new"],
+                             (root / "summary.md").read_text())
+            self.assertEqual(set(plans[0]["platforms"]), {"facebook", "instagram"})
+            held = state["entries"][f"{route}:facebook:old"]
+            self.assertEqual(held["status"], "held")
+            self.assertTrue(held["video_quarantined"])
+            self.assertEqual(held["failure"], old["failure"])
+
     def test_penguen_silent_preupload_failure_is_skipped_for_next_safe_clip(self):
         from contextlib import ExitStack
         with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
