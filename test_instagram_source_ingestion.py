@@ -121,6 +121,35 @@ class ConfigTests(unittest.TestCase):
         self.assertIn("gonle", config_module.collection_targets(normalized))
         self.assertEqual(normalized["accounts"]["gonle"]["source_accounts"][0]["content_categories"], ["comedy"])
 
+    def test_collection_folder_cannot_be_reused_across_routes(self):
+        config = base_config()
+        shared_folder = "source_folder_shared_001"
+        for route in ("tarladaki", "penguen"):
+            account = config["accounts"][route]
+            account.update(enabled=True, auto_collection=True,
+                           collection_folder_id=shared_folder)
+            account["source_accounts"] = [{"username": f"creator_{route}",
+                "enabled": True, "rights_approved": True,
+                "official_api_download_allowed": True, "rights_evidence": "license"}]
+        normalized = config_module.validate_config(config)
+        for route in ("tarladaki", "penguen"):
+            self.assertIn("collection_folder_reused_by_routes",
+                          normalized["accounts"][route]["config_errors"])
+            self.assertNotIn(route, config_module.collection_targets(normalized))
+
+    def test_collection_requires_explicit_official_api_download_permission(self):
+        config = base_config()
+        account = config["accounts"]["tarladaki"]
+        account.update(enabled=True, auto_collection=True,
+                       collection_folder_id="source_folder_001")
+        account["source_accounts"] = [{"username": "creator_name", "enabled": True,
+            "rights_approved": True, "rights_evidence": "license",
+            "official_api_download_allowed": False}]
+        normalized = config_module.validate_config(config)
+        self.assertIn("auto_collection_has_no_authorized_sources",
+                      normalized["accounts"]["tarladaki"]["config_errors"])
+        self.assertNotIn("tarladaki", config_module.collection_targets(normalized))
+
     def test_due_schedule_filters_only_activated_routes_in_turkey_time(self):
         config = base_config()
         account = config["accounts"]["tarladaki"]

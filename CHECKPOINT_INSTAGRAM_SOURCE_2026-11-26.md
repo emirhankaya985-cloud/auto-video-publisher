@@ -1,37 +1,40 @@
-# Instagram source intake checkpoint — 2026-11-26
+# Instagram kaynak toplama ve Drive checkpoint — 26.11.2026
 
-## Local implementation
+## GitHub durumu
 
-- Feature branch: `feat/instagram-source-ingestion-20261125`
-- Local feature commits include the rebased implementation (`542b5e0`) and scheduled NTFY regression test (`d07505d`).
-- Base: `bca890599f1fa8b60b13bafdd2d2dda96ee0d2c0` (latest GitHub `main`, fetched successfully and rebased locally)
-- Film Second is excluded from new collection and scheduled publisher account matrices; legacy history/schema support remains.
-- Existing publisher hours were preserved. Source collection is opt-in and runs separately; source publishing remains off.
-- Existing nightly statistics/NTFY flow now includes a read-only source health and collection summary.
-- No production secrets/configuration were changed and no live Instagram, Drive, Neon or publisher writes were made.
+- PR #324 birleştirildi; merge commit: `1e63e0417c35eb04bdd598316245d6b2f4634285`.
+- `main` için PR CI'sinde 13 workflow başarılı, 2 kontrol atlandı. PR başlığında 1.506 testin geçtiği ve 16 testin atlandığı raporlanmıştı.
+- Birleştirme sonrası Meta publisher health watchdog ayrı bir üretim alarmı verdi: Film ve ToonZone `publication_blocked`; son raporda 14 onaylı yayın makbuzu vardı. Bu alarm PR başlığı CI hatası değil. Tekrar çalıştırılmadı ve üretim ayarlarına dokunulmadı.
+- Bu görev için yerel branch: `feat/drive-source-folders-20261126`, taban güncel `origin/main` (`56d3164a`, PR #327 merge sonrası). Yerel commit `da4e969`; GitHub bağlantısı üzerinden aynı dosya ağacını taşıyan branch commit'i `bbf5398` olarak oluştu (tree SHA aynı: `7304185d`). PR #328 açık.
+- PR #328 başlığı için GitHub bağlantısı henüz workflow run veya check kaydı döndürmedi. Bu nedenle yeni commit için CI sonucu yok; CI başarılı sayılmadı ve PR birleştirilmedi. PR #324'ün geçmiş kontrolleri bu commit'in CI'si değildir.
+- Bu branch için güncel tam yerel test: `python -m unittest discover -q` — 1.508 başarılı, 16 atlandı. Kaynak alım testleri 31 başarılı. Python derleme, iki ilgili Actions YAML dosyasının parse edilmesi ve `git diff --check` geçti.
 
-## Local verification
+## Drive denetimi
 
-- Full `python -m unittest discover -q` passed after the latest rebase: 1,506 tests, 16 skipped (`unittest`, 2026-11-26). The prior 268 focused tests also passed. Coverage includes six-route defaults, 3-new/3-archive planning, existing publish hours, Film Second exclusion, and the single scheduled NTFY source-summary path.
-- Python compilation, workflow YAML parsing, and `git diff --check` passed.
-- Test-generated `link-runtime` artifacts were removed from the worktree.
+- Kullanıcının verdiği `Yeniler` klasörü `11zbrunHoiTZyJ8JDsj99ascO66mmCj-M` (`Ortak 2 Mizah`) altında ve boş. Tarladaki Fasulye ile Beyinsiz Penguen için aynı intake klasörü olarak kullanılamaz.
+- Altı hesabın mevcut yayın klasörleri doğrulandı; ToonZone'daki `Kapaklar` klasörü mevcut kapak içeriği olarak korundu. Diğer hedeflerin mevcut dosyalarına dokunulmadı.
+- Altı yeni intake klasörü oluşturma denemesi Drive API'den `403 insufficientParentPermissions` ile reddedildi. Tarayıcıdaki aynı paylaşılan üst klasörde `Yeni` düğmesi de devre dışıydı. Dolayısıyla altı `collection_folder_id` boş bırakıldı; kimlik uydurulmadı ve yetki/aşım yapılmadı.
+- Drive connector'ıyla listeleme ve metadata okuma mümkün; bu, GitHub Actions `DRIVE_TOKEN_JSON` kimliğinin okuma/yazma yetkisini doğrulamıyor. Dosya yükleme veya üretim tokenıyla yazma testi yapılmadı.
 
-## Integration status
+## Hesaplar, hedefler ve kapılar
 
-- Current GitHub `main` advanced to `bca8905`; local changes were rebased without conflicts, preserving the current publisher schedule and report protections.
-- Local `gh auth status` reports its CLI credential is invalid. The connected GitHub API successfully transferred the verified tree to the feature branch, created PR #324, and updated its description.
-- PR #324's prior code CI passed all 13 workflows after a legacy-only Film Second fixture fix. GitHub `main` then advanced again; the new local rebase and 1,506-test run passed. The feature branch still needs updating to the latest base and the latest-head CI result before merge.
-- Do not merge unless required checks pass. Keep all collection and publishing activation switches off until account rights, Meta access, and Drive child folders are verified.
+- Altı rota: `tarladaki`, `penguen`, `gonle`, `daily_laugh`, `film`, `toonzone`. Her birinde hedef günlük plan 3 yeni + 3 arşiv video; mevcut limit kaynak başına günde 2.
+- Altı rotada toplama/yayın kapalı, kaynak hesap listeleri boş ve intake klasör kimlikleri boş. Kaynak hesap ve yeniden kullanım izinleri henüz verilmediğinden Instagram API çağrısı, medya toplama ve yayın yapılmadı.
+- Yayın zamanları değişmedi. Film ve ToonZone seri sırası korunuyor. Film Second aktif rotaya veya kaynak kapsamına eklenmedi.
+- Kodda artık bir intake klasörünün birden fazla rota tarafından paylaşılması reddediliyor.
+- Yerel güvenlik düzeltmeleri iki rota yapılandırmasının aynı alım klasörünü paylaşmasını engelliyor ve resmi API indirme iznini toplama koşulu olarak zorluyor. Kaynaklar hâlâ boş, bütün kapılar kapalı.
 
-## Live connection and permission audit
+## Bağlantılar ve maliyet
 
-- No Instagram source usernames/IDs, rights evidence, or dedicated collection folder IDs are configured.
-- Meta source access and reuse permissions remain unverified. No collection was run.
-- Google Drive connector profile responded. All five distinct configured publishing parents returned folder metadata, but the connector reported `source_visibility_status=access_not_verified`; six dedicated source intake folder IDs remain blank. Production `DRIVE_TOKEN_JSON` access was not tested.
-- Neon connector performed only `SELECT current_database(), current_schema(), current_user` against project `auto-video-publisher-free`, branch `main`; it returned database `auto_video_publisher_live`, schema `public`. This verifies the connected Neon app path, not that GitHub's `DASHBOARD_DATABASE_URL` points to it. No migration or write was run.
-- NTFY CI safety tests passed. No live topic message was sent, so phone delivery remains unverified.
-- No source media was collected or published, no production secrets/settings were changed, and no new paid service was added.
+- Google Drive kullanıcı bağlantısı yanıt verdi; üst klasöre yazma yetkisi yetersiz çıktı.
+- Neon kontrol panelinde `auto-video-publisher-free` projesi ve `main` branch'i bulundu; mevcut geçmiş denetimde DB adı `auto_video_publisher_live`, şema `public` olarak okundu. SQL bağlantısının endpoint'i uyandırıp maliyet doğurma olasılığı nedeniyle bu görevde yeniden sorgu/migration yapılmadı. GitHub `DASHBOARD_DATABASE_URL` hedefi doğrulanmış değil.
+- NTFY/Telegram kod yolları ve yinelenen bildirim koruması denetlendi. Canlı bildirim gönderilmedi; sunucu ACK veya kod denetimi telefon teslimatını kanıtlamaz.
+- Yeni ücretli servis, token, topic veya bot oluşturulmadı. Medya yüklemesi yapılmadı. Bu yüzden ek harcama başlatılmadı; platformların genel fatura durumuna dair bağımsız kanıt yok.
 
-## User setup
+## Sonraki adımlar
 
-See [`USER_ACTION_REQUIRED.md`](USER_ACTION_REQUIRED.md) for the source rights, Meta actor ID, Drive folders, existing secret names, and NTFY phone-delivery checks required before live activation.
+1. Paylaşılan beş hedef üst klasöre Google Drive'da klasör oluşturma ve dosya ekleme yetkisini, kullanılan Google hesabına verin. Sonra altı ayrı alt klasör oluşturulup ID'leri yapılandırmaya eklenebilir.
+2. Altı rota için kaynak Instagram kullanıcı adı/ID, kategori ve yazılı yeniden yayın izni kanıtını sağlayın.
+3. GitHub Actions'ta mevcut `DRIVE_TOKEN_JSON`, `DASHBOARD_DATABASE_URL`, `META_ACCESS_TOKEN`, `NTFY_TOPIC`/`NTFY_TOPIC_URL` değerlerinin doğru ve geçerli olduğunu gizli değerleri paylaşmadan doğrulayın; `IG_SOURCE_DISCOVERY_ACTOR_ID` değişkenini kontrol edin.
+4. Gerekirse normal çalışma sırasında NTFY'nin telefona ulaştığını kontrol edin; test bildirimi gönderilmedi.
+5. PR #328 için CI koşumlarını sağlayın/inceleyin. Kontroller geçerse birleştirin; ardından merge SHA'sini bu dosyaya ekleyin.
