@@ -1,11 +1,13 @@
 """Recoverability is based on known history and API stages, not wishful retries."""
 import unittest
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 from publisher_recovery import (
     classify_meta_failure, read_with_retry, known_pre_publish_media_rejection,
     ordered_recovery_profile_index,
+    ordered_recovery_window,
 )
 
 
@@ -170,6 +172,24 @@ class RecoveryPolicyTests(unittest.TestCase):
     def test_ordered_retry_cycles_five_profiles_without_artificial_delay(self):
         self.assertEqual([ordered_recovery_profile_index(n) for n in range(8)],
                          [0, 1, 2, 3, 4, 0, 1, 2])
+
+    def test_ordered_video_recovery_window_is_two_hours_and_fail_closed(self):
+        now = datetime(2026, 11, 28, 12, 0, tzinfo=timezone.utc)
+        entry = {
+            "status": "ready", "recovery_started_at_utc": (now - timedelta(minutes=119)).isoformat(),
+            "failure": {"recovery_action": "retry_same_ordered_video", "http_status": 400,
+                        "stage": "Instagram ikili video aktarımı", "graph_code": 100},
+        }
+        self.assertTrue(ordered_recovery_window(entry, now))
+        entry["recovery_started_at_utc"] = (now - timedelta(hours=2)).isoformat()
+        self.assertFalse(ordered_recovery_window(entry, now))
+        entry["recovery_started_at_utc"] = (now + timedelta(minutes=1)).isoformat()
+        self.assertFalse(ordered_recovery_window(entry, now))
+        entry["failure"]["stage"] = "Instagram media_publish"
+        self.assertFalse(ordered_recovery_window(entry, now))
+        entry["failure"]["stage"] = "Instagram ikili video aktarımı"
+        entry["failure"]["graph_code"] = 190
+        self.assertFalse(ordered_recovery_window(entry, now))
 
     def test_unknown_transport_failure_remains_uncertain(self):
         result = classify_meta_failure(TimeoutError())

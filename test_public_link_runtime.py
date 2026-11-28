@@ -1266,7 +1266,7 @@ class LinkRuntimeSafety(unittest.TestCase):
             facebook.assert_not_called()
             instagram.assert_not_called()
 
-    def test_known_ig_binary_400_queues_only_one_strict_profile_retry(self):
+    def test_unordered_ig_binary_400_quarantines_only_video(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             state_path, plan_path = root / "state.json", root / "plan.json"
@@ -1291,27 +1291,16 @@ class LinkRuntimeSafety(unittest.TestCase):
                 with self.assertRaises(SystemExit):
                     runtime.publish()
                 first = json.loads(state_path.read_text())["entries"]["penguen:instagram:vid"]
-                self.assertEqual(first["status"], "ready")
-                self.assertEqual(first["prepublish_retry_count"], 1)
+                self.assertEqual(first["status"], "held")
+                self.assertTrue(first["video_quarantined"])
+                self.assertEqual(first["failure"]["recovery_action"], "skip_this_video")
                 self.assertFalse(prepare.call_args.kwargs["film_compact"])
                 self.assertTrue(prepare.call_args.kwargs["short_reel"])
                 self.assertFalse(prepare.call_args.kwargs["prefer_remux"])
                 self.assertTrue(prepare.call_args.kwargs["force_transcode"])
                 ig.assert_called_once()
-                state = json.loads(state_path.read_text())
-                state["entries"]["penguen:instagram:vid"]["status"] = "intent"
-                runtime.save(state_path, state)
-                ig.reset_mock(side_effect=True)
-                ig.return_value = "ig-post-confirmed"
-                runtime.publish()
-                second = json.loads(state_path.read_text())["entries"]["penguen:instagram:vid"]
-                self.assertEqual(second["status"], "done")
-                self.assertEqual(second["post_id"], "ig-post-confirmed")
-                self.assertTrue(prepare.call_args.kwargs["film_compact"])
-                self.assertFalse(prepare.call_args.kwargs["short_reel"])
-                self.assertEqual(ig.call_count, 1)
 
-    def test_second_known_instagram_400_schedules_final_safe_profile(self):
+    def test_known_unordered_400_quarantines_video_without_account_hold(self):
         for route in ("penguen", "gonle"):
             with self.subTest(route=route), tempfile.TemporaryDirectory() as folder:
                 root = Path(folder)
@@ -1351,9 +1340,9 @@ class LinkRuntimeSafety(unittest.TestCase):
                         self.assertTrue(flags["film_compact"])
                     upload.assert_called_once()
                 record = json.loads(state_path.read_text())["entries"][key]
-                self.assertEqual(record["status"], "ready")
-                self.assertEqual(record["prepublish_retry_count"], 2)
-                self.assertEqual(record["failure"]["recovery_next_profile"], 2)
+                self.assertEqual(record["status"], "held")
+                self.assertTrue(record["video_quarantined"])
+                self.assertEqual(record["failure"]["recovery_action"], "skip_this_video")
 
     def test_final_profile_is_normalized_and_success_is_persisted(self):
         for route in ("penguen", "gonle"):

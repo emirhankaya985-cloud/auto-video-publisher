@@ -5,6 +5,7 @@ Meta 400 may require video normalization, permissions, captions or API
 parameters; classify it without assuming one specific fix.
 """
 import time
+from datetime import datetime, timedelta, timezone
 
 
 READ_RETRY_HTTP = frozenset({429, 500, 502, 503, 504})
@@ -123,6 +124,7 @@ _TWO_ALTERNATE_PROFILE_ROUTES = frozenset({
 })
 _ORDERED_ALTERNATE_PROFILE_ROUTES = frozenset({"film", "toonzone"})
 ORDERED_RECOVERY_PROFILE_COUNT = 5
+ORDERED_RECOVERY_WINDOW = timedelta(hours=2)
 _PRE_PUBLISH_STAGES = frozenset({
     "Instagram ikili video aktarımı", "Instagram video işleme durumu",
 })
@@ -167,3 +169,32 @@ def ordered_recovery_profile_index(retry_count):
     if type(retry_count) is not int or retry_count < 0:
         raise ValueError("ordered retry count must be a nonnegative integer")
     return retry_count % ORDERED_RECOVERY_PROFILE_COUNT
+
+
+def ordered_recovery_window(entry, now=None):
+    """Whether an exact ordered-video 400 recovery is still inside its 2h window."""
+    if not isinstance(entry, dict) or entry.get("status") != "ready":
+        return False
+    failure = entry.get("failure")
+    if not isinstance(failure, dict) or failure.get("recovery_action") != "retry_same_ordered_video":
+        return False
+    if failure.get("http_status") != 400 or failure.get("stage") not in _PRE_PUBLISH_STAGES:
+        return False
+    if entry.get("container_publish_attempted") or failure.get("container_status") in {
+            "PUBLISHED", "FINISHED", "IN_PROGRESS", "UNVERIFIED"}:
+        return False
+    code, subcode = failure.get("graph_code"), failure.get("graph_subcode")
+    if not (code in (None, 100) or (code == -1 and subcode in (2207001, 2207053))):
+        return False
+    started = entry.get("recovery_started_at_utc")
+    try:
+        start = datetime.fromisoformat(started.replace("Z", "+00:00"))
+    except (AttributeError, TypeError, ValueError):
+        return False
+    if start.tzinfo is None:
+        return False
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        return False
+    elapsed = now.astimezone(timezone.utc) - start.astimezone(timezone.utc)
+    return timedelta(0) <= elapsed < ORDERED_RECOVERY_WINDOW
