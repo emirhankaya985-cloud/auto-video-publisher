@@ -27,12 +27,28 @@ repository (for example, the wrong GitHub CLI identity or insufficient read
 access). Output contains booleans, fixed secret names, and a `secret_values_read:
 false` marker only.
 
-The check does not validate secret contents, OAuth scopes, Google Drive access,
-YouTube channel identity, or publication permissions. Use the existing
-read-only connection checks for those. It does not edit secrets or variables,
-enable automation, start a workflow, send a notification, or publish media.
-Keep the legacy `AUTOMATION_ENABLED` switch unchanged; the active Meta-only
-schedule is separate from the legacy OAuth/YouTube utilities.
+This is an inventory check, not an OAuth readiness result. It does not validate
+secret contents, OAuth scopes, Google Drive access, YouTube channel identity,
+or publication permissions. In particular, a present `TOKEN_CHANNEL*_JSON`
+name does not prove that its value is a refreshable authorized-user credential
+or that it belongs to the expected channel.
+
+OAuth/channel verification is a separate check: `youtube_readonly_connection.py`
+checks one configured target at a time and reports only safe status fields. Its
+offline tests are:
+
+```powershell
+python -m unittest -v test_youtube_readonly_connection.py
+```
+
+Those tests use mocks and do not validate the real GitHub secret values. The
+GitHub connection workflow is also guarded by `AUTOMATION_ENABLED`; this
+name-only preflight does not invoke it or change that switch. Treat OAuth and
+Drive access as **unverified** until an authorized read-only connection check
+has actually completed. This tool does not edit secrets or variables, enable
+automation, start a workflow, send a notification, or publish media. Keep the
+legacy `AUTOMATION_ENABLED` switch unchanged; the active Meta-only schedule is
+separate from the legacy OAuth/YouTube utilities.
 
 Run the offline unit tests with:
 
