@@ -250,19 +250,78 @@ class PublicationResilienceTests(unittest.TestCase):
         self.assertEqual(post.call_count, 2)
         upload.assert_called_once()
 
+    def test_facebook_code6000_quarantines_exact_unordered_clip(self):
+        with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
+            root = Path(tmp)
+            _item, _state, video = self.publication_fixture(root)
+            error = runtime.MetaAPIError("HTTP 400 video upload rejected")
+            error.stage, error.http_status, error.code, error.subcode = (
+                "Facebook video_reels binary upload", 400, 6000, None)
+            stack.enter_context(patch.dict(os.environ, {"GITHUB_RUN_ID": "999"}))
+            stack.enter_context(patch.object(runtime, "STATE", root / "state.json"))
+            stack.enter_context(patch.object(runtime, "PLAN", root / "plan.json"))
+            stack.enter_context(patch.object(runtime, "load_meta_auth", return_value={
+                "pages": [{"page_name": "Gönle Düşen"}]}))
+            stack.enter_context(patch.object(runtime, "download", return_value=video))
+            stack.enter_context(patch.object(runtime, "verify_source_video", return_value=True))
+            upload = stack.enter_context(patch.object(runtime, "upload_facebook_reel",
+                                                        side_effect=error))
+
+            with self.assertRaises(SystemExit):
+                runtime.publish()
+
+            row = json.loads((root / "state.json").read_text())["entries"]["gonle:facebook:v1"]
+            self.assertEqual(row["status"], "held")
+            self.assertTrue(row["video_quarantined"])
+            self.assertEqual(row["failure"]["recovery_action"], "skip_this_video")
+            self.assertEqual(row["failure"]["stage"], "Facebook video_reels binary upload")
+            self.assertEqual(row["failure"]["graph_code"], 6000)
+            upload.assert_called_once()
+
+    def test_facebook_finish_auth_and_rate_400_stay_uncertain(self):
+        for stage, code in (("Facebook video_reels finish", 6000),
+                            ("Facebook video_reels binary upload", 190),
+                            ("Facebook video_reels binary upload", 613)):
+            with self.subTest(stage=stage, code=code), tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
+                root = Path(tmp)
+                _item, _state, video = self.publication_fixture(root)
+                error = runtime.MetaAPIError("HTTP 400")
+                error.stage, error.http_status, error.code, error.subcode = stage, 400, code, None
+                stack.enter_context(patch.dict(os.environ, {"GITHUB_RUN_ID": "999"}))
+                stack.enter_context(patch.object(runtime, "STATE", root / "state.json"))
+                stack.enter_context(patch.object(runtime, "PLAN", root / "plan.json"))
+                stack.enter_context(patch.object(runtime, "load_meta_auth", return_value={
+                    "pages": [{"page_name": "Gönle Düşen"}]}))
+                stack.enter_context(patch.object(runtime, "download", return_value=video))
+                stack.enter_context(patch.object(runtime, "verify_source_video", return_value=True))
+                stack.enter_context(patch.object(runtime, "upload_facebook_reel", side_effect=error))
+                with self.assertRaises(SystemExit):
+                    runtime.publish()
+                row = json.loads((root / "state.json").read_text())["entries"]["gonle:facebook:v1"]
+                self.assertEqual(row["status"], "uncertain")
+                self.assertNotIn("video_quarantined", row)
+
     def test_facebook_explicit_failure_cannot_be_claimed_as_a_published_id(self):
-        for failed_stage in ("upload", "finish"):
-            calls = [response({"video_id": "123", "upload_url": "https://upload.invalid"})]
-            if failed_stage == "finish":
-                calls.append(response({"success": True}))
-            calls.append(response({"success": False}))
-            with self.subTest(stage=failed_stage), tempfile.TemporaryDirectory() as temp_dir:
+        cases = (
+            ("start", [response({"error": {"message": "bad request", "code": 100}}, 400)],
+             "Facebook video_reels start"),
+            ("binary", [response({"video_id": "123", "upload_url": "https://upload.invalid"}),
+                        response({"error": {"message": "upload failed", "code": 6000}}, 400)],
+             "Facebook video_reels binary upload"),
+            ("finish", [response({"video_id": "123", "upload_url": "https://upload.invalid"}),
+                        response({"success": True}),
+                        response({"error": {"message": "finish failed", "code": 6000}}, 400)],
+             "Facebook video_reels finish"),
+        )
+        for phase, calls, expected_stage in cases:
+            with self.subTest(stage=phase), tempfile.TemporaryDirectory() as temp_dir:
                 video = Path(temp_dir) / "video.mp4"
                 video.write_bytes(b"data")
                 with patch.object(cloud.requests, "post", side_effect=calls) as post:
-                    with self.assertRaises(cloud.MetaAPIError):
+                    with self.assertRaises(cloud.MetaAPIError) as caught:
                         cloud.upload_facebook_reel({"page_id": "123", "page_token": "test"},
                                                    str(video), "caption")
+                self.assertEqual(caught.exception.stage, expected_stage)
                 self.assertEqual(post.call_count, len(calls))
 
 

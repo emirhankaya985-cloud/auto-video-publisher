@@ -42,7 +42,8 @@ from ordered_channels import TOONZONE_ETSY_LINK, parse_order, toonzone_metadata
 from publication_safety import route_paused
 from publisher_recovery import (
     read_with_retry, classify_meta_failure, known_pre_publish_media_rejection,
-    ordered_recovery_profile_index, ordered_recovery_window,
+    known_facebook_binary_media_rejection, ordered_recovery_profile_index,
+    ordered_recovery_window,
 )
 from scheduled_multi_publisher import (
     platform_content_from_txt, TARLADAKI_HOURS, PENGUEN_HOURS,
@@ -958,6 +959,28 @@ def quarantine_unordered_ig_source(route, platform, item, entry, cap_hash):
             and not entry.get("container_publish_attempted")
             and failure.get("stage") == "Instagram ikili video aktarımı"
             and failure.get("http_status") == 400)
+
+
+def quarantine_unordered_facebook_source(route, platform, item, entry, cap_hash):
+    """Skip only the exact unordered clip after Meta confirms video upload code 6000."""
+    failure = entry.get("failure")
+    if not isinstance(failure, dict):
+        return False
+    marker = SimpleNamespace(
+        stage=failure.get("stage"), http_status=failure.get("http_status"),
+        code=failure.get("graph_code"), subcode=failure.get("graph_subcode"),
+    )
+    return (
+        platform == "facebook"
+        and entry.get("status") == "held"
+        and entry.get("video_quarantined") is True
+        and entry.get("route") == route
+        and entry.get("platform") == platform
+        and entry.get("file") == item.get("name")
+        and entry.get("caption_hash") == cap_hash
+        and not entry.get("container_publish_attempted")
+        and known_facebook_binary_media_rejection(marker, route)
+    )
 
 
 def facebook_can_continue_past_ig_rejection(route, platform, entry):
@@ -1950,7 +1973,13 @@ def plan(audit=False):
                                      route=route, platform=p, video=item["name"],
                                      status="uncertain")
                         existing["hold_alerted_at"] = now.isoformat()
-                    if quarantine_unordered_ig_source(route, p, item, existing, cap_hash):
+                    if quarantine_unordered_facebook_source(route, p, item, existing, cap_hash):
+                        # The Facebook binary upload was definitively rejected
+                        # before the finish/publish request. Keep its exact
+                        # ledger row, but let this unordered feed choose a new clip.
+                        skip_unproven_candidate = True
+                        report.append("QUARANTINE: exact Facebook video upload rejected; inspect next unordered source.")
+                    elif quarantine_unordered_ig_source(route, p, item, existing, cap_hash):
                         # Unordered humor may use another unique clip while the
                         # exact binary-rejected source stays quarantined on
                         # both platforms. No retry, resume or intent deletion.
@@ -2717,6 +2746,14 @@ def publish():
                             entry.update(status="held", video_quarantined=True,
                                          failure=dict(diagnostic,
                                                       recovery_action="skip_this_video"))
+                    elif (platform == "facebook" and isinstance(exc, MetaAPIError)
+                          and known_facebook_binary_media_rejection(exc, item["route"])):
+                        # Code 6000 on the raw binary upload response is a
+                        # confirmed pre-finish rejection. Never quarantine a
+                        # start/finish, auth, permission, rate, or ambiguous error.
+                        entry.update(status="held", video_quarantined=True,
+                                     failure=dict(diagnostic,
+                                                  recovery_action="skip_this_video"))
                     else:
                         entry.update(status="uncertain", failure=diagnostic)
                     safe = str(exc) if isinstance(exc, MetaAPIError) else type(exc).__name__

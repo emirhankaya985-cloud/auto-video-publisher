@@ -498,21 +498,30 @@ def upload_facebook_reel(page, video_path: str, caption: str):
     file_size = os.path.getsize(video_path)
     
     init_url = f"https://graph.facebook.com/{GRAPH_API_VERSION}/{page_id}/video_reels"
-    init_resp = _graph_json(requests.post(init_url, data={"upload_phase": "start", "access_token": page_token}, timeout=30))
+    init_resp = _graph_json(
+        requests.post(init_url, data={"upload_phase": "start", "access_token": page_token}, timeout=30),
+        "Facebook video_reels start",
+    )
     video_id = init_resp["video_id"]
     upload_url = init_resp["upload_url"]
     
     headers = {"Authorization": f"OAuth {page_token}", "offset": "0", "file_size": str(file_size)}
     with open(video_path, "rb") as f:
         video_data = f.read()
-    _graph_json(requests.post(upload_url, headers=headers, data=video_data, timeout=300))
+    _graph_json(
+        requests.post(upload_url, headers=headers, data=video_data, timeout=300),
+        "Facebook video_reels binary upload",
+    )
     
     finish_url = f"https://graph.facebook.com/{GRAPH_API_VERSION}/{page_id}/video_reels"
     finish_data = {
         "upload_phase": "finish", "access_token": page_token,
         "video_id": video_id, "video_state": "PUBLISHED", "description": caption
     }
-    _graph_json(requests.post(finish_url, data=finish_data, timeout=30))
+    _graph_json(
+        requests.post(finish_url, data=finish_data, timeout=30),
+        "Facebook video_reels finish",
+    )
     return video_id
 
 def create_instagram_cover_video(

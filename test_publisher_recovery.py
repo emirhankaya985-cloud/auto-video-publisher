@@ -6,7 +6,7 @@ from unittest.mock import Mock
 
 from publisher_recovery import (
     classify_meta_failure, read_with_retry, known_pre_publish_media_rejection,
-    ordered_recovery_profile_index,
+    known_facebook_binary_media_rejection, ordered_recovery_profile_index,
     ordered_recovery_window,
 )
 
@@ -190,6 +190,22 @@ class RecoveryPolicyTests(unittest.TestCase):
         entry["failure"]["stage"] = "Instagram ikili video aktarımı"
         entry["failure"]["graph_code"] = 190
         self.assertFalse(ordered_recovery_window(entry, now))
+
+    def test_facebook_quarantine_requires_unordered_binary_video_code_6000(self):
+        error = SimpleNamespace(stage="Facebook video_reels binary upload",
+                                http_status=400, code=6000)
+        for route in ("tarladaki", "penguen", "gonle", "daily_laugh"):
+            self.assertTrue(known_facebook_binary_media_rejection(error, route))
+        for stage in ("Facebook video_reels start", "Facebook video_reels finish", "Graph API"):
+            self.assertFalse(known_facebook_binary_media_rejection(
+                SimpleNamespace(stage=stage, http_status=400, code=6000), "penguen"))
+        for code in (None, 100, 4, 10, 190, 200, 613, 80001, 80002, 368):
+            self.assertFalse(known_facebook_binary_media_rejection(
+                SimpleNamespace(stage="Facebook video_reels binary upload",
+                                http_status=400, code=code), "penguen"))
+        self.assertFalse(known_facebook_binary_media_rejection(error, "film"))
+        self.assertFalse(known_facebook_binary_media_rejection(
+            SimpleNamespace(stage=error.stage, http_status=500, code=6000), "penguen"))
 
     def test_unknown_transport_failure_remains_uncertain(self):
         result = classify_meta_failure(TimeoutError())

@@ -123,6 +123,7 @@ _TWO_ALTERNATE_PROFILE_ROUTES = frozenset({
     "tarladaki", "penguen", "daily_laugh", "gonle",
 })
 _ORDERED_ALTERNATE_PROFILE_ROUTES = frozenset({"film", "toonzone"})
+_UNORDERED_FB_VIDEO_ROUTES = frozenset({"tarladaki", "penguen", "gonle", "daily_laugh"})
 ORDERED_RECOVERY_PROFILE_COUNT = 5
 ORDERED_RECOVERY_WINDOW = timedelta(hours=2)
 _PRE_PUBLISH_STAGES = frozenset({
@@ -162,6 +163,22 @@ def known_pre_publish_media_rejection(exc, route, previous_retries=0):
     code = getattr(exc, "code", None)
     subcode = getattr(exc, "subcode", None)
     return code in (None, 100) or (code == -1 and subcode in (2207001, 2207053))
+
+
+def known_facebook_binary_media_rejection(exc, route):
+    """Only a Graph-confirmed Facebook video upload error may quarantine a clip.
+
+    The Page Video Reels reference documents code 6000 as a video upload
+    failure. Requiring that code and the binary-upload stage excludes invalid
+    parameters, permission/auth, throttling, and finish/ambiguous publication.
+    """
+    return (
+        route in _UNORDERED_FB_VIDEO_ROUTES
+        and getattr(exc, "stage", None) == "Facebook video_reels binary upload"
+        and getattr(exc, "http_status", None) == 400
+        and type(getattr(exc, "code", None)) is int
+        and getattr(exc, "code", None) == 6000
+    )
 
 
 def ordered_recovery_profile_index(retry_count):
