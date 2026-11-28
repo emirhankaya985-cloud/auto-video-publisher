@@ -4,8 +4,12 @@ import subprocess
 import sys
 
 REPOSITORY = "emirhankaya985-cloud/auto-video-publisher"
-REQUIRED = ("DRIVE_TOKEN_JSON", "TOKEN_CHANNEL1_JSON", "TOKEN_CHANNEL2_JSON")
-OPTIONAL_GROUPS = {"ntfy": ("NTFY_TOPIC_URL", "NTFY_TOPIC")}
+REQUIRED = ("TOKEN_CHANNEL1_JSON", "TOKEN_CHANNEL2_JSON")
+OPTIONAL_GROUPS = {
+    # Used only by optional Drive-backed reports/audits/backup and disabled legacy routes.
+    "drive_dependent_features": ("DRIVE_TOKEN_JSON",),
+    "ntfy": ("NTFY_TOPIC_URL", "NTFY_TOPIC"),
+}
 
 
 def assess_names(names):
@@ -18,7 +22,7 @@ def assess_names(names):
         "required": required,
         "missing_required": [name for name, present in required.items() if not present],
         "optional": optional,
-        "ready_by_name_only": all(required.values()),
+        "required_names_present": all(required.values()),
         "secret_values_read": False,
     }
 
@@ -48,7 +52,7 @@ def main():
                           "secret_values_read": False}, sort_keys=True))
         return 1
     print(json.dumps(result, sort_keys=True))
-    return 0 if result["ready_by_name_only"] else 2
+    return 0 if result["required_names_present"] else 2
 
 
 if __name__ == "__main__":

@@ -31,7 +31,7 @@ Hesap aileleri: Tarladaki Fasulye, Beyinsiz Penguen, Gönle Düşen, Daily Laugh
 
 ## GitHub Actions secret adlarını ön kontrol etme
 
-Salt-okunur secret adı kontrolünün kullanımı ve sınırları için [Actions secret-name preflight](docs/ACTIONS_SECRET_NAMES_PREFLIGHT.md) belgesine bak. Araç secret değerlerini okumaz ve `AUTOMATION_ENABLED` ayarını değiştirmez.
+Salt-okunur secret adı kontrolünün kullanımı ve sınırları için [Actions secret-name preflight](docs/ACTIONS_SECRET_NAMES_PREFLIGHT.md) belgesine bak. YouTube raporu adlarını kontrol eder; Drive ve NTFY özelliklerini isteğe bağlı sayar. Secret değerlerini okumaz ve `AUTOMATION_ENABLED` ayarını değiştirmez.
 
 ## Başlangıç ve testsiz canlı müdahaleden kaçınma
 

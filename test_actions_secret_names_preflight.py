@@ -7,23 +7,24 @@ from actions_secret_names_preflight import assess_names, inspect_repository
 
 
 class ActionsSecretNamesPreflightTests(unittest.TestCase):
-    def test_required_secret_names_and_optional_ntfy(self):
-        report = assess_names({"DRIVE_TOKEN_JSON", "TOKEN_CHANNEL1_JSON", "TOKEN_CHANNEL2_JSON",
-                               "NTFY_TOPIC_URL"})
-        self.assertTrue(report["ready_by_name_only"])
+    def test_youtube_names_are_required_and_drive_and_ntfy_are_optional(self):
+        report = assess_names({"TOKEN_CHANNEL1_JSON", "TOKEN_CHANNEL2_JSON", "NTFY_TOPIC_URL"})
+        self.assertTrue(report["required_names_present"])
         self.assertEqual(report["missing_required"], [])
+        self.assertFalse(report["optional"]["drive_dependent_features"])
         self.assertTrue(report["optional"]["ntfy"])
         self.assertFalse(report["secret_values_read"])
 
-    def test_missing_drive_secret_is_named_without_values(self):
-        report = assess_names({"TOKEN_CHANNEL1_JSON", "TOKEN_CHANNEL2_JSON", "NTFY_TOPIC_URL"})
-        self.assertEqual(report["missing_required"], ["DRIVE_TOKEN_JSON"])
-        self.assertFalse(report["ready_by_name_only"])
+    def test_drive_secret_enables_only_optional_drive_features(self):
+        report = assess_names({"TOKEN_CHANNEL1_JSON", "TOKEN_CHANNEL2_JSON", "DRIVE_TOKEN_JSON"})
+        self.assertEqual(report["missing_required"], [])
+        self.assertTrue(report["required_names_present"])
+        self.assertTrue(report["optional"]["drive_dependent_features"])
         self.assertNotIn("secret-value-sentinel", str(report))
 
     def test_ntfy_is_optional(self):
-        report = assess_names({"DRIVE_TOKEN_JSON", "TOKEN_CHANNEL1_JSON", "TOKEN_CHANNEL2_JSON"})
-        self.assertTrue(report["ready_by_name_only"])
+        report = assess_names({"TOKEN_CHANNEL1_JSON", "TOKEN_CHANNEL2_JSON"})
+        self.assertTrue(report["required_names_present"])
         self.assertFalse(report["optional"]["ntfy"])
 
     def test_live_inspection_requires_expected_github_account_and_only_requests_names(self):
@@ -31,11 +32,11 @@ class ActionsSecretNamesPreflightTests(unittest.TestCase):
 
         def runner(args, **kwargs):
             calls.append(args)
-            output = "emirhankaya985-cloud" if len(calls) == 1 else "DRIVE_TOKEN_JSON\nTOKEN_CHANNEL1_JSON\nTOKEN_CHANNEL2_JSON"
+            output = "emirhankaya985-cloud" if len(calls) == 1 else "TOKEN_CHANNEL1_JSON\nTOKEN_CHANNEL2_JSON"
             return Mock(stdout=output)
 
         result = inspect_repository(runner)
-        self.assertTrue(result["ready_by_name_only"])
+        self.assertTrue(result["required_names_present"])
         self.assertEqual(calls, [
             ["gh", "api", "user", "--jq", ".login"],
             ["gh", "secret", "list", "--repo", "emirhankaya985-cloud/auto-video-publisher",
