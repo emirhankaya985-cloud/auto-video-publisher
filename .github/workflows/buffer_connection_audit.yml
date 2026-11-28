@@ -6,6 +6,8 @@ on:
     paths:
       - 'buffer_connection_audit.py'
       - 'test_buffer_connection_audit.py'
+      - 'six_video_manifest_validator.py'
+      - 'test_six_video_manifest_validator.py'
       - '.github/workflows/buffer_connection_audit.yml'
 
 permissions:
@@ -26,7 +28,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install --require-hashes -r requirements.txt
-      - run: python -m unittest -v test_buffer_connection_audit.py
+      - run: python -m unittest -v test_buffer_connection_audit.py test_six_video_manifest_validator.py
 
   audit:
     if: github.event_name == 'workflow_dispatch' && github.repository == 'emirhankaya985-cloud/auto-video-publisher' && github.ref == 'refs/heads/main'
@@ -41,4 +43,5 @@ jobs:
       - name: Read Buffer organization and X channel metadata only
         env:
           BUFFER_API_KEY_1: ${{ secrets.BUFFER_API_KEY_1 }}
+          BUFFER_X_CHANNELS_JSON: ${{ vars.BUFFER_X_CHANNELS_JSON }}
         run: python -u buffer_connection_audit.py

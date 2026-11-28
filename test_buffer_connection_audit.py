@@ -1,3 +1,4 @@
+import json
 import unittest
 from unittest.mock import Mock
 
@@ -6,10 +7,55 @@ from buffer_connection_audit import (
     API_URL,
     BufferConnectionError,
     audit,
+    validate_channel_mapping,
+    X_ACCOUNT_KEYS,
 )
 
 
 class BufferConnectionAuditTests(unittest.TestCase):
+    @staticmethod
+    def _channels(count=6):
+        return [
+            {"channel_id": f"mock-channel-{index}", "name": f"Mock X {index}",
+             "connected": True, "queue_paused": False}
+            for index in range(count)
+        ]
+
+    def test_complete_mapping_resolves_six_connected_x_channels_offline(self):
+        channels = self._channels()
+        mapping = {key: channels[index]["channel_id"] for index, key in enumerate(X_ACCOUNT_KEYS)}
+        result = validate_channel_mapping(json.dumps(mapping), channels)
+        self.assertEqual(result["status"], "complete")
+        self.assertEqual(len(result["accounts"]), 6)
+
+    def test_partial_mapping_reports_missing_accounts_without_inventing_ids(self):
+        result = validate_channel_mapping('{"tarladaki":"mock-known-id"}', self._channels(0))
+        self.assertEqual(result["status"], "incomplete")
+        self.assertEqual(result["accounts"]["tarladaki"]["status"], "channel_not_found")
+        self.assertEqual(result["missing_accounts"], list(X_ACCOUNT_KEYS[1:]))
+
+    def test_missing_mapping_is_not_reported_as_zero_or_connected(self):
+        result = validate_channel_mapping("", self._channels())
+        self.assertEqual(result["status"], "not_configured")
+        self.assertEqual(result["missing_accounts"], list(X_ACCOUNT_KEYS))
+
+    def test_bad_json_and_unknown_accounts_fail_closed(self):
+        self.assertEqual(validate_channel_mapping("not-json", [])["reason"], "invalid_json")
+        result = validate_channel_mapping('{"other":"mock-id"}', [])
+        self.assertEqual(result["status"], "invalid")
+        self.assertEqual(result["reason"], "unknown_account_key")
+
+    def test_duplicate_ids_and_disconnected_channels_fail_closed(self):
+        channels = self._channels()
+        duplicate = {key: "same-id" for key in X_ACCOUNT_KEYS}
+        self.assertEqual(validate_channel_mapping(json.dumps(duplicate), channels)["reason"],
+                         "duplicate_configured_channel_id")
+        mapping = {key: channels[index]["channel_id"] for index, key in enumerate(X_ACCOUNT_KEYS)}
+        channels[0]["connected"] = False
+        result = validate_channel_mapping(json.dumps(mapping), channels)
+        self.assertEqual(result["status"], "incomplete")
+        self.assertEqual(result["accounts"]["tarladaki"]["status"], "disconnected")
+
     def test_lists_only_x_channels_without_writing_posts(self):
         key = "buffer-secret-test-value"
         responses = [
