@@ -1,12 +1,23 @@
 import unittest
 from contextlib import redirect_stdout
 from io import StringIO
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 from actions_secret_names_preflight import assess_names, inspect_repository
 
 
 class ActionsSecretNamesPreflightTests(unittest.TestCase):
+    def test_pr_ci_runs_preflight_tests_without_forwarding_credentials(self):
+        workflow = (Path(__file__).parent / ".github/workflows/youtube_readonly_connection.yml").read_text(encoding="utf-8")
+        pull_request = workflow.split("  push:\n", 1)[0]
+        offline_job = workflow.split("  google-readonly:\n", 1)[0]
+        self.assertIn("      - actions_secret_names_preflight.py", pull_request)
+        self.assertIn("      - test_actions_secret_names_preflight.py", pull_request)
+        self.assertIn("test_actions_secret_names_preflight.py", offline_job)
+        self.assertNotIn("secrets.", offline_job)
+        self.assertIn("github.event_name == 'workflow_dispatch' || (github.event_name == 'push'", workflow)
+
     def test_youtube_names_are_required_and_drive_and_ntfy_are_optional(self):
         report = assess_names({"TOKEN_CHANNEL1_JSON", "TOKEN_CHANNEL2_JSON", "NTFY_TOPIC_URL"})
         self.assertTrue(report["required_names_present"])

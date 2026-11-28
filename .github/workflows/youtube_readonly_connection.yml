@@ -12,6 +12,8 @@ on:
       - youtube_authorize_channel.py
       - test_youtube_authorize_channel.py
       - test_youtube_readonly_connection.py
+      - actions_secret_names_preflight.py
+      - test_actions_secret_names_preflight.py
       - youtube_account_inventory.py
       - test_youtube_account_inventory.py
       - youtube_uploader.py
@@ -62,7 +64,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install --require-hashes -r requirements.txt
-      - run: python -m unittest -v test_youtube_readonly_connection.py test_youtube_authorize_channel.py test_youtube_account_inventory.py test_verified_post_receipts.py
+      - run: python -m unittest -v test_actions_secret_names_preflight.py test_youtube_readonly_connection.py test_youtube_authorize_channel.py test_youtube_account_inventory.py test_verified_post_receipts.py
 
   google-readonly:
     # PRs use mocked tests. Trusted main pushes check all four authorized

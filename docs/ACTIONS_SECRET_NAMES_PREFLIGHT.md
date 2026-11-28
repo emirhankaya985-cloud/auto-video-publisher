@@ -47,9 +47,37 @@ offline tests are:
 python -m unittest -v test_youtube_readonly_connection.py
 ```
 
-Those tests use mocks and do not validate the real GitHub secret values. The
-The manual Drive audit workflow is guarded by `AUTOMATION_ENABLED`; the legacy
-Drive publisher is also disabled by that switch. Optional Drive consumers are:
+Those tests use mocks and do not validate the real GitHub secret values.
+
+Recent sanitized OAuth runs failed during refresh for all four targets:
+`channel1`, `channel2`, `daily_laugh`, and `gonle_dusen`. Their matching
+secrets are `TOKEN_CHANNEL1_JSON`, `TOKEN_CHANNEL2_JSON`,
+`TOKEN_DAILY_LAUGH_LAB_JSON`, and `TOKEN_GONLE_DUSEN_JSON`. Logs preserve only
+`RefreshError`, not Google's specific reason code, so they cannot distinguish
+a revoked refresh token from a client-configuration or other refresh failure.
+This does not affect the Meta-only route.
+
+If YouTube OAuth is needed, renew from the trusted Windows computer that owns
+the Google Desktop OAuth client file:
+
+1. Keep `client_secrets.json` in the local repository root; never commit it or
+   send it in chat. The helper first checks each existing local token against
+   the exact expected YouTube channel ID.
+2. Run `powershell -ExecutionPolicy Bypass -File .\youtube_oauth_renew_windows.ps1 -AllFour`.
+   It opens browser consent only for targets whose local token fails identity
+   verification, and updates the corresponding GitHub secret only after the
+   exact channel ID is verified. Required scopes are `youtube.readonly` and
+   `youtube.upload`.
+3. The helper queues a read-only channel-identity check per target. It makes
+   no video upload or publication request. Confirm each channel's expected ID
+   before treating OAuth as restored. Do not enable `AUTOMATION_ENABLED`.
+
+Never paste token JSON, client secrets, refresh tokens, or authorization codes
+into chat or logs. `DRIVE_TOKEN_JSON` is unrelated and remains optional.
+
+The manual Drive audit workflow (`connection_audit.yml`) is guarded by
+`AUTOMATION_ENABLED`; the legacy Drive publisher is also disabled by that
+switch. Optional Drive consumers are:
 
 | Code/workflow | Drive operation | Folder ID or source |
 | --- | --- | --- |
@@ -58,13 +86,13 @@ Drive publisher is also disabled by that switch. Optional Drive consumers are:
 | `analytics_sheets.py:_drive_publications` via `.github/workflows/analytics_sheets_sync.yml` | Read-only publication metadata/appProperties reads across account folders | `DRIVE_FOLDER_ID`, `DAILY_LAUGH_DRIVE_FOLDER_ID`, `GONLE_DUSEN_DRIVE_FOLDER_ID`; Film default `1NvEuGQ83BmCMrzdK6ziI1nC_0zzshqJW`; ToonZone default `14ee4AnUdf03dYUAdtfpHa-E9Zxyh4UZF` |
 | `durable_backup.py:persist` via `.github/workflows/publication_backup.yml` | Writes and verifies a private content-addressed recovery archive | Private folder discovered/created by marker; no fixed folder ID |
 
-The publishing schedule in this repository is a separate product path; the
+The preflight tool itself does not edit secrets or variables, enable
+automation, start a workflow, send a notification, or publish media. The
+publishing schedule in this repository is a separate product path; the
 current Meta-only public-link route does not need this Google Drive OAuth
 secret. Keep `DRIVE_TOKEN_JSON` optional unless one of the listed Drive-backed
 features is deliberately enabled. Do not reconnect or copy credentials from
-another repository for this name-only check. This tool does not edit secrets
-or variables, enable automation, start a workflow, send a notification, or
-publish media.
+another repository for this name-only check.
 
 Run the offline unit tests with:
 
