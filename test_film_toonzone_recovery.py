@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 from test_public_link_runtime import runtime
@@ -11,7 +12,7 @@ from test_public_link_runtime import runtime
 
 class FilmToonZoneRecoveryTests(unittest.TestCase):
     def _run(self, route, name, retry_count=0, run_id="40107188749", source_id="clip",
-             history_error=None, saved_caption_hash=None):
+             history_error=None, saved_caption_hash=None, recovery=False):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             caption = "RECOVERY-IG-EXACT"
@@ -22,14 +23,19 @@ class FilmToonZoneRecoveryTests(unittest.TestCase):
                     "run_id": "40107188749",
                 },
                 f"{route}:instagram:{source_id}": {
-                    "route": route, "platform": "instagram", "status": "uncertain",
+                    "route": route, "platform": "instagram", "status": "ready" if recovery else "uncertain",
                     "caption_hash": saved_caption_hash or runtime.caption_key(caption), "file": name,
+                    "source_id": source_id,
                     "day": "2026-10-24", "run_id": run_id,
                     "prepublish_retry_count": retry_count,
+                    **({"recovery_started_at_utc": (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat(),
+                        "recovery_deadline_utc": (datetime.now(timezone.utc) + timedelta(hours=1, minutes=50)).isoformat()}
+                       if recovery else {}),
                     "failure": {
                         "stage": "Instagram ikili video aktarımı",
                         "http_status": 400, "graph_code": None,
                         "reason": "invalid_media_or_graph_request",
+                        **({"recovery_action": "retry_same_ordered_video"} if recovery else {}),
                     },
                 }
             }, "episode_days": {}}
@@ -41,6 +47,8 @@ class FilmToonZoneRecoveryTests(unittest.TestCase):
                     return {name: {"name": name, "id": source_id}}
                 return covers
             with patch.dict(os.environ, {"GITHUB_RUN_ID": "500",
+                                         "PUBLISH_ACCOUNT_SCOPE": route,
+                                         "VIDEO_RECOVERY_ONLY": "true" if recovery else "false",
                                          "GITHUB_STEP_SUMMARY": str(root / "summary.md")}), \
                  patch.object(runtime, "ROOT", root), \
                  patch.object(runtime, "STATE", root / "state.json"), \
@@ -215,6 +223,16 @@ class FilmToonZoneRecoveryTests(unittest.TestCase):
         self.assertEqual(len(plans), 1)
         self.assertEqual(state["film:instagram:clip"]["status"], "intent")
         self.assertNotIn("recovery_retry_not_before", state["film:instagram:clip"])
+        self.assertIn("NEXT: Yoksul_1986_Part_16.mp4", report)
+
+    def test_two_hour_recovery_tick_plans_only_exact_video_on_instagram(self):
+        planned, state, report = self._run(
+            "film", "Yoksul_1986_Part_16.mp4", retry_count=4, recovery=True)
+        self.assertEqual(len(planned), 1)
+        self.assertEqual(planned[0]["platforms"], ["instagram"])
+        row = state["film:instagram:clip"]
+        self.assertEqual(row["status"], "intent")
+        self.assertEqual(row["recovery_started_at_utc"][:4], "2026" if datetime.now().year == 2026 else str(datetime.now().year))
         self.assertIn("NEXT: Yoksul_1986_Part_16.mp4", report)
 
     def test_second_confirmed_binary_rejection_advances_bounded_film_profile(self):

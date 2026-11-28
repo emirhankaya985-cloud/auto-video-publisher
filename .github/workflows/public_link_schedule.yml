@@ -30,6 +30,7 @@ on:
     # DST offsets; off-season ticks are no-ops after quota/history checks.
     - cron: '7 1,2,13,14,16,17,19,20,22,23 * * *'
     - cron: '7,17,27,37 9 * * *'          # ToonZone 12:00/10/20/30 TRT
+    - cron: '*/15 * * * *'                # Ordered-video 400 recovery only; Film + ToonZone
   workflow_dispatch:
     inputs:
       mode:
@@ -74,6 +75,7 @@ jobs:
             github.event.schedule == '37 6,9,12,15,18 * * *' && '["penguen","gonle"]' ||
             github.event.schedule == '7 7,9,11,13,15 * * *' && '["film"]' ||
             github.event.schedule == '7 1,2,13,14,16,17,19,20,22,23 * * *' && '["daily_laugh"]' ||
+            github.event.schedule == '*/15 * * * *' && '["film","toonzone"]' ||
             '["toonzone"]'
           ) }}
     # An invalid Film account cannot cancel, serialize or fail ToonZone.
@@ -225,6 +227,7 @@ jobs:
         env:
           MODE: ${{ steps.release_gate.outputs.mode }}
           IG_AUDITED_RESCUE_ONLY: ${{ steps.release_gate.outputs.recovery_only }}
+          VIDEO_RECOVERY_ONLY: ${{ github.event_name == 'schedule' && github.event.schedule == '*/15 * * * *' && 'true' || 'false' }}
           FILM_TEN_PARTS_ONCE: ${{ steps.release_gate.outputs.film_ten_parts_once }}
           FILM_GAP_PART6TO10_ONCE: ${{ steps.release_gate.outputs.film_gap_once }}
         run: |

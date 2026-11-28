@@ -15,7 +15,7 @@ import time
 import tempfile
 import zipfile
 from types import SimpleNamespace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -42,7 +42,7 @@ from ordered_channels import TOONZONE_ETSY_LINK, parse_order, toonzone_metadata
 from publication_safety import route_paused
 from publisher_recovery import (
     read_with_retry, classify_meta_failure, known_pre_publish_media_rejection,
-    ordered_recovery_profile_index,
+    ordered_recovery_profile_index, ordered_recovery_window,
 )
 from scheduled_multi_publisher import (
     platform_content_from_txt, TARLADAKI_HOURS, PENGUEN_HOURS,
@@ -953,7 +953,8 @@ def quarantine_unordered_ig_source(route, platform, item, entry, cap_hash):
             and entry.get("route") == route and entry.get("platform") == platform
             and entry.get("file") == item["name"]
             and entry.get("caption_hash") == cap_hash
-            and entry.get("status") == "uncertain"
+            and (entry.get("status") == "uncertain"
+                 or (entry.get("status") == "held" and entry.get("video_quarantined") is True))
             and not entry.get("container_publish_attempted")
             and failure.get("stage") == "Instagram ikili video aktarımı"
             and failure.get("http_status") == 400)
@@ -1356,6 +1357,7 @@ def plan(audit=False):
     history_cache = {}
     duplicate_fingerprints = {}
     rescue_only = os.getenv("IG_AUDITED_RESCUE_ONLY") == "true"
+    video_recovery_only = os.getenv("VIDEO_RECOVERY_ONLY") == "true" and not audit
     for route, (source, page_name) in prioritized_route_items(day):
         if (route == "film_second"
                 and os.getenv("LEGACY_FILM_SECOND_ENABLED", "false").lower() != "true"):
@@ -1364,6 +1366,8 @@ def plan(audit=False):
         source_account = source_publish_accounts.get(route)
         route_catalog_key = "instagram_source_" + route if source_account else source
         if scope and route != scope:
+            continue
+        if video_recovery_only and route not in {"film", "toonzone"}:
             continue
         if rescue_only and route not in _AUDITED_IG_V3_FILES:
             continue
@@ -1382,6 +1386,11 @@ def plan(audit=False):
             continue
         ig_enabled = not (route == "gonle" and route_paused("gonle_ig")) and not (route == "daily_laugh" and route_paused("daily_laugh_instagram"))
         platforms = ["facebook"] + (["instagram"] if page.get("instagram_id") and route != "film_second" and ig_enabled else [])
+        if video_recovery_only:
+            platforms = ["instagram"] if "instagram" in platforms else []
+            if not platforms:
+                report.append("RECOVERY HELD: linked Instagram identity unavailable.")
+                continue
         if source_account:
             platforms = [platform for platform in platforms
                          if platform in source_account["target_platforms"]]
@@ -1490,6 +1499,12 @@ def plan(audit=False):
             # account quota. Exact caption reconciliation still runs above.
             counts = {p: 0 for p in platforms}
         due = target_count(route, now)
+        if video_recovery_only:
+            # Recovery checks only the exact, previously rejected ordered
+            # source. It does not open a normal publication slot or advance
+            # the series queue.
+            counts = {p: 0 for p in platforms}
+            due = 1
         if film_gap_once and route == "film":
             # The first release already published five parts on both platforms.
             # Raise the OWNER-ONLY temporary planning ceiling by five; never
@@ -1634,6 +1649,19 @@ def plan(audit=False):
             videos.sort(key=lambda v: parse_order(Path(v["name"]).stem, "cartoon"))
         else:
             videos.sort(key=lambda v: v["name"])
+        if video_recovery_only:
+            eligible_sources = {
+                (entry.get("file"), entry.get("source_id"))
+                for entry in state["entries"].values()
+                if isinstance(entry, dict)
+                and entry.get("route") == route
+                and entry.get("platform") == "instagram"
+                and ordered_recovery_window(entry)
+            }
+            videos = [video for video in videos
+                      if (video.get("name"), str(video.get("id") or "")) in eligible_sources]
+            if not videos:
+                report.append("RECOVERY: no eligible ordered video inside its two-hour window.")
         selected = None
         route_selected = 0
         blocked_platforms = set()
@@ -1958,7 +1986,7 @@ def plan(audit=False):
                 target = due if (film_ten_once or film_gap_once) and route == "film" else target_count(route, now)
                 today_count = sum(route_clock(route, timestamp(row)).date() == clock.date() for row in histories[p])
                 confirmed_in_ledger = ledger_daily_count(state, route, p, clock.date().isoformat())
-                today_count = 0 if rescue_only else max(today_count, confirmed_in_ledger)
+                today_count = 0 if (rescue_only or video_recovery_only) else max(today_count, confirmed_in_ledger)
                 # A tick catches up one item per account; no all-night busy polling.
                 if today_count + planned_counts.get((route, p), 0) >= target:
                     continue
@@ -2051,15 +2079,22 @@ def plan(audit=False):
                     key = f"{route}:{p}:{item['id']}"
                     old_resume = state["entries"].get(key, {}).get("container_resume")
                     old_attempts = state["entries"].get(key, {}).get("prepublish_retry_count", 0)
+                    old_started = state["entries"].get(key, {}).get("recovery_started_at_utc")
+                    old_deadline = state["entries"].get(key, {}).get("recovery_deadline_utc")
                     old_expired = state["entries"].get(key, {}).get("expired_container_recovery")
                     old_source_sha256 = state["entries"].get(key, {}).get("source_sha256")
                     state["entries"][key] = {
                         "route": route, "platform": p, "status": "intent",
                         "caption_hash": caption_key(captions[p]), "file": item["name"],
+                        "source_id": str(item["id"]),
                         "publish_caption": captions[p], "caption_source": origin,
                         "day": clock.date().isoformat(), "run_id": os.environ["GITHUB_RUN_ID"],
                         "prepublish_retry_count": old_attempts,
                     }
+                    if isinstance(old_started, str):
+                        state["entries"][key]["recovery_started_at_utc"] = old_started
+                    if isinstance(old_deadline, str):
+                        state["entries"][key]["recovery_deadline_utc"] = old_deadline
                     if item.get("instagram_source_sha256"):
                         state["entries"][key].update({
                             "instagram_source_sha256": item["instagram_source_sha256"],
@@ -2651,22 +2686,37 @@ def publish():
                     if (platform == "instagram" and isinstance(exc, MetaAPIError)
                             and known_pre_publish_media_rejection(exc, item["route"], previous)):
                         # Only a terminal, proven pre-publish rejection reaches
-                        # here. Ordered routes keep the same part at queue head
-                        # and retry on the next scheduled workflow tick.
-                        next_retry_count = previous + 1
-                        failure = dict(
-                            diagnostic,
-                            recovery_next_profile=next_retry_count,
-                            recovery_action="reconcile_then_retry_same_ordered_part_on_next_tick",
-                        )
+                        # here. Ordered series keep the exact part at queue
+                        # head for a bounded two-hour rapid recovery window.
                         if item["route"] in {"film", "toonzone"}:
+                            next_retry_count = previous + 1
+                            started = entry.get("recovery_started_at_utc")
+                            try:
+                                start_dt = datetime.fromisoformat(started.replace("Z", "+00:00"))
+                                if start_dt.tzinfo is None:
+                                    raise ValueError("timezone required")
+                            except (AttributeError, TypeError, ValueError):
+                                start_dt = datetime.now(timezone.utc)
+                                started = start_dt.isoformat()
+                            entry["recovery_started_at_utc"] = started
+                            entry["recovery_deadline_utc"] = (
+                                start_dt.astimezone(timezone.utc) + timedelta(hours=2)
+                            ).isoformat()
+                            failure = dict(
+                                diagnostic,
+                                recovery_next_profile=next_retry_count,
+                                recovery_action="retry_same_ordered_video",
+                            )
                             failure["recovery_profile_index"] = ordered_recovery_profile_index(next_retry_count)
-                        entry.pop("recovery_profile_override", None)
-                        entry.update(
-                            status="ready",
-                            prepublish_retry_count=next_retry_count,
-                            failure=failure,
-                        )
+                            entry.pop("recovery_profile_override", None)
+                            entry.update(status="ready", prepublish_retry_count=next_retry_count,
+                                         failure=failure)
+                        else:
+                            # Unordered feeds skip only this rejected source;
+                            # the next unique clip remains eligible.
+                            entry.update(status="held", video_quarantined=True,
+                                         failure=dict(diagnostic,
+                                                      recovery_action="skip_this_video"))
                     else:
                         entry.update(status="uncertain", failure=diagnostic)
                     safe = str(exc) if isinstance(exc, MetaAPIError) else type(exc).__name__
