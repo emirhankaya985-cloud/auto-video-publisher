@@ -29,6 +29,10 @@ Hesap aileleri: Tarladaki Fasulye, Beyinsiz Penguen, Gönle Düşen, Daily Laugh
 - Başarısız veya eksik API ölçümünü `0` yerine `N/A` ya da `Kısmi` olarak bildir.
 - Sunucudan NTFY mesaj alındısı almak, Android cihazın bildirimi aldığı anlamına gelmez.
 
+## GitHub Actions secret adlarını ön kontrol etme
+
+Salt-okunur secret adı kontrolünün kullanımı ve sınırları için [Actions secret-name preflight](docs/ACTIONS_SECRET_NAMES_PREFLIGHT.md) belgesine bak. YouTube raporu adlarını kontrol eder; Drive ve NTFY özelliklerini isteğe bağlı sayar. Secret değerlerini okumaz ve `AUTOMATION_ENABLED` ayarını değiştirmez.
+
 ## Başlangıç ve testsiz canlı müdahaleden kaçınma
 
 Python 3.12 kullan. Kilitlenmiş bağımlılıklar mevcut:
